@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""Private NARC containers: unchanged icon bytes; UTF-8 adapters from message JSON."""
+import json, pathlib, struct, sys
+root,out=map(pathlib.Path,sys.argv[1:]);out.mkdir(parents=True,exist_ok=True)
+def pack(path,members):
+    image=bytearray();fat=bytearray()
+    for member in members:
+        start=len(image);image.extend(member);fat.extend(struct.pack('<II',start,len(image)))
+        image.extend(b'\xff'*((-len(image))%4))
+    def block(tag,data): return tag+struct.pack('<I',8+len(data))+data
+    body=block(b'BTAF',struct.pack('<HH',len(members),0)+fat)+block(b'BTNF',struct.pack('<IHH',4,0,1))+block(b'GMIF',image)
+    path.write_bytes(struct.pack('<4sHHIHH',b'NARC',0xfffe,0x100,16+len(body),16,3)+body)
+icons={int(p.stem.rsplit('_',1)[1]):p.read_bytes() for p in (root/'files/itemtool/itemdata/item_icon').glob('item_icon_*') if p.suffix in ('.NCGR','.NCLR','.NCER','.NANR')}
+if set(icons)!=set(range(max(icons)+1)):raise ValueError('Icon archive has gaps')
+pack(out/'item_icon.narc',[icons[i] for i in range(len(icons))])
+for group in (221,222,251):
+    messages=json.loads((root/f'files/msgdata/msg/msg_{group:04}.json').read_text())['messages']
+    members=[]
+    for index,message in enumerate(messages):
+        if int(message['id'].rsplit('_',1)[1])!=index:raise ValueError('Message order changed')
+        text=message.get('en_US','');text=''.join(text) if isinstance(text,list) else text
+        members.append(text.encode('utf-8')+b'\0')
+    pack(out/f'msg_{group:04}.narc',members)
+
+# Retain original archive bytes for bag graphics and fonts.
+(out/'font.narc').write_bytes((root/'files/graphic/font.narc').read_bytes())
+(out/'bag.narc').write_bytes((root/'files/a/0/1/5').read_bytes())
+# Local UTF-8 -> original glyph-code adapter, not a replacement font.
+import re
+mapping={ord(v):int(k,16) for k,v in re.findall(r'^([0-9A-F]{4})=(.)$',(root/'tools/msgenc/charmap.txt').read_text(),re.M) if 0<int(k,16)<=509}
+(out.parent/'charmap.inc').write_text('static const struct { uint32_t unicode; uint16_t glyph; } glyph_map[] = {\n'+''.join(f'{{{u},{g}}},\n' for u,g in sorted(mapping.items()))+'};\n')

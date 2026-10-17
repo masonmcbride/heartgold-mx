@@ -1,0 +1,11 @@
+/upstream/
+/build*/
+*.nds
+*.srl
+*.narc
+*.NCGR
+*.NCLR
+.DS_Store
+
+__pycache__/
+*.py[cod]

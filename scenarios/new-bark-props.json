@@ -1,0 +1,95 @@
+{
+  "id": "new-bark-props-v1",
+  "source": "src/field/map_prop_manager.c",
+  "executable": "heartgold_field_lifecycle",
+  "phases": [
+    [
+      "created",
+      0
+    ],
+    [
+      "loaded",
+      17
+    ],
+    [
+      "drawn",
+      17
+    ],
+    [
+      "capacity",
+      32
+    ],
+    [
+      "reset",
+      0
+    ],
+    [
+      "fallback",
+      1
+    ],
+    [
+      "reloaded",
+      17
+    ],
+    [
+      "destroyed",
+      0
+    ]
+  ],
+  "required_execution": [
+    "MapPropManager_New",
+    "MapPropManager_Init",
+    "MapProp_Init",
+    "MapPropManager_LoadFromNARC",
+    "MapPropManager_LoadOne",
+    "MapPropManager_RemoveMapPropByIndex",
+    "MapPropManager_Reset",
+    "MapPropManager_Free",
+    "MapProp_GetTranslation",
+    "MapProp_SetTranslation",
+    "MapProp_GetBuildModel",
+    "MapProp_GetScale",
+    "MapProp_GetRotation",
+    "MapProp_IsActive",
+    "DrawModelShapewise",
+    "ov01_021F3C9C"
+  ],
+  "native_boundaries": [
+    "Heap_Alloc",
+    "Heap_AllocAtEnd",
+    "Heap_Free",
+    "MI_CpuClearFast",
+    "NARC_ReadFile",
+    "Field3dRenderObjManager_IsResFileHeaderLoadedByIndex",
+    "Field3dRenderObjManager_GetOrAllocRenderObjByID",
+    "Field3dRenderObjManager_FreeRenderObj",
+    "ov01_021FB9F4",
+    "ov01_021EA7F8",
+    "ov01_021EA804",
+    "ov01_021EA81C",
+    "GF3dRender_DrawModel",
+    "NNS_G3dGlbSetBaseTrans",
+    "NNS_G3dGlbSetBaseRot",
+    "NNS_G3dGlbSetBaseScale",
+    "NNS_G3dGlbFlush",
+    "NNS_G3dDraw1Mat1Shp",
+    "sub_02020D2C"
+  ],
+  "unsupported_boundaries": [
+    "GetSafariObjectConfig",
+    "sub_0201F990",
+    "ov01_021EA9B0"
+  ],
+  "resources": {
+    "files/a/0/4/0": "prop_models.narc",
+    "files/a/0/4/2": "area_data.narc",
+    "files/a/0/4/3": "area_models.narc",
+    "files/a/0/6/5": "land_data.narc",
+    "files/fielddata/build_model/bm_field_matshp.dat": "bm_field_matshp.dat"
+  },
+  "next_targets": [
+    "ov01_021F3A3C",
+    "ov01_021F3C9C",
+    "MapPropManager_LoadFromSafariZone"
+  ]
+}
