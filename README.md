@@ -1,8 +1,8 @@
 # HeartGold MX
 
-An experimental Apple Silicon build that compiles and executes original Pokémon HeartGold gameplay C with a small compatibility runtime. MX means M-series chips, with X as the variable. The current applications are an interactive inventory and a native searchable map browser; 453 of 540 map entries currently render. Original gameplay C runs natively; original ARM static terrain routines now execute through a bounded Thumb interpreter. New Bark now supports keyboard walking through original input/collision/grid logic, with a native billboard presentation. Full original field-controller execution is still incomplete.
+An experimental Apple Silicon build that compiles and executes original Pokémon HeartGold gameplay C with a small compatibility runtime. MX means M-series chips, with X as the variable. The current applications are an interactive inventory and a native searchable map browser; 453 of 540 map entries currently render. Original gameplay C runs natively; original ARM static terrain routines now execute through a bounded Thumb interpreter. New Bark and its seven interiors now support walking, running and door/stair travel through admitted original input, collision, command and warp logic, with native scene presentation. Full original field-controller execution is still incomplete.
 
-See [platform architecture and field integration gates](docs/platform-architecture.md) for reusable DS boundaries, source-verified field relationships and current execution limits.
+See [platform architecture and field integration gates](docs/platform-architecture.md) for reusable DS boundaries, source-verified field relationships and current execution limits. See the [reuse audit](docs/reuse-audit.md) for measured function/import inventory, library and license findings, and the next continuous-gameplay integration sequence.
 
 ## Build and run
 
@@ -102,7 +102,7 @@ Current limits include affine OAM matrices, 8bpp, OBJ window/semitransparent mod
 
 ## Tests and verified behavior
 
-Fifteen CTest checks cover:
+Twenty-five CTest checks cover:
 
 - original item/bag attributes, healing amount, limits, removal, compaction, sorting, registration, copy, moves, and item ID mappings;
 - DS scalar widths/qualifications and original personal/evolution data layouts, plus bitfield packing;
@@ -112,6 +112,8 @@ Fifteen CTest checks cover:
 - original list-menu header skipping, scrolling, callback, confirmation and cancellation; inventory mutation, cap rejection, pocket memory, empty/refilled pockets, UTF-8 names, and names/descriptions/icons for all 537 item IDs;
 - original map-header/matrix loading across all 540 map IDs (280 referenced matrices), validation of all 288 original matrix resources, cell metadata, matrix mutation functions, metatile predicates and invalid field CLI input;
 - textured rendering semantics: signed delta/full vertex equivalence, named material/texture/palette binding, addressing, depth order, cutout, alpha blending, shared-edge coverage, camera changes/reset and malformed texture resources;
+- original walk/run command selection, running-shoe/B gating, stateful diagonal input, step statistics, encrypted statistics records and RNG/encryption vectors;
+- all 14 New Bark portal anchors, staged local-field commits, interior movement, town/house and upstairs/downstairs travel with retained player statistics;
 - original task priority/FIFO order, queue capacity/reuse, insertion/removal during dispatch, environment lifetime, four-queue routing, input-state preservation and bounded 60 Hz host timing;
 - original font direct/lazy loading and mode switching, glyph expansion and width measurement, all-item NCER rendering compared with the previous icon decoder, original pocket SRT animations and tilemaps, two-screen rendering and hit testing, and malformed/truncated sprite/animation resources.
 
@@ -174,4 +176,4 @@ The native viewer also has a **Characters · sprite meshes** category: 182 stand
 Original `task.c` now executes child/parent field tasks and application waits in the running scene app, on a native timer independent of camera redraws. See [field task runtime](docs/field-task-runtime.md) for execution evidence and the remaining avatar/field-loop boundary.
 
 
-Run `./build/heartgold_field_viewer`, select New Bark (60), click the scene and hold **WASD** to walk. Original collision checks gate each step; release stops movement. The camera follows the player; arrows/drag orbit, scroll or +/− zoom, shift-drag pans, and R recenters. Other maps remain inspection views. Original hero textures now animate direction and stepping in a native billboard, with smooth movement between admitted tiles. Original animation-controller execution, NPC population, interactions, map transitions and full game startup are not implemented. See [player movement](docs/player-movement.md) for execution boundaries and tests.
+Run `./build/heartgold_field_viewer`, select New Bark (60), click the scene and hold **WASD** to walk or **Shift + WASD** to run. Original collision checks gate each step; release stops movement. The camera follows the player; arrows/drag orbit, scroll or +/− zoom, shift-drag pans, and R recenters. Door and stair travel connects New Bark with its seven interiors, retaining the player and step count. Other maps remain inspection views. Original walking commands now advance the player’s position and static terrain height each tick through their original command tables. Original hero textures animate direction and stepping in a native billboard; pose selection remains native. See [original walking execution](docs/original-walking.md) and [walk/run control and statistics](docs/original-locomotion.md). Face the town or lab sign and press Enter/Space to read its original text; press again to close. See [original transition execution](docs/original-transitions.md) for the eight-map network and source/host boundaries. Original animation-controller execution, NPC population, general story interactions, outdoor header crossings and full game startup remain pending. See [background interaction](docs/field-interaction.md) for original event/script execution and native UI boundaries. See [player movement](docs/player-movement.md) for execution boundaries and tests.

@@ -2,7 +2,7 @@
 #include "compat/resources.h"
 /* Process-lifetime cache. All callers run on the main thread. */
 typedef struct { uint8_t *bytes; DSNarc narc; } Cache;
-static Cache cache[14];
+static Cache cache[16];
 int native_resource_member(int archive,int group,int member,const uint8_t **bytes,size_t *size) {
     const char *name;int slot;
     if(archive==NARC_itemtool_itemdata_item_icon) { slot=0;name="item_icon.narc"; }
@@ -19,6 +19,8 @@ int native_resource_member(int archive,int group,int member,const uint8_t **byte
     else if(archive==NARC_a_0_4_3) { slot=11;name="area_models.narc"; }
     else if(archive==NARC_a_1_4_8) { slot=12;name="room_props.narc"; }
     else if(archive==NARC_data_mmodel_mmodel) { slot=13;name="characters.narc"; }
+    else if(archive==NARC_fielddata_eventdata_zone_event) { slot=14;name="zone_event.narc"; }
+    else if(archive==NARC_msgdata_msg && group==542) { slot=15;name="msg_0542.narc"; }
     else return 0;
     Cache *c=&cache[slot];
     if(!c->bytes) {
@@ -57,9 +59,9 @@ void NARC_ReadFile(NARC *n,u32 length,void *out) {
 }
 
 int native_resource_file(const char *name,const uint8_t **out,size_t *size) {
-    static struct { uint8_t *bytes;size_t length; } files[2];
+    static struct { uint8_t *bytes;size_t length; } files[3];
     if(!name || !out || !size)return 0;
-    unsigned slot;if(!strcmp(name,"bm_field_matshp.dat"))slot=0;else if(!strcmp(name,"bm_room_matshp.dat"))slot=1;else return 0;
+    unsigned slot;if(!strcmp(name,"bm_field_matshp.dat"))slot=0;else if(!strcmp(name,"bm_room_matshp.dat"))slot=1;else if(!strcmp(name,"t20_script.bin"))slot=2;else return 0;
     uint8_t *bytes=files[slot].bytes;size_t length=files[slot].length;
     if(!bytes) {
         char path[4096];if(snprintf(path,sizeof(path),"%s/%s",HG_PACKED_ROOT,name)>=(int)sizeof(path))return 0;

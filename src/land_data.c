@@ -115,12 +115,17 @@ int hg_collision_decode(const uint8_t *p,size_t n,HGCollision *out) {
 
 int hg_field_resources_height(HGFieldResources *f,int x,int z,unsigned mode,
                               int32_t reference,int32_t *height) {
+    if(x<0 || z<0 || x>32767 || z>32767)return -1;
+    return hg_field_resources_height_at(f,x*65536+32768,z*65536+32768,mode,reference,height);
+}
+int hg_field_resources_height_at(HGFieldResources *f,int32_t x,int32_t z,unsigned mode,
+                                 int32_t reference,int32_t *height) {
     HGFieldTile tile;
-    if(!height || mode>2 || !hg_field_resources_tile(f,x,z,&tile))return -1;
+    if(!height || x<0 || z<0 || mode>2 || !hg_field_resources_tile(f,x/65536,z/65536,&tile))return -1;
     /* Original sub_02054654 subtracts the chunk center from world Q12
      * coordinates before ov01_021FAE50. One tile is 16 model units. */
-    int32_t local_x=((x%32)*16-248)*4096;
-    int32_t local_z=((z%32)*16-248)*4096;
+    int32_t local_x=x%(512*4096)-256*4096;
+    int32_t local_z=z%(512*4096)-256*4096;
     return hg_collision_height(tile.land.collision,tile.land.collision_size,mode,
                                reference,local_x,local_z,height);
 }

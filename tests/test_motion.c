@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <stddef.h>
 #define CHECK(x) do { if(!(x)) { fprintf(stderr,"%s:%d: %s\n",__FILE__,__LINE__,#x);return 1; } } while(0)
+static unsigned completions;
+static void completed(LocalMapObject *object) { (void)object;completions++; }
 int main(void) {
     LocalMapObject object={0};MapObjectManager manager={0};FieldSystem field={0};PlayerSaveData save;
     manager.objects=&object;manager.objectCount=1;manager.fieldSystem=&field;object.manager=&manager;object.movement=1;
@@ -144,6 +146,39 @@ int main(void) {
                 committed++;
             } else {CHECK(!memcmp(&object,&walk_before,sizeof(object)));denied++;}
             object=walk_before;
+            /* Execute the original command table and state machine, rather
+             * than testing a duplicate native eight-tick interpolation. */
+            MapObject_SetMovementCommand(&object,255);sub_0205F47C(&object,completed);
+            LocalMapObject timed_before=object;unsigned callbacks=completions;
+            CHECK(hg_motion_walk_begin(resources,avatar,(uint16_t)keys[d],&move));
+            CHECK(move.moved==!original_mask && move.collision_mask==original_mask);
+            if(move.moved) {
+                CHECK(object.positionVector.x==position.x && object.positionVector.z==position.z);
+                HGMotionMove duplicate={.moved=77};LocalMapObject active=object;
+                CHECK(!hg_motion_walk_begin(resources,avatar,(uint16_t)keys[d],&duplicate));
+                CHECK(duplicate.moved==77 && !memcmp(&object,&active,sizeof(object)));
+                for(int tick=1;tick<=8;tick++) {
+                    int done=99;CHECK(hg_motion_walk_tick(resources,&object,&done));
+                    CHECK(done==(tick==8));
+                    CHECK(object.positionVector.x==position.x+dx[d]*tick*8192);
+                    CHECK(object.positionVector.z==position.z+dz[d]*tick*8192);
+                    int32_t expected_height;
+                    CHECK(hg_field_resources_height_at(resources,object.positionVector.x,object.positionVector.z,0,
+                          object.positionVector.y,&expected_height)==1);
+                    CHECK(object.positionVector.y==expected_height);
+                    CHECK(completions==callbacks+(tick==8));
+                    CHECK(MapObject_GetXCoord(&object)==worldx+dx[d]);
+                    CHECK(MapObject_GetZCoord(&object)==worldz+dz[d]);
+                }
+                CHECK(MapObject_GetMovementCommand(&object)==255 && MapObject_GetMovementStep(&object)==0);
+                CHECK(MapObject_GetPreviousXCoord(&object)==MapObject_GetXCoord(&object));
+                CHECK(MapObject_GetPreviousZCoord(&object)==MapObject_GetZCoord(&object));
+                CHECK(object.positionVector.y==target_height);
+                int intact=77;LocalMapObject ended=object;
+                CHECK(!hg_motion_walk_tick(resources,&object,&intact) && intact==77);
+                CHECK(!memcmp(&object,&ended,sizeof(object)));
+            } else CHECK(!memcmp(&object,&timed_before,sizeof(object)) && completions==callbacks);
+            object=walk_before;
             player_queries++;
 
         }
@@ -151,6 +186,7 @@ int main(void) {
     HGMotionTile untouched={.wall=77,.behavior=42};
     CHECK(!hg_motion_tile(resources,-1,0,&untouched)&&untouched.wall==77&&untouched.behavior==42);
     CHECK(walls && open && barriers && player_queries==3968 && water_edges && height_cases==4 && committed && denied);
+    CHECK(completions==committed);
     printf("Original New Bark attribute dispatch: %u walls, %u open, %u directed barriers\n",walls,open,barriers);
     /* Occupancy must reach the full player mask and stop a connected step. */
     LocalMapObject pair[2]={walk_sample,walk_sample};MapObjectManager pair_manager={0};
@@ -177,7 +213,21 @@ int main(void) {
     PlayerAvatar_SetState(avatar,1);HGMotionMove refused={.moved=77};
     CHECK(!hg_motion_walk_step(resources,avatar,0x10,&refused)&&refused.moved==77);
     PlayerAvatar_SetState(avatar,0);
+    object=walk_sample;MapObject_SetMovementCommand(&object,255);sub_0205F47C(&object,completed);
+    HGMotionMove begun;CHECK(hg_motion_walk_begin(resources,avatar,(uint16_t)keys[sample_direction],&begun)&&begun.moved);
+    LocalMapObject admitted=object;object.positionVector.x=-65536;
+    LocalMapObject bad_height=object;int failed_tick=77;unsigned before_failure=completions;
+    CHECK(!hg_motion_walk_tick(resources,&object,&failed_tick)&&failed_tick==77);
+    CHECK(!memcmp(&object,&bad_height,sizeof(object)) && completions==before_failure);
+    object=admitted;
+    sub_0205F47C(&object,NULL);LocalMapObject no_owner=object;int complete=77;
+    CHECK(!hg_motion_walk_tick(resources,&object,&complete)&&complete==77);
+    CHECK(!memcmp(&object,&no_owner,sizeof(object)));
+    int32_t no_height=77;
+    CHECK(hg_field_resources_height_at(resources,-1,0,0,0,&no_height)==-1 && no_height==77);
+    CHECK(hg_field_resources_height(resources,32768,0,0,0,&no_height)==-1 && no_height==77);
     printf("Original player collision: %u edges, %u committed / %u denied; %u bike-water checks; height threshold checked\n",player_queries,committed,denied,water_edges);
+    printf("Original normal-walk commands: %u complete eight-tick walks; every Q12 position, terrain height and completion callback checked\n",completions);
     hg_field_resources_free(resources);
     PlayerAvatar_FreeToHeap(avatar);puts("Original avatar/object state executed");return 0;
 }

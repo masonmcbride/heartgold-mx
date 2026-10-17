@@ -1,15 +1,22 @@
 #pragma once
 #include "compat/overlays.h"
-/* Scoped native owner for task.c only. This is NOT the original FieldSystem
+/* Scoped native owner for admitted task, motion and transition code. This is NOT the original FieldSystem
  * layout and must not be passed to unported field units or guest ARM code. */
 #define POKEHEARTGOLD_FIELD_SYSTEM_H
 #define POKEHEARTGOLD_SCRIPT_MANAGER_H
 typedef struct TaskManager TaskManager;
+typedef struct MapEvents MapEvents;
+typedef struct MapObjectManager MapObjectManager;
+typedef struct Location Location;
 struct FieldSystem {
     TaskManager *taskman;
     PlayerAvatar *playerAvatar;
     OverlayManager *application;
     unsigned long long ticks;
+    MapEvents *mapEvents;
+    MapObjectManager *mapObjectManager;
+    Location *location;
+    SaveData *saveData;
 };
 #include "task.h"
 void *Heap_AllocAtEnd(enum HeapID,u32);

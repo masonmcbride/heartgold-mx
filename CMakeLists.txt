@@ -27,8 +27,14 @@ enable_testing()
 add_executable(test_items tests/test_items.c)
 target_link_libraries(test_items PRIVATE hg_logic)
 add_test(NAME original_items COMMAND test_items)
-add_library(ds_platform STATIC src/ds_graphics.c src/ds_resources.c src/ds_model.c src/ds_texture.c src/ds_raster.c src/ds_transform.c)
+add_library(ds_platform STATIC src/ds_graphics.c src/ds_resources.c src/ds_model.c src/ds_texture.c src/ds_raster.c src/ds_transform.c src/ds_frame_clock.c)
 target_include_directories(ds_platform PUBLIC src)
+# These per-pixel loops run in the interactive app even in a Debug build.
+# Keep assertions/debug symbols/sanitizers; do not enable fast-math.
+option(HG_OPTIMIZE_RASTER "Optimize native CPU raster and texture sampling" ON)
+if(HG_OPTIMIZE_RASTER)
+  set_property(SOURCE src/ds_raster.c src/ds_texture.c APPEND PROPERTY COMPILE_OPTIONS -O2)
+endif()
 add_executable(test_platform tests/test_platform.c)
 target_link_libraries(test_platform PRIVATE ds_platform)
 add_test(NAME ds_platform COMMAND test_platform)
@@ -194,21 +200,89 @@ target_link_libraries(test_field_tasks PRIVATE hg_field_app hg_field_tasks)
 add_test(NAME original_field_task_flow COMMAND test_field_tasks)
 
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_motion.py" "${HG_UPSTREAM}" "${GEN}" COMMAND_ERROR_IS_FATAL ANY)
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_transitions.py" "${HG_UPSTREAM}" "${GEN}" COMMAND_ERROR_IS_FATAL ANY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/prepare_transitions.py"
+  "${HG_UPSTREAM}/include/map_events_internal.h" "${HG_UPSTREAM}/include/field_system.h"
+  "${HG_UPSTREAM}/include/field_types_def.h" "${HG_UPSTREAM}/include/map_events.h" "${HG_UPSTREAM}/include/save_local_field_data.h"
+  "${HG_UPSTREAM}/src/map_events.c" "${HG_UPSTREAM}/src/save_local_field_data.c"
+  "${HG_UPSTREAM}/src/field/field_control.c" "${HG_UPSTREAM}/src/field_warp_tasks.c")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/prepare_motion.py" "${HG_UPSTREAM}/include/map_events_internal.h")
 add_library(hg_motion STATIC "${HG_UPSTREAM}/src/map_object.c" "${HG_UPSTREAM}/src/player_avatar.c")
+target_sources(hg_motion PRIVATE src/field_transition.c "${HG_UPSTREAM}/src/save_local_field_data.c")
+target_compile_definitions(hg_motion PRIVATE HG_ORIGINAL_MAP_EVENTS="${HG_UPSTREAM}/src/map_events.c")
+set_property(SOURCE "${HG_UPSTREAM}/src/save_local_field_data.c" APPEND PROPERTY COMPILE_OPTIONS
+  -include "${CMAKE_SOURCE_DIR}/src/compat/transitions.h")
 target_link_libraries(hg_motion PUBLIC hg_field_tasks hg_props)
 target_compile_options(hg_motion PRIVATE "$<$<COMPILE_LANGUAGE:C>:SHELL:-include \"${CMAKE_SOURCE_DIR}/src/compat/motion.h\">")
 add_executable(test_motion tests/test_motion.c)
 target_compile_options(test_motion PRIVATE "$<$<COMPILE_LANGUAGE:C>:SHELL:-include \"${CMAKE_SOURCE_DIR}/src/compat/motion.h\">")
 target_link_libraries(test_motion PRIVATE hg_motion)
 target_link_options(hg_motion INTERFACE -Wl,-dead_strip)
+add_library(hg_stats STATIC "${HG_UPSTREAM}/src/game_stats.c" "${HG_UPSTREAM}/src/math_util.c" src/compat/stats.c)
+target_link_libraries(hg_stats PUBLIC hg_props)
+target_compile_options(hg_stats PRIVATE "$<$<COMPILE_LANGUAGE:C>:SHELL:-include \"${CMAKE_SOURCE_DIR}/src/compat/stats.h\">")
+target_link_options(hg_stats INTERFACE -Wl,-dead_strip)
+target_link_libraries(hg_motion PUBLIC hg_stats)
+add_executable(test_stats tests/test_stats.c)
+target_link_libraries(test_stats PRIVATE hg_stats)
+add_test(NAME original_game_statistics COMMAND test_stats)
+add_executable(test_locomotion tests/test_locomotion.c)
+target_link_libraries(test_locomotion PRIVATE hg_motion)
+add_test(NAME original_locomotion_controller COMMAND test_locomotion)
+add_executable(test_transitions tests/test_transitions.c)
+target_link_libraries(test_transitions PRIVATE hg_field_app hg_motion)
+add_test(NAME original_field_transitions COMMAND test_transitions)
 add_test(NAME original_motion_state COMMAND test_motion)
 
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_field_guest.py" "${HG_UPSTREAM}" "${GEN}" "${CMAKE_C_COMPILER}" COMMAND_ERROR_IS_FATAL ANY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/prepare_field_guest.py"
   "${HG_UPSTREAM}/asm/unk_0205CB48.s" "${HG_UPSTREAM}/asm/unk_0205FD20.s"
-  "${HG_UPSTREAM}/asm/unk_02054648.s" "${HG_UPSTREAM}/asm/unk_02062108.s")
+  "${HG_UPSTREAM}/asm/unk_02054648.s" "${HG_UPSTREAM}/asm/unk_02062108.s"
+  "${HG_UPSTREAM}/asm/unk_data_020FCBD8.s" "${HG_UPSTREAM}/asm/unk_data_020FDB44.s"
+  "${HG_UPSTREAM}/asm/unk_data_020FD978.s"
+  "${HG_UPSTREAM}/asm/overlay_01_022053EC.s"
+  "${HG_UPSTREAM}/asm/unk_0203BA5C.s"
+  "${HG_UPSTREAM}/files/msgdata/msg/msg_0096_D31R0201.json"
+  "${HG_UPSTREAM}/files/msgdata/msg/msg_0066_D23R0102.json")
 target_sources(hg_motion PRIVATE src/motion_guest.c)
 
 target_sources(hg_motion PRIVATE src/field_player.c)
 target_link_libraries(hg_field_app PRIVATE hg_motion)
+
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_interaction.py" "${HG_UPSTREAM}" "${GEN}" "${CMAKE_C_COMPILER}" COMMAND_ERROR_IS_FATAL ANY)
+file(GLOB HG_EVENT_INPUTS CONFIGURE_DEPENDS "${HG_UPSTREAM}/files/fielddata/eventdata/zone_event/*.json" "${HG_UPSTREAM}/files/fielddata/script/scr_seq/event_*.h")
+file(GLOB_RECURSE HG_JSONPROC_INPUTS CONFIGURE_DEPENDS "${HG_UPSTREAM}/tools/jsonproc/*.h" "${HG_UPSTREAM}/tools/jsonproc/*.hpp" "${HG_UPSTREAM}/tools/jsonproc/*.cpp")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${HG_EVENT_INPUTS} ${HG_JSONPROC_INPUTS}
+  "${HG_UPSTREAM}/files/fielddata/eventdata/zone_event.json.txt"
+  "${HG_UPSTREAM}/asm/macros/script.inc" "${HG_UPSTREAM}/asm/macros/movement.inc"
+  "${CMAKE_SOURCE_DIR}/scripts/prepare_interaction.py" "${CMAKE_SOURCE_DIR}/scripts/narc_tools.py"
+  "${HG_UPSTREAM}/include/script.h" "${HG_UPSTREAM}/asm/unk_0203DB6C.s"
+  "${HG_UPSTREAM}/files/fielddata/script/scr_seq/scr_seq_0842_T20.s"
+  "${HG_UPSTREAM}/files/msgdata/msg/msg_0542_T20.json")
+add_library(hg_script STATIC "${HG_UPSTREAM}/src/script.c" src/sign_script.c)
+target_link_libraries(hg_script PUBLIC hg_field)
+target_compile_options(hg_script PRIVATE "$<$<COMPILE_LANGUAGE:C>:SHELL:-include \"${CMAKE_SOURCE_DIR}/src/compat/script.h\">")
+target_sources(hg_field PRIVATE src/field_events.c)
+target_link_libraries(hg_motion PUBLIC hg_script)
+
+add_executable(test_interaction tests/test_interaction.c)
+target_compile_options(test_interaction PRIVATE "$<$<COMPILE_LANGUAGE:C>:SHELL:-include \"${CMAKE_SOURCE_DIR}/src/compat/motion.h\">")
+target_link_libraries(test_interaction PRIVATE hg_field_app hg_motion hg_script)
+add_test(NAME original_background_interaction COMMAND test_interaction)
+
+add_executable(heartgold_field_benchmark src/field_benchmark.c)
+target_link_libraries(heartgold_field_benchmark PRIVATE hg_field_app)
+
+# Read-only symbol/provider evidence. A complete build supplies all objects and
+# executables; test linkage is explicitly not reported as execution coverage.
+add_custom_target(reuse_audit
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/audit_reuse.py"
+    --build "${CMAKE_BINARY_DIR}" --upstream "${HG_UPSTREAM}"
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" VERBATIM USES_TERMINAL)
+get_property(HG_AUDIT_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(HG_AUDIT_TARGET IN LISTS HG_AUDIT_TARGETS)
+  get_target_property(HG_AUDIT_TYPE "${HG_AUDIT_TARGET}" TYPE)
+  if(HG_AUDIT_TYPE STREQUAL "EXECUTABLE")
+    add_dependencies(reuse_audit "${HG_AUDIT_TARGET}")
+  endif()
+endforeach()

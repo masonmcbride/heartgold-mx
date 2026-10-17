@@ -59,3 +59,6 @@ int hg_collision_height(const uint8_t *,size_t,unsigned mode,int32_t reference,
  * chunk collision coordinate system; dynamic terrain/objects are not queried. */
 int hg_field_resources_height(HGFieldResources *,int x,int z,unsigned mode,
                               int32_t reference,int32_t *height);
+/* Same static provider at arbitrary nonnegative matrix-global Q12 position. */
+int hg_field_resources_height_at(HGFieldResources *,int32_t x,int32_t z,unsigned mode,
+                                 int32_t reference,int32_t *height);

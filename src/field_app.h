@@ -18,3 +18,15 @@ void hg_field_app_camera(const HGFieldApp *,DSCamera *,unsigned,unsigned);
 
 unsigned long long hg_field_app_revision(const HGFieldApp *);
 int hg_field_app_presentation(const HGFieldApp *,double world[3],unsigned *frame);
+
+void hg_field_app_interact(HGFieldApp *);
+const char *hg_field_app_dialogue(const HGFieldApp *);
+
+/* Wall-clock-driven simulation, bounded catch-up; first call primes the clock. */
+unsigned hg_field_app_advance(HGFieldApp *,uint64_t monotonic_ns);
+
+/* Cancel held and latched input on focus loss/map ownership changes. */
+void hg_field_app_clear_input(HGFieldApp *);
+/* Original in-memory step statistic; no disk save is loaded or written. */
+unsigned hg_field_app_steps(const HGFieldApp *);
+unsigned hg_field_app_map(const HGFieldApp *);

@@ -2,14 +2,8 @@
 """Private NARC containers: unchanged icon bytes; UTF-8 adapters from message JSON."""
 import json, pathlib, struct, sys
 root,out=map(pathlib.Path,sys.argv[1:]);out.mkdir(parents=True,exist_ok=True)
-def pack(path,members):
-    image=bytearray();fat=bytearray()
-    for member in members:
-        start=len(image);image.extend(member);fat.extend(struct.pack('<II',start,len(image)))
-        image.extend(b'\xff'*((-len(image))%4))
-    def block(tag,data): return tag+struct.pack('<I',8+len(data))+data
-    body=block(b'BTAF',struct.pack('<HH',len(members),0)+fat)+block(b'BTNF',struct.pack('<IHH',4,0,1))+block(b'GMIF',image)
-    path.write_bytes(struct.pack('<4sHHIHH',b'NARC',0xfffe,0x100,16+len(body),16,3)+body)
+from narc_tools import pack
+
 icons={int(p.stem.rsplit('_',1)[1]):p.read_bytes() for p in (root/'files/itemtool/itemdata/item_icon').glob('item_icon_*') if p.suffix in ('.NCGR','.NCLR','.NCER','.NANR')}
 if set(icons)!=set(range(max(icons)+1)):raise ValueError('Icon archive has gaps')
 pack(out/'item_icon.narc',[icons[i] for i in range(len(icons))])

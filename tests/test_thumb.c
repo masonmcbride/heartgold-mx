@@ -145,6 +145,16 @@ int main(void) {
         int32_t direct=0,world=0;
         CHECK(hg_collision_height(bark.collision,bark.collision_size,0,0,(x*16-248)*4096,(z*16-248)*4096,&direct)==1);
         CHECK(hg_field_resources_height(field,21*32+x,12*32+z,0,0,&world)==1 && world==direct);
+        /* Intermediate walking positions, including exact tile boundaries and
+         * fractional Q12 coordinates. Compare with direct chunk-local input. */
+        const int offsets[][2]={{0,0},{8192,57344},{32768,32768},{65535,4095}};
+        for(unsigned i=0;i<sizeof(offsets)/sizeof(*offsets);i++) {
+            int32_t lx=x*65536+offsets[i][0],lz=z*65536+offsets[i][1];
+            direct=world=777;
+            int result=hg_collision_height(bark.collision,bark.collision_size,0,0,lx-1048576,lz-1048576,&direct);
+            CHECK(hg_field_resources_height_at(field,21*2097152+lx,12*2097152+lz,0,0,&world)==result);
+            CHECK(world==direct);
+        }
     }
     CHECK(hg_field_resources_loaded(field)==1);
     CHECK(hg_field_resources_height(field,-1,0,0,0,&height)==-1);

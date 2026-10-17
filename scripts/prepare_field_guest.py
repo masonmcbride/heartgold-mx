@@ -3,10 +3,14 @@ Unprovided imports receive named failure traps, never successful stubs.
 """
 import hashlib,json,pathlib,re,struct,subprocess,sys
 root,out,cc=map(pathlib.Path,sys.argv[1:])
-sources=[root/'asm'/name for name in ('unk_0205CB48.s','unk_0205FD20.s','unk_02054648.s','unk_02062108.s')]
+sources=[root/'asm'/name for name in ('unk_0205CB48.s','unk_0205FD20.s','unk_02054648.s','unk_02062108.s','unk_0203DB6C.s','unk_data_020FCBD8.s','unk_data_020FDB44.s','unk_data_020FD978.s','overlay_01_022053EC.s','unk_0203BA5C.s')]
 raw='\n'.join(p.read_text() for p in sources)
+message_sources=[root/'files/msgdata/msg'/name for name in ('msg_0096_D31R0201.json','msg_0066_D23R0102.json')]
+for p in message_sources:
+ header=out/'msgdata/msg'/p.with_suffix('.h').name;header.parent.mkdir(parents=True,exist_ok=True)
+ header.write_text(''.join(f'#define {m["id"]} {i}\n' for i,m in enumerate(json.loads(p.read_text())['messages'])))
 source=out/'field_guest_input.S';source.write_text(raw)
-text=subprocess.check_output([str(cc),'-E','-P','-DPM_ASM','-x','assembler-with-cpp','-I'+str(root/'include'),'-I'+str(root/'files'),str(source)],text=True)
+text=subprocess.check_output([str(cc),'-E','-P','-DPM_ASM','-x','assembler-with-cpp','-I'+str(out),'-I'+str(root/'include'),'-I'+str(root/'files'),str(source)],text=True)
 lines=['.syntax unified','.cpu arm946e-s','.thumb']
 for line in text.splitlines():
  line=line.split(';')[0].strip()
@@ -62,5 +66,5 @@ for name,value,index in symbols:
 header += ['static const struct { unsigned address;const char *name; } hg_field_guest_imports[] = {']
 header += [f'{{{a}u,"{n}"}},' for n,a in imports.items()];header+=['};']
 (out/'field_guest.inc').write_text('\n'.join(header)+'\n')
-(out/'field_guest_provenance.json').write_text(json.dumps({'sources':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in sources},'image_sha256':hashlib.sha256(image).hexdigest(),'image_size':len(image),'code_size':code_size,'imports':imports},indent=2)+'\n')
+(out/'field_guest_provenance.json').write_text(json.dumps({'sources':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in sources+message_sources},'image_sha256':hashlib.sha256(image).hexdigest(),'image_size':len(image),'code_size':code_size,'imports':imports},indent=2)+'\n')
 print(f'Original field guest: {len(image)} bytes, {len(imports)} named import traps')

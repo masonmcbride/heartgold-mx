@@ -10,7 +10,12 @@ static int inclusive(const V *a,const V *b,double area) {
     double dy=b->y-a->y,dx=b->x-a->x;return dy>0 || (dy==0 && dx<0);
 }
 static int order(const void *a,const void *b) { double x=((const Triangle *)a)->depth,y=((const Triangle *)b)->depth;return (x>y)-(x<y); }
+static int needs_alpha(const DSRasterMaterial *m) {
+    return ((m->polygon>>16)&31)<31 || (m->textured && (m->texture.format==1 || m->texture.format==6));
+}
 static int paint(const Triangle *t,const DSRasterMaterial *m,uint8_t *rgba,double *depth,unsigned w,unsigned h,int alpha_pass) {
+    if(alpha_pass && !needs_alpha(m))return 1;
+    if(!alpha_pass && ((m->polygon>>16)&31)<31)return 1;
     const V *v=t->v;double area=edge(v,v+1,v[2].x,v[2].y);if(fabs(area)<1e-10)return 1;
     double lo_x=fmax(0,fmin(v[0].x,fmin(v[1].x,v[2].x))),hi_x=fmin(w-1,fmax(v[0].x,fmax(v[1].x,v[2].x)));
     double lo_y=fmax(0,fmin(v[0].y,fmin(v[1].y,v[2].y))),hi_y=fmin(h-1,fmax(v[0].y,fmax(v[1].y,v[2].y)));
@@ -39,9 +44,10 @@ int ds_raster_draw(const DSRasterTriangle *src,size_t count,const DSRasterMateri
     const double fields[]={camera->yaw,camera->pitch,camera->scale,camera->x,camera->y,camera->z,camera->pan_x,camera->pan_y};for(unsigned i=0;i<8;i++)if(!isfinite(fields[i]))return 0;
     if(camera->scale<=0 || camera->scale>1000 || fabs(camera->pan_x)>100000 || fabs(camera->pan_y)>100000)return 0;
     Triangle *tri=malloc(count*sizeof(*tri));double *depth=malloc((size_t)w*h*sizeof(*depth));if(!tri || !depth) { free(tri);free(depth);return 0; }
+    int alpha_needed=0;
     double cy=cos(camera->yaw),sy=sin(camera->yaw),cp=cos(camera->pitch),sp=sin(camera->pitch);
     for(size_t i=0;i<count;i++) {
-        tri[i].material=src[i].v[0].material;if(tri[i].material>=material_count)goto fail;tri[i].depth=0;
+        tri[i].material=src[i].v[0].material;if(tri[i].material>=material_count)goto fail;tri[i].depth=0;alpha_needed|=needs_alpha(materials+tri[i].material);
         for(unsigned j=0;j<3;j++) {
             const DSSceneVertex *s=&src[i].v[j];if(s->material!=tri[i].material)goto fail;
             double x=s->x-camera->x,y=s->y-camera->y,z=s->z-camera->z,xr=cy*x-sy*z,zr=sy*x+cy*z;
@@ -52,8 +58,10 @@ int ds_raster_draw(const DSRasterTriangle *src,size_t count,const DSRasterMateri
     }
     for(size_t i=0;i<(size_t)w*h;i++) { depth[i]=-DBL_MAX;rgba[i*4]=24;rgba[i*4+1]=31;rgba[i*4+2]=38;rgba[i*4+3]=255; }
     for(size_t i=0;i<count;i++)if(!paint(tri+i,materials+tri[i].material,rgba,depth,w,h,0))goto fail;
-    qsort(tri,count,sizeof(*tri),order);
-    for(size_t i=0;i<count;i++)if(!paint(tri+i,materials+tri[i].material,rgba,depth,w,h,1))goto fail;
+    if(alpha_needed) {
+        qsort(tri,count,sizeof(*tri),order);
+        for(size_t i=0;i<count;i++)if(!paint(tri+i,materials+tri[i].material,rgba,depth,w,h,1))goto fail;
+    }
     free(tri);free(depth);return 1;
 fail:free(tri);free(depth);return 0;
 }

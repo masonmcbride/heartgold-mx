@@ -34,6 +34,14 @@ int main(void) {
     mats[0].texture.texels=red;mats[0].polygon=16u<<16;
     CHECK(ds_raster_draw(tris,2,mats,2,&camera,front,16,16));CHECK(front[center]==131 && front[center+2]==124);
     CHECK(ds_raster_draw(reverse,2,mats,2,&camera,back,16,16));CHECK(!memcmp(front,back,sizeof(front)));
+    /* Texture alpha still needs blending even with fully opaque polygons. */
+    mats[0].polygon=31u<<16;mats[0].texture=(DSTexture){a3,palette,1,8,1,1,1,0};
+    CHECK(ds_raster_draw(tris,2,mats,2,&camera,front,16,16));
+    CHECK(front[center+1]==182 && front[center+2]==73);
+    mats[0].texture=(DSTexture){a5,palette,1,8,1,1,6,0};
+    CHECK(ds_raster_draw(tris,2,mats,2,&camera,front,16,16));
+    CHECK(front[center+1]==131 && front[center+2]==124);
+    mats[0].texture=(DSTexture){red,NULL,2,0,1,1,7,0};mats[0].polygon=16u<<16;
     /* A shared diagonal must not blend twice. One large square split in two. */
     double xs[]={-6,6,6,-6},ys[]={6,6,-6,-6};unsigned ids[2][3]={{0,1,2},{0,2,3}};
     for(unsigned t=0;t<2;t++)for(unsigned i=0;i<3;i++)tris[t].v[i]=(DSSceneVertex){.x=xs[ids[t][i]],.y=ys[ids[t][i]],.color=32767,.material=0};

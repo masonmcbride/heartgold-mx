@@ -16,8 +16,8 @@ int hg_motion_terrain_barrier(HGFieldResources *,LocalMapObject *,unsigned direc
 /* Original object occupancy, including previous tiles and vertical separation. */
 int hg_motion_occupied(LocalMapObject *,int x,int y,int z,int *occupied);
 
-/* Original player collision mask, currently admitted only within New Bark's
- * normal static field, with no active gym gimmick/dynamic platforms. Nonzero
+/* Original player collision mask, admitted in New Bark and its seven tested
+ * static interiors, with no active gym gimmick/dynamic platforms. Nonzero
  * masks include special movement requirements, not just solid obstacles.
  * Query preserves object state; unsupported environments leave output intact. */
 int hg_motion_player_collision(HGFieldResources *,PlayerAvatar *,unsigned direction,unsigned *mask);
@@ -27,3 +27,26 @@ typedef struct { int direction,moved; unsigned collision_mask; } HGMotionMove;
  * commits the original grid step and coordinate conversion. No animation,
  * jumping, surfing, warp/script transitions or controller timing is supplied. */
 int hg_motion_walk_step(HGFieldResources *,PlayerAvatar *,uint16_t held_keys,HGMotionMove *);
+
+/* Normal walking only: native admission selects command 12..15 after original
+ * collision checks. Tick executes original command-table dispatch, displacement,
+ * terrain following and completion. Object callback must be a native provider.
+ * Begin leaves the position vector at the source; tick reports completion.
+ * The shared tick also admits running commands 88..91 from locomotion_begin. */
+int hg_motion_walk_begin(HGFieldResources *,PlayerAvatar *,uint16_t,HGMotionMove *);
+int hg_motion_walk_tick(HGFieldResources *,LocalMapObject *,int *complete);
+
+typedef struct GameStats GameStats;
+/* Native-owned statistics plus a pointer-free serialized follower notification.
+ * This is not an original SaveData layout or a populated follower actor. */
+typedef struct { GameStats *stats; uint8_t follower[32]; } HGMotionSession;
+/* Scoped original sub_0205D4B4 walk/run branch, plus original input-history
+ * update. B is bit 1; original running-shoe ownership gates running. Only zero
+ * collision masks are admitted; other movement types remain unsupported. */
+int hg_motion_locomotion_begin(HGFieldResources *,PlayerAvatar *,uint16_t,HGMotionSession *,HGMotionMove *);
+
+/* Original facing-tile/direction selector over validated serialized BgEvents.
+ * Hidden items are unsupported without their original saved flag state. */
+int hg_motion_background_event(PlayerAvatar *,const uint8_t *,unsigned count,unsigned *script);
+/* Original spawn-table helper for local-field record initialization. */
+unsigned hg_field_guest_mom_spawn(void);

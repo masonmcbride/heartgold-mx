@@ -1,13 +1,15 @@
 #include "compat/scheduler.h"
 #include "sys_task_api.h"
 #include "system.h"
+#include "ds_frame_clock.h"
 
 struct System gSystem;
 static void *arenas[4];
 static SysTaskQueue *queues[4];
 static SysTask *frame_task;
-static uint64_t ticks,last_ns,accumulator;
-static int initialized,dispatching,clock_primed;
+static uint64_t ticks;
+static DSFrameClock frame_clock;
+static int initialized,dispatching;
 
 static void count_frame(SysTask *task,void *data) { (void)task;(void)data;ticks++; }
 
@@ -26,7 +28,7 @@ int hg_scheduler_init(void) {
     }
     gSystem.mainTaskQueue=queues[0];gSystem.printTaskQueue=queues[1];
     gSystem.vblankTaskQueue=queues[2];gSystem.vwaitTaskQueue=queues[3];
-    ticks=last_ns=accumulator=0;clock_primed=dispatching=0;
+    ticks=0;frame_clock=(DSFrameClock){0};dispatching=0;
     frame_task=SysTask_CreateOnMainQueue(count_frame,NULL,UINT32_MAX);
     if(!frame_task)abort();initialized=1;return 1;
 }
@@ -41,16 +43,8 @@ int hg_scheduler_step(void) {
 
 unsigned hg_scheduler_advance(uint64_t now_ns) {
     if(!initialized || dispatching)return 0;
-    if(!clock_primed) { last_ns=now_ns;clock_primed=1;return 0; }
-    if(now_ns<last_ns)return 0;
-    uint64_t delta=now_ns-last_ns;last_ns=now_ns;
-    if(delta>250000000)delta=250000000;
-    accumulator+=delta*60; /* Nanoseconds scaled by 60 avoids 60 Hz rounding drift. */
-    unsigned count=0;
-    while(accumulator>=1000000000 && count<8) {
-        accumulator-=1000000000;if(!hg_scheduler_step())break;count++;
-    }
-    if(count==8)accumulator%=1000000000; /* Drop backlog after stalls; no unbounded catch-up. */
+    unsigned due=ds_frame_clock_advance(&frame_clock,now_ns),count=0;
+    while(count<due){if(!hg_scheduler_step())break;count++;}
     return count;
 }
 
@@ -63,5 +57,5 @@ int hg_scheduler_shutdown(void) {
     SysTask_Destroy(frame_task);frame_task=NULL;
     gSystem.mainTaskQueue=gSystem.printTaskQueue=gSystem.vblankTaskQueue=gSystem.vwaitTaskQueue=NULL;
     for(unsigned i=0;i<4;i++) { free(arenas[i]);arenas[i]=NULL;queues[i]=NULL; }
-    initialized=clock_primed=0;ticks=last_ns=accumulator=0;return 1;
+    initialized=0;ticks=0;frame_clock=(DSFrameClock){0};return 1;
 }

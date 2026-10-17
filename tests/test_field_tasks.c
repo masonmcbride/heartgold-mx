@@ -94,5 +94,53 @@ int main(void) {
     hg_field_app_input(app,0);
     hg_field_app_free(app);hg_field_app_step(NULL);CHECK(hg_field_app_ticks(NULL)==0);
     CHECK(!hg_field_app_new(540,error,sizeof(error)) && error[0]);
+    /* The same real second produces the same simulation at 10/30/60 polls/s.
+     * This catches rendering-coupled movement without a flaky real-time test. */
+    double reference[3]={0};unsigned reference_pose=0;
+    const unsigned rates[]={60,30,10};
+    for(unsigned run=0;run<3;run++) {
+        app=hg_field_app_new(60,error,sizeof(error));CHECK(app);hg_field_app_input(app,0x40);
+        CHECK(!hg_field_app_advance(app,UINT64_C(1000000000)));
+        unsigned steps=0;
+        for(unsigned i=1;i<=rates[run];i++)steps+=hg_field_app_advance(app,UINT64_C(1000000000)+(uint64_t)i*UINT64_C(1000000000)/rates[run]);
+        CHECK(steps==60 && hg_field_app_ticks(app)==62);
+        double presented[3];unsigned pose;CHECK(hg_field_app_presentation(app,presented,&pose));
+        if(!run){memcpy(reference,presented,sizeof(reference));reference_pose=pose;}
+        else CHECK(!memcmp(reference,presented,sizeof(reference)) && pose==reference_pose);
+        CHECK(!hg_field_app_advance(app,UINT64_C(1999999999)));
+        CHECK(hg_field_app_advance(app,UINT64_C(20000000000))==8 && hg_field_app_ticks(app)==70);
+        hg_field_app_free(app);
+    }
+    app=hg_field_app_new(60,error,sizeof(error));CHECK(app);
+    CHECK(hg_field_app_player(app,&startx,&startz));
+    hg_field_app_input(app,0x40);hg_field_app_input(app,0); /* tap between polls */
+    hg_field_app_step(app);CHECK(hg_field_app_player(app,&x,&z)&&x==startx&&z==startz-1);
+    for(unsigned i=0;i<16;i++)hg_field_app_step(app);
+    CHECK(hg_field_app_player(app,&stoppedx,&stoppedz)&&stoppedx==x&&stoppedz==z);
+    hg_field_app_input(app,0x40);hg_field_app_input(app,0);hg_field_app_clear_input(app);
+    for(unsigned i=0;i<16;i++)hg_field_app_step(app);
+    CHECK(hg_field_app_player(app,&stoppedx,&stoppedz)&&stoppedx==x&&stoppedz==z);
+    hg_field_app_free(app);
+    /* Shift maps to original B: run four ticks, retain that command when Shift
+     * is released mid-step, then begin an eight-tick walk at the next boundary. */
+    app=hg_field_app_new(60,error,sizeof(error));CHECK(app);
+    CHECK(!hg_field_app_steps(app));CHECK(hg_field_app_presentation(app,visual_before,NULL));
+    hg_field_app_input(app,0x42);hg_field_app_step(app);
+    CHECK(hg_field_app_steps(app)==1 && hg_field_app_presentation(app,visual_step,&pose));
+    CHECK(visual_step[2]==visual_before[2]-4 && (pose==18||pose==20));
+    hg_field_app_input(app,0x40);for(unsigned i=0;i<3;i++)hg_field_app_step(app);
+    CHECK(hg_field_app_presentation(app,visual_end,&pose)&&visual_end[2]==visual_before[2]-16&&pose==1);
+    CHECK(hg_field_app_steps(app)==1);
+    hg_field_app_step(app);CHECK(hg_field_app_presentation(app,visual_step,&pose));
+    CHECK(visual_step[2]==visual_end[2]-2 && hg_field_app_steps(app)==2 && (pose==2||pose==4));
+    hg_field_app_clear_input(app);for(unsigned i=0;i<16;i++)hg_field_app_step(app);
+    CHECK(hg_field_app_steps(app)==2 && hg_field_app_presentation(app,visual_end,&pose)&&pose==1);
+    CHECK(visual_end[2]==visual_before[2]-32);hg_field_app_free(app);
+    /* A lone Shift tap cannot remain latched onto a later directional tap. */
+    app=hg_field_app_new(60,error,sizeof(error));CHECK(app);
+    hg_field_app_input(app,2);hg_field_app_input(app,0);hg_field_app_step(app);CHECK(!hg_field_app_steps(app));
+    CHECK(hg_field_app_presentation(app,visual_before,NULL));hg_field_app_input(app,0x40);hg_field_app_input(app,0);
+    hg_field_app_step(app);CHECK(hg_field_app_presentation(app,visual_step,NULL)&&visual_step[2]==visual_before[2]-2);
+    hg_field_app_free(app);
     puts("Original field tasks: child yield/parent resume, jump/scratch release, application wait/completion, repeated cleanup and independent frame clock passed");return 0;
 }

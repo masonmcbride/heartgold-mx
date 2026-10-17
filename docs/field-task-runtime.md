@@ -16,7 +16,7 @@ flowchart LR
   Overlay --> Scene[Native scene callbacks]
 ```
 
-The native window schedules a nominal 60 Hz main-run-loop timer. Each callback advances original field-task dispatch and application dispatch. This is an AppKit scheduling interval, not DS hardware timing: delayed callbacks are not caught up or cycle-emulated. Rendering stays separate: camera events redraw the cached scene without advancing simulation. Character inspection has no scene application and its timer does no field work.
+The native window schedules a nominal 60 Hz main-run-loop timer. Callbacks sample a monotonic clock and advance original field-task/application dispatch for the elapsed 60 Hz ticks, with at most eight catch-up ticks per callback. The clock accumulator is shared with the existing system-task scheduler. This is host scheduling, not DS hardware/cycle emulation. See [movement performance](movement-performance.md). Rendering stays separate: camera events redraw the cached scene without advancing simulation. Character inspection has no scene application and its timer does no field work.
 
 `HGFieldApp` initialization takes two deterministic ticks: the parent pushes the application-wait task, then the child launches and initializes the application. Closing/replacing a map requests native scene completion, lets original exec/exit finish, and drains the original waiting task and its parent before freeing their host context. Failed scene initialization follows the same cleanup path. There is no forced freeing of unknown task environments.
 
@@ -41,3 +41,5 @@ Heap-at-end allocation now lives in the shared heap boundary, rather than the pr
 The native UI smoke test verifies the timer advances before its existing camera/map/character/navigation checks. The normal and ASan/UBSan CTest suites cover this integration. Upstream remains unchanged.
 
 This is an executable control-flow foundation, not a playable game. The next dependency is binding original avatar/object updates and input to this owner, with correctly scoped data layouts and original collision/event decisions. Existing `SysTask` queues are a different scheduling mechanism: they are independently tested but are not automatically dispatched by this new field-task timer.
+
+The [transition integration](original-transitions.md) extends the scoped native `FieldSystem` owner with typed location, event, map-object-manager and save-owner fields for specifically admitted original code. It remains a native compatibility declaration, not the serialized DS layout or proof that arbitrary field units can run. Door/stair scene replacement occurs within the existing native scene callback and preserves the same original application/task owner; original field-transition task choreography remains unexecuted.
