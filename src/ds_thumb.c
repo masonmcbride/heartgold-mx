@@ -62,6 +62,12 @@ DSThumbResult ds_thumb_run(DSThumb *c,size_t budget) {
         } else if((ins&0xfc00)==0x4000) {
             a=c->r[d];b=c->r[s];
             switch((ins>>6)&15) {
+            case 0:c->r[d]=a&b;nz(c,c->r[d]);break;
+            case 1:c->r[d]=a^b;nz(c,c->r[d]);break;
+            case 8:nz(c,a&b);break;
+            case 14:c->r[d]=a&~b;nz(c,c->r[d]);break;
+            case 15:c->r[d]=~b;nz(c,c->r[d]);break;
+            case 7:{ unsigned shift=b&255;r=a;if(shift) { unsigned n=shift&31;r=n?(a>>n)|(a<<(32-n)):a;c->c=r>>31; }c->r[d]=r;nz(c,r);break; }
             case 5:{ unsigned carry=c->c;uint64_t sum=(uint64_t)a+b+carry;
                 r=(uint32_t)sum;nz(c,r);c->c=(unsigned)(sum>>32);c->v=(~(a^b)&(a^r))>>31;c->r[d]=r;break; }
             case 9:c->r[d]=sub(c,0,b);break;
@@ -74,10 +80,10 @@ DSThumbResult ds_thumb_run(DSThumb *c,size_t budget) {
             d=(ins&7)|((ins>>4)&8);s=(ins>>3)&15;
             a=d==15?pc+4:c->r[d];b=s==15?pc+4:c->r[s];
             switch((ins>>8)&3) {
-            case 0:if(d==15)return DS_THUMB_BAD_INSTRUCTION;c->r[d]=a+b;break;
+            case 0:c->r[d]=(a+b)&(d==15?~1u:~0u);break;
             case 1:(void)sub(c,a,b);break;
             case 2:if(d==15)return DS_THUMB_BAD_INSTRUCTION;c->r[d]=b;break;
-            case 3:if(!(b&1) || (ins&0x0087))return DS_THUMB_BAD_INSTRUCTION;c->r[15]=b&~1u;break;
+            case 3:if(!(b&1) || (ins&7))return DS_THUMB_BAD_INSTRUCTION;if(ins&0x80)c->r[14]=pc+3;c->r[15]=b&~1u;break;
             }
         } else if((ins&0xf800)==0x4800) {
             address=((pc+4)&~3u)+4*(ins&255);
@@ -98,10 +104,9 @@ DSThumbResult ds_thumb_run(DSThumb *c,size_t budget) {
             c->r[14]=pc+5;c->r[15]=pc+4+(uint32_t)offset;
         } else if((ins&0xf000)==0x5000) {
             unsigned op=(ins>>9)&7;address=c->r[s]+c->r[t];
-            unsigned width=op==1||op==5?2:op==2||op==6?1:4;
-            if(op==3||op==7)return DS_THUMB_BAD_INSTRUCTION;
+            unsigned width=op==1||op==5||op==7?2:op==2||op==6||op==3?1:4;
             if(op<3) { if(!write_mem(c,address,width,c->r[d]))return DS_THUMB_BAD_MEMORY; }
-            else { if(!read_mem(c,address,width,&r))return DS_THUMB_BAD_MEMORY;c->r[d]=r; }
+            else { if(!read_mem(c,address,width,&r))return DS_THUMB_BAD_MEMORY;if(op==3 && (r&128))r|=0xffffff00u;if(op==7 && (r&32768))r|=0xffff0000u;c->r[d]=r; }
         } else if((ins&0xe000)==0x6000 || (ins&0xf000)==0x8000) {
             unsigned width=(ins&0x8000)?2:(ins&0x1000)?1:4;
             address=c->r[s]+((ins>>6)&31)*width;

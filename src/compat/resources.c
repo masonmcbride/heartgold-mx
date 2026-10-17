@@ -2,7 +2,7 @@
 #include "compat/resources.h"
 /* Process-lifetime cache. All callers run on the main thread. */
 typedef struct { uint8_t *bytes; DSNarc narc; } Cache;
-static Cache cache[12];
+static Cache cache[14];
 int native_resource_member(int archive,int group,int member,const uint8_t **bytes,size_t *size) {
     const char *name;int slot;
     if(archive==NARC_itemtool_itemdata_item_icon) { slot=0;name="item_icon.narc"; }
@@ -17,6 +17,8 @@ int native_resource_member(int archive,int group,int member,const uint8_t **byte
     else if(archive==NARC_a_0_4_4) { slot=9;name="map_texture.narc"; }
     else if(archive==NARC_a_0_4_0) { slot=10;name="prop_models.narc"; }
     else if(archive==NARC_a_0_4_3) { slot=11;name="area_models.narc"; }
+    else if(archive==NARC_a_1_4_8) { slot=12;name="room_props.narc"; }
+    else if(archive==NARC_data_mmodel_mmodel) { slot=13;name="characters.narc"; }
     else return 0;
     Cache *c=&cache[slot];
     if(!c->bytes) {
@@ -55,8 +57,10 @@ void NARC_ReadFile(NARC *n,u32 length,void *out) {
 }
 
 int native_resource_file(const char *name,const uint8_t **out,size_t *size) {
-    static uint8_t *bytes;static size_t length;
-    if(!name || strcmp(name,"bm_field_matshp.dat") || !out || !size)return 0;
+    static struct { uint8_t *bytes;size_t length; } files[2];
+    if(!name || !out || !size)return 0;
+    unsigned slot;if(!strcmp(name,"bm_field_matshp.dat"))slot=0;else if(!strcmp(name,"bm_room_matshp.dat"))slot=1;else return 0;
+    uint8_t *bytes=files[slot].bytes;size_t length=files[slot].length;
     if(!bytes) {
         char path[4096];if(snprintf(path,sizeof(path),"%s/%s",HG_PACKED_ROOT,name)>=(int)sizeof(path))return 0;
         FILE *f=fopen(path,"rb");if(!f)return 0;
@@ -64,7 +68,7 @@ int native_resource_file(const char *name,const uint8_t **out,size_t *size) {
         if(n<4 || n>1024*1024 || fseek(f,0,SEEK_SET)) { fclose(f);return 0; }
         uint8_t *p=malloc((size_t)n);if(!p) { fclose(f);return 0; }
         int ok=fread(p,1,(size_t)n,f)==(size_t)n;fclose(f);if(!ok) { free(p);return 0; }
-        bytes=p;length=(size_t)n;
+        bytes=p;length=(size_t)n;files[slot].bytes=bytes;files[slot].length=length;
     }
     *out=bytes;*size=length;return 1;
 }

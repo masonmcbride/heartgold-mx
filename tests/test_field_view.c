@@ -21,7 +21,19 @@ int main(void) {
     CHECK(ds_model_open(prop,prop_size,0,&prop_model) && ds_texture_bank(prop,prop_size,&embedded));
     CHECK(ds_model_material(&prop_model,0,&prop_material));CHECK(prop_material.translation_uv && prop_material.uv_u==40 && prop_material.uv_v==64);
     for(size_t n=0;n<prop_size;n++) { CHECK(!ds_model_open(prop,n,0,&prop_model));CHECK(!ds_texture_bank(prop,n,&embedded)); }
-    CHECK(!hg_field_view_new(540));CHECK(!hg_field_view_new(33)); /* multi-chunk route explicitly unsupported */
+    char error[256];CHECK(!hg_field_view_load(540,error,sizeof(error)) && strstr(error,"Invalid map"));
+    CHECK(!hg_field_view_load(10,error,sizeof(error)) && strstr(error,"prop"));
+    CHECK(!hg_field_view_load(0,error,sizeof(error)) && strstr(error,"598 chunks"));
+    CHECK(hg_field_map_count()==540 && !strcmp(hg_field_map_name(60),"MAP_NEW_BARK") && !hg_field_map_name(540));
+    view=hg_field_view_load(33,error,sizeof(error));CHECK(view && !error[0]);CHECK(hg_field_view_triangles(view)==2179);
+    hg_field_view_camera(view,&c,128,128);CHECK(hg_field_view_render(view,&c,first,128,128));
+    CHECK(memcmp(first,reset,sizeof(first)));hg_field_view_free(view);
+    view=hg_field_view_new(63);CHECK(view && hg_field_view_triangles(view)==707);
+    hg_field_view_camera(view,&c,128,128);CHECK(hg_field_view_render(view,&c,first,128,128));
+    unsigned occupied=0;for(unsigned i=0;i<128*128;i++)if(first[4*i]!=24 || first[4*i+1]!=32 || first[4*i+2]!=36)occupied++;
+    CHECK(occupied>500);hg_field_view_free(view);
+    view=hg_field_view_new(539);CHECK(view);hg_field_view_camera(view,&c,128,128);CHECK(hg_field_view_render(view,&c,first,128,128));hg_field_view_free(view);
+    view=hg_field_view_new(60);CHECK(view && hg_field_view_triangles(view)==1948);hg_field_view_free(view);
     const uint8_t *bytes;size_t size;CHECK(native_resource_member(NARC_a_0_4_4,0,2,&bytes,&size));DSTextureBank bank;
     CHECK(ds_texture_bank(bytes,size,&bank));CHECK(bank.textures==67 && bank.palettes==66);
     DSTexture texture;CHECK(ds_texture_find(&bank,"road01","road01",&texture));CHECK(texture.format==3);

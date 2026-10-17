@@ -93,6 +93,7 @@ file(GLOB MATRIX_INPUTS CONFIGURE_DEPENDS "${HG_UPSTREAM}/files/fielddata/mapmat
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${MATRIX_INPUTS}
  "${CMAKE_SOURCE_DIR}/scripts/prepare_field.py"
  "${HG_UPSTREAM}/files/fielddata/build_model/bm_field_matshp.dat"
+ "${HG_UPSTREAM}/files/fielddata/build_model/bm_room_matshp.dat" "${HG_UPSTREAM}/files/a/1/4/8"
  "${HG_UPSTREAM}/files/a/0/4/0" "${HG_UPSTREAM}/files/a/0/4/3"
  "${HG_UPSTREAM}/files/a/0/4/2" "${HG_UPSTREAM}/files/a/0/4/4"
  "${HG_UPSTREAM}/files/a/0/6/5"
@@ -121,7 +122,7 @@ add_test(NAME model_geometry COMMAND test_model)
 
 add_executable(heartgold_field_viewer src/field_viewer.m)
 target_compile_options(heartgold_field_viewer PRIVATE -fobjc-arc)
-target_link_libraries(heartgold_field_viewer PRIVATE hg_field_view "-framework Cocoa")
+target_link_libraries(heartgold_field_viewer PRIVATE "-framework Cocoa")
 add_executable(test_raster tests/test_raster.c)
 target_link_libraries(test_raster PRIVATE ds_platform)
 add_test(NAME textured_raster_semantics COMMAND test_raster)
@@ -159,3 +160,55 @@ target_include_directories(test_thumb PRIVATE "${GEN}")
 target_link_libraries(test_thumb PRIVATE hg_field)
 add_test(NAME original_thumb_terrain COMMAND test_thumb)
 target_sources(hg_field PRIVATE src/terrain_guest.c)
+
+add_executable(heartgold_field_catalog src/field_catalog.c)
+target_link_libraries(heartgold_field_catalog PRIVATE hg_field_view)
+add_test(NAME field_catalog_new_bark COMMAND heartgold_field_catalog 60)
+set_tests_properties(field_catalog_new_bark PROPERTIES PASS_REGULAR_EXPRESSION "\"rendered\":true")
+
+# Original application lifecycle. Module residency is a native boundary;
+# compiling this manager does not compile the original overlay entry points.
+add_library(hg_overlays STATIC "${HG_UPSTREAM}/src/overlay_manager.c" src/compat/overlays.c)
+target_link_libraries(hg_overlays PUBLIC hg_logic)
+target_compile_options(hg_overlays PUBLIC "$<$<COMPILE_LANGUAGE:C>:SHELL:-include \"${CMAKE_SOURCE_DIR}/src/compat/overlays.h\">")
+add_executable(test_overlays tests/test_overlays.c)
+add_test(NAME original_overlay_lifecycle COMMAND test_overlays)
+add_library(hg_field_app STATIC src/field_app.c)
+target_link_libraries(hg_field_app PUBLIC hg_field_view PRIVATE hg_overlays)
+target_link_libraries(heartgold_field_viewer PRIVATE hg_field_app)
+
+target_link_libraries(test_overlays PRIVATE hg_field_app)
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_characters.py" "${HG_UPSTREAM}" "${GEN}" COMMAND_ERROR_IS_FATAL ANY)
+file(GLOB CHARACTER_INPUTS CONFIGURE_DEPENDS "${HG_UPSTREAM}/files/data/mmodel/mmodel/*.NSBMD" "${HG_UPSTREAM}/files/data/mmodel/mmodel/*.NSBTX")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CHARACTER_INPUTS} "${CMAKE_SOURCE_DIR}/scripts/prepare_characters.py" "${HG_UPSTREAM}/include/constants/mmodel.h" "${HG_UPSTREAM}/asm/overlay_01_sprite_data.s")
+add_executable(test_characters tests/test_characters.c)
+target_link_libraries(test_characters PRIVATE hg_field_view)
+add_test(NAME character_sprite_catalog COMMAND test_characters)
+
+add_library(hg_field_tasks STATIC "${HG_UPSTREAM}/src/task.c" src/compat/field_tasks.c)
+target_link_libraries(hg_field_tasks PUBLIC hg_overlays)
+target_compile_options(hg_field_tasks PRIVATE "$<$<COMPILE_LANGUAGE:C>:SHELL:-include \"${CMAKE_SOURCE_DIR}/src/compat/field_tasks.h\">")
+target_link_libraries(hg_field_app PRIVATE hg_field_tasks)
+add_executable(test_field_tasks tests/test_field_tasks.c)
+target_link_libraries(test_field_tasks PRIVATE hg_field_app hg_field_tasks)
+add_test(NAME original_field_task_flow COMMAND test_field_tasks)
+
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_motion.py" "${HG_UPSTREAM}" "${GEN}" COMMAND_ERROR_IS_FATAL ANY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/prepare_motion.py" "${HG_UPSTREAM}/include/map_events_internal.h")
+add_library(hg_motion STATIC "${HG_UPSTREAM}/src/map_object.c" "${HG_UPSTREAM}/src/player_avatar.c")
+target_link_libraries(hg_motion PUBLIC hg_field_tasks hg_props)
+target_compile_options(hg_motion PRIVATE "$<$<COMPILE_LANGUAGE:C>:SHELL:-include \"${CMAKE_SOURCE_DIR}/src/compat/motion.h\">")
+add_executable(test_motion tests/test_motion.c)
+target_compile_options(test_motion PRIVATE "$<$<COMPILE_LANGUAGE:C>:SHELL:-include \"${CMAKE_SOURCE_DIR}/src/compat/motion.h\">")
+target_link_libraries(test_motion PRIVATE hg_motion)
+target_link_options(hg_motion INTERFACE -Wl,-dead_strip)
+add_test(NAME original_motion_state COMMAND test_motion)
+
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_field_guest.py" "${HG_UPSTREAM}" "${GEN}" "${CMAKE_C_COMPILER}" COMMAND_ERROR_IS_FATAL ANY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/prepare_field_guest.py"
+  "${HG_UPSTREAM}/asm/unk_0205CB48.s" "${HG_UPSTREAM}/asm/unk_0205FD20.s"
+  "${HG_UPSTREAM}/asm/unk_02054648.s" "${HG_UPSTREAM}/asm/unk_02062108.s")
+target_sources(hg_motion PRIVATE src/motion_guest.c)
+
+target_sources(hg_motion PRIVATE src/field_player.c)
+target_link_libraries(hg_field_app PRIVATE hg_motion)

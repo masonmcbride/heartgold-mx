@@ -43,3 +43,5 @@ void ReadMsgDataIntoString(MsgData *m,int index,String *s) {
 }
 void DestroyMsgData(MsgData *m) { free(m); }
 String *NewString_ReadMsgData(MsgData *m,int index) { String *s=native_string_new();ReadMsgDataIntoString(m,index,s);return s; }
+
+void *Heap_AllocAtEnd(enum HeapID heap,u32 n) { return Heap_Alloc(heap,n); }

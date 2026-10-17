@@ -12,3 +12,5 @@ int ds_texture_find(const DSTextureBank *,const char *,const char *,DSTexture *)
 /* Nearest sample with DS clamp/repeat/mirror bits from material TEXIMAGE_PARAM.
  * RGBA packed low-to-high; coordinates in texels. Unsupported format 5 fails. */
 int ds_texture_sample(const DSTexture *,double,double,uint32_t params,uint32_t *rgba);
+/* Bounded dictionary enumeration for explicit resource-slot binding. */
+int ds_texture_name(const DSTextureBank *,unsigned index,int palette,char name[17]);

@@ -1,5 +1,6 @@
 #include "ds_raster.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #define CHECK(x) do { if(!(x)) { fprintf(stderr,"%s:%d: %s\n",__FILE__,__LINE__,#x);return 1; } } while(0)
@@ -38,6 +39,26 @@ int main(void) {
     for(unsigned t=0;t<2;t++)for(unsigned i=0;i<3;i++)tris[t].v[i]=(DSSceneVertex){.x=xs[ids[t][i]],.y=ys[ids[t][i]],.color=32767,.material=0};
     CHECK(ds_raster_draw(tris,2,mats,2,&camera,front,16,16));
     for(unsigned y=3;y<13;y++)for(unsigned x=3;x<13;x++) { size_t at=4*(y*16+x);CHECK(front[at]==142 && front[at+2]==18); }
+    /* Textureless surfaces use vertex color and retain polygon opacity. */
+    mats[0].textured=0;mats[0].polygon=31u<<16;
+    for(unsigned t=0;t<2;t++)for(unsigned i=0;i<3;i++)tris[t].v[i].color=31u<<5;
+    CHECK(ds_raster_draw(tris,2,mats,2,&camera,front,16,16));
+    CHECK(front[center]==0 && front[center+1]==255 && front[center+2]==0);
+    unsigned alternative[2][3]={{0,1,3},{1,2,3}};
+    for(unsigned t=0;t<2;t++)for(unsigned i=0;i<3;i++) {
+        unsigned id=ids[t][i];tris[t].v[i].x=xs[id]*0.93+ys[id]*0.17+0.13;tris[t].v[i].y=ys[id]*0.93-xs[id]*0.17+0.21;
+    }
+    CHECK(ds_raster_draw(tris,2,mats,2,&camera,front,16,16));
+    for(unsigned t=0;t<2;t++)for(unsigned i=0;i<3;i++) {
+        unsigned id=alternative[t][i];tris[t].v[i].x=xs[id]*0.93+ys[id]*0.17+0.13;tris[t].v[i].y=ys[id]*0.93-xs[id]*0.17+0.21;
+    }
+    CHECK(ds_raster_draw(tris,2,mats,2,&camera,back,16,16));
+    for(unsigned i=0;i<16*16;i++) {
+        CHECK((front[4*i+1]>200)==(back[4*i+1]>200));
+        for(unsigned k=0;k<4;k++)CHECK(abs((int)front[4*i+k]-(int)back[4*i+k])<=1);
+    }
+    mats[0].polygon=0;CHECK(ds_raster_draw(tris,2,mats,2,&camera,back,16,16));
+    CHECK(memcmp(front,back,sizeof(front)));
     camera.yaw=NAN;CHECK(!ds_raster_draw(tris,2,mats,2,&camera,front,16,16));
     puts("Texture addressing/alpha, depth order independence, cutout, blending and shared-edge coverage passed");return 0;
 }

@@ -1,4 +1,8 @@
+> Current movement and multi-map behavior supersedes the early single-chunk milestone below: see [player movement](player-movement.md) and [map browser](map-browser.md).
+
 # Interactive New Bark land viewer
+
+The later [native map browser](map-browser.md) adds map selection, multi-chunk assembly and support for 278/540 map entries. Single-chunk limits below describe the earlier milestone.
 
 Run `./build/heartgold_field_viewer`. The application displays original New Bark land geometry and textures with a host orthographic camera. Drag or use arrow keys to orbit, scroll or press +/− to zoom, use WASD or shift-drag to pan, and R to reset. Command-Q closes the app. The viewer renders on input changes and owns a cached triangle/material scene. It uses a CPU renderer displayed by AppKit; this is separate from the Metal inventory app.
 

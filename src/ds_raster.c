@@ -18,7 +18,7 @@ static int paint(const Triangle *t,const DSRasterMaterial *m,uint8_t *rgba,doubl
     for(int y=(int)floor(lo_y);y<=(int)ceil(hi_y);y++)for(int x=(int)floor(lo_x);x<=(int)ceil(hi_x);x++) {
         if((unsigned)x>=w || (unsigned)y>=h)continue;
         double a=edge(v+1,v+2,x+0.5,y+0.5)/area,b=edge(v+2,v,x+0.5,y+0.5)/area,c=1-a-b;
-        if(a<0 || b<0 || c<0)continue;
+        if(a < -1e-10 || b < -1e-10 || c < -1e-10)continue;
         if((fabs(a)<1e-10 && !inclusive(v+1,v+2,area)) || (fabs(b)<1e-10 && !inclusive(v+2,v,area)) || (fabs(c)<1e-10 && !inclusive(v,v+1,area)))continue;size_t i=(size_t)y*w+x;double z=a*v[0].z+b*v[1].z+c*v[2].z;
         if(z<depth[i]-1e-8)continue;
         uint32_t tex=0xffffffff;

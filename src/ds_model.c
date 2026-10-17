@@ -138,7 +138,7 @@ int ds_model_node(const DSModel *model,unsigned node,DSTransform *out) {
     size_t end=u32(model->bytes+4);if(end<72 || end>model->size || model->bytes[65]!=model->nodes)return 0;
     return node_transform(model->bytes+64,end-64,node,out);
 }
-static int scene(const DSModel *model,int selected_shape,int selected_material,DSSceneTriangle emit,void *user,DSModelStats *out) {
+static int scene(const DSModel *model,int selected_shape,int selected_material,DSSceneTriangle emit,void *user,DSModelStats *out,int inspection) {
     if(!model || !model->bytes || !out || model->size<72 || !model->nodes || model->nodes>32)return 0;
     const uint8_t *p=model->bytes;size_t sbc=u32(p+4),end=u32(p+8);
     if(p[65]!=model->nodes || sbc<72 || end<=sbc || end>model->size)return 0;
@@ -150,12 +150,14 @@ static int scene(const DSModel *model,int selected_shape,int selected_material,D
         unsigned op=p[pos++],kind=op&31,params;
         switch(op) {
         case 0:case 1:case 11:case 43:params=0;break;
+        case 7:if(!inspection)return 0;params=1;break;
         case 2:params=2;break;
         case 3:case 4:case 36:case 68:case 5:params=1;break;
         case 6:case 38:case 70:case 102:params=3+!!(op&32)+!!(op&64);break;
         default:return 0;
         }
         if(!span(end,pos,params))return 0;const uint8_t *a=p+pos;pos+=params;total.commands++;
+        if(op==7 && a[0]>=model->nodes)return 0;
         if(op==1) { if(!state.valid)return 0;*out=total;return 1; }
         if(op==2) { if(a[0]>=model->nodes || a[1]>1)return 0;visible=a[1]; }
         if(op==3) { if(a[0]>=32 || !valid[a[0]])return 0;state.transform=stack[a[0]]; }
@@ -184,9 +186,9 @@ static int scene(const DSModel *model,int selected_shape,int selected_material,D
     return 0;
 }
 
-int ds_model_scene(const DSModel *model,DSSceneTriangle emit,void *user,DSModelStats *out) { return scene(model,-1,-1,emit,user,out); }
+int ds_model_scene(const DSModel *model,DSSceneTriangle emit,void *user,DSModelStats *out) { return scene(model,-1,-1,emit,user,out,0); }
 int ds_model_scene_shape(const DSModel *model,unsigned shape,unsigned material,DSSceneTriangle emit,void *user,DSModelStats *out) {
-    if(!model || shape>=model->shapes || material>=model->materials)return 0;return scene(model,(int)shape,(int)material,emit,user,out);
+    if(!model || shape>=model->shapes || material>=model->materials)return 0;return scene(model,(int)shape,(int)material,emit,user,out,0);
 }
 
 /* Texture/palette bindings index material lists by names, not archive order. */
@@ -219,3 +221,5 @@ int ds_model_material(const DSModel *model,unsigned index,DSModelMaterial *out) 
     if(!binding(p,n,u16(p),index,v.texture) || !binding(p,n,u16(p+2),index,v.palette))return 0;
     *out=v;return 1;
 }
+
+int ds_model_inspection_scene(const DSModel *m,DSSceneTriangle emit,void *user,DSModelStats *out) { return scene(m,-1,-1,emit,user,out,1); }

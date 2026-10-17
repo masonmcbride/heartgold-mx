@@ -29,3 +29,7 @@ int ds_model_material(const DSModel *,unsigned,DSModelMaterial *);
 int ds_model_scene_shape(const DSModel *,unsigned shape,unsigned material,DSSceneTriangle,void *,DSModelStats *);
 
 int ds_model_node(const DSModel *,unsigned,DSTransform *);
+
+/* Inspection only: freeze simple SBC billboard orientation in model space.
+ * Not camera-facing billboard emulation or support in normal game scenes. */
+int ds_model_inspection_scene(const DSModel *,DSSceneTriangle,void *,DSModelStats *);

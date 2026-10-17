@@ -35,7 +35,6 @@ int hg_props_validate(const uint8_t *p,size_t n) {
     if((!p && n) || n%48 || n/48>MAP_PROP_MAX)return 0;
     for(size_t i=0;i<n;i+=48)if(r32(p+i)>=550)return 0;return 1;
 }
-void *Heap_AllocAtEnd(enum HeapID heap,u32 n) { return Heap_Alloc(heap,n); }
 void MI_CpuClearFast(void *p,u32 n) { memset(p,0,n); }
 static void unsupported(const char *name) { fprintf(stderr,"Unsupported prop boundary: %s\n",name);abort(); }
 void GetSafariObjectConfig(SafariObjectConfig *p,int i,int gender) { (void)p;(void)i;(void)gender;unsupported("Safari placement"); }
@@ -83,12 +82,12 @@ void GF3dRender_DrawModel(NNSG3dRenderObj *obj,const VecFx32 *t,const MtxFx33 *r
     NNS_G3dGlbSetBaseTrans(t);NNS_G3dGlbSetBaseRot(r);NNS_G3dGlbSetBaseScale(s);NNS_G3dGlbFlush();submit(obj->model,-1,-1);
 }
 void NNS_G3dDraw1Mat1Shp(const NNSG3dResMdl *model,int material,int shape,BOOL send) {
-    if(!model || material<0 || (unsigned)material>=model->model.materials || shape<0 || (unsigned)shape>=model->model.shapes)abort();
+    if(!model || material<0 || (unsigned)material>=model->model.materials || shape<0 || (unsigned)shape>=model->model.shapes) { draw.failed=1;return; }
     DSTransform node,identity=ds_transform_identity();
-    if(model->model.nodes!=1 || !ds_model_node(&model->model,0,&node))abort();
-    for(unsigned i=0;i<12;i++)if(node.m[i]!=identity.m[i])abort();
+    if(model->model.nodes!=1 || !ds_model_node(&model->model,0,&node)) { draw.failed=1;return; }
+    for(unsigned i=0;i<12;i++)if(node.m[i]!=identity.m[i]) { draw.failed=1;return; }
     if(send) { draw.material_valid=1;draw.material_id=material;draw.material_model=model; }
-    else if(!draw.material_valid || draw.material_id!=material || draw.material_model!=model)abort();
+    else if(!draw.material_valid || draw.material_id!=material || draw.material_model!=model) { draw.failed=1;return; }
     submit(model,material,shape);
 }
 void sub_02020D2C(MtxFx33 *p,VecFx32 *v) {

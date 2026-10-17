@@ -47,3 +47,6 @@ shutil.copyfile(root/"files/a/0/4/0",out/"resources/prop_models.narc")
 shutil.copyfile(root/"files/a/0/4/3",out/"resources/area_models.narc")
 
 shutil.copyfile(root/"files/fielddata/build_model/bm_field_matshp.dat",out/"resources/bm_field_matshp.dat")
+
+shutil.copyfile(root/"files/a/1/4/8",out/"resources/room_props.narc")
+shutil.copyfile(root/"files/fielddata/build_model/bm_room_matshp.dat",out/"resources/bm_room_matshp.dat")

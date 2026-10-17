@@ -81,3 +81,12 @@ int ds_texture_sample(const DSTexture *t,double u,double v,uint32_t params,uint3
     unsigned r=c&31,g=(c>>5)&31,b=(c>>10)&31;
     *out=(r*255/31)|((g*255/31)<<8)|((b*255/31)<<16)|(alpha<<24);return 1;
 }
+int ds_texture_name(const DSTextureBank *b,unsigned index,int palette,char name[17]) {
+    if(!b || !b->bytes || b->size<60 || !name)return 0;
+    size_t dict=palette?r32(b->bytes+52):r16(b->bytes+14);unsigned stride=palette?4:8;
+    if(!span(b->size,dict,8))return 0;const uint8_t *d=b->bytes+dict;size_t size=r16(d+2),table=r16(d+6);
+    if(size>b->size-dict || index>=d[1] || !span(size,table,4) || r16(d+table)!=stride)return 0;
+    size_t names=table+r16(d+table+2);
+    if(names<table+4+stride*d[1] || !span(size,names,16*d[1]))return 0;
+    memcpy(name,d+names+16*index,16);name[16]=0;return 1;
+}
