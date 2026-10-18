@@ -274,6 +274,33 @@ static NSString *mapTitle(unsigned map) {
         hg_field_app_step(self.canvas.application);hg_field_app_presentation(self.canvas.application,runStep,NULL);
         if(runStep[2]!=runStart[2]-18 || hg_field_app_steps(self.canvas.application)!=2)exit(1);
         [self.canvas keyUp:release];if(![self.canvas loadMap:60 error:reloadError])exit(1);
+        /* Exercise both sideways stride poses through actual modifier-bearing
+         * input, including frames 26/32 that previously lost 42 opaque texels. */
+        if(![[NSFileManager defaultManager] createDirectoryAtPath:@"build/evidence/hero-crop" withIntermediateDirectories:YES attributes:nil error:nil])exit(1);
+        for(NSString *letter in @[@"a",@"d"]) {
+            if(![self.canvas loadMap:60 error:reloadError])exit(1);
+            DSCamera closeup=self.canvas.camera;closeup.scale=6;self.canvas.camera=closeup;
+            hg_field_app_presentation(self.canvas.application,runStart,NULL);
+            NSEvent *sideRun=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:NSEventModifierFlagShift timestamp:0 windowNumber:self.window.windowNumber context:nil characters:letter.uppercaseString charactersIgnoringModifiers:letter isARepeat:NO keyCode:0];
+            NSEvent *sideUp=[NSEvent keyEventWithType:NSEventTypeKeyUp location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:letter charactersIgnoringModifiers:letter isARepeat:NO keyCode:0];
+            [self.canvas keyDown:sideRun];unsigned poses=0;
+            for(unsigned tick=0;tick<8;tick++) {
+                hg_field_app_step(self.canvas.application);hg_field_app_presentation(self.canvas.application,runStep,&runPose);
+                if(runPose==26||runPose==28||runPose==30||runPose==32) {
+                    unsigned bit=1u<<(runPose-25);
+                    if(!(poses&bit)) {
+                        if(![self.canvas render])exit(1);
+                        NSString *path=[NSString stringWithFormat:@"build/evidence/hero-crop/running-%u.png",runPose];
+                        if(![[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:path atomically:YES])exit(1);
+                        poses|=bit;
+                    }
+                }
+            }
+            BOOL west=[letter isEqualToString:@"a"];
+            if(poses!=(west?10u:160u)||runStep[0]!=runStart[0]+(west?-32:32)||runStep[2]!=runStart[2])exit(1);
+            [self.canvas keyUp:sideUp];
+        }
+        if(![self.canvas loadMap:60 error:reloadError])exit(1);
         NSString *route=@"aassa";
         for(NSUInteger i=0;i<route.length;i++) {
             NSString *letter=[route substringWithRange:NSMakeRange(i,1)];
@@ -312,7 +339,67 @@ static NSString *mapTitle(unsigned map) {
         [self.canvas keyDown:exitHouse];hg_field_app_step(self.canvas.application);
         if(hg_field_app_map(travelSession)!=60 || hg_field_app_steps(travelSession)!=8 || ![self.canvas render])exit(1);
         if(self.canvas.application!=travelSession || self.selectedMap!=60 || self.canvas.movementKeys)exit(1);
-        [self.canvas display];fprintf(stderr,"Map browser smoke: original house round trip with retained session/statistics, map-list/camera synchronization, walk/run commands, Shift release, town-sign dialogue, held/tapped input, elapsed-time movement, search, supported/unsupported selection, recovery and AppKit display passed\n");[NSApp terminate:nil];
+        if(![self.canvas loadMap:65 error:reloadError])exit(1);
+        for(unsigned step=0;step<3;step++) {
+            [self.canvas keyDown:walk];hg_field_app_step(self.canvas.application);[self.canvas keyUp:release];
+            for(unsigned tick=1;tick<8;tick++)hg_field_app_step(self.canvas.application);
+        }
+        NSEvent *faceNpc=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"d" charactersIgnoringModifiers:@"d" isARepeat:NO keyCode:2];
+        [self.canvas keyDown:faceNpc];hg_field_app_step(self.canvas.application);self.canvas.movementKeys=0;hg_field_app_clear_input(self.canvas.application);
+        [self.canvas keyDown:confirm];hg_field_app_step(self.canvas.application);
+        if(strcmp(hg_field_app_dialogue_page(self.canvas.application),"PIKACHU is an evolved Pokémon.")||![self.canvas render])exit(1);
+        [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/new-bark-npc-dialogue.png" atomically:YES];
+        unsigned pages=0;
+        while(hg_field_app_dialogue(self.canvas.application)[0]&&pages++<16){[self.canvas keyDown:confirm];hg_field_app_step(self.canvas.application);}
+        if(pages<3||pages>=16||hg_field_app_dialogue(self.canvas.application)[0]||![self.canvas render])exit(1);
+        if(![self.canvas loadMap:63 error:reloadError])exit(1);
+        NSString *momRoute=@"wwwddd";
+        for(NSUInteger i=0;i<momRoute.length;i++) {
+            NSString *letter=[momRoute substringWithRange:NSMakeRange(i,1)];
+            NSEvent *down=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:letter charactersIgnoringModifiers:letter isARepeat:NO keyCode:0];
+            NSEvent *up=[NSEvent keyEventWithType:NSEventTypeKeyUp location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:letter charactersIgnoringModifiers:letter isARepeat:NO keyCode:0];
+            [self.canvas keyDown:down];hg_field_app_step(self.canvas.application);[self.canvas keyUp:up];for(unsigned tick=1;tick<8;tick++)hg_field_app_step(self.canvas.application);
+        }
+        HGStoryState *story=hg_field_app_story(self.canvas.application);unsigned long long beforeStory=hg_story_revision(story);
+        [self.canvas keyDown:confirm];hg_field_app_step(self.canvas.application);
+        if(strcmp(hg_field_app_dialogue(self.canvas.application),"Professor Elm has been waiting for\nyou, dear. Please, go and help him.")||hg_story_revision(story)!=beforeStory||![self.canvas render])exit(1);
+        [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/new-bark-mom-story.png" atomically:YES];
+        [self.canvas keyDown:confirm];hg_field_app_step(self.canvas.application);
+        if(hg_field_app_dialogue(self.canvas.application)[0]||hg_story_revision(story)!=beforeStory+1||![self.canvas render])exit(1);
+        NSArray *conversations=@[
+            @{@"map":@60,@"route":@"sssssssasssaa",@"text":@"Yo, Ethan!",@"image":@"new-bark-breeder-dialogue.png"},
+            @{@"map":@61,@"route":@"wwwwwwwwwdd",@"text":@"Professor Elm: If a wild Pokémon",@"image":@"new-bark-elm-dialogue.png"},
+            @{@"map":@60,@"route":@"wwwwaaaaaaawwwd",@"text":@"So this is the famous Elm",@"image":@"new-bark-rival-dialogue.png"}
+        ];
+        for(NSDictionary *conversation in conversations) {
+            if(![self.canvas loadMap:[conversation[@"map"] unsignedIntValue] error:reloadError])exit(1);
+            NSString *route=conversation[@"route"];
+            for(NSUInteger i=0;i<route.length;i++) {
+                NSString *letter=[route substringWithRange:NSMakeRange(i,1)];
+                NSEvent *down=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:letter charactersIgnoringModifiers:letter isARepeat:NO keyCode:0];
+                NSEvent *up=[NSEvent keyEventWithType:NSEventTypeKeyUp location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:letter charactersIgnoringModifiers:letter isARepeat:NO keyCode:0];
+                [self.canvas keyDown:down];hg_field_app_step(self.canvas.application);[self.canvas keyUp:up];for(unsigned tick=1;tick<8;tick++)hg_field_app_step(self.canvas.application);
+            }
+            [self.canvas resetCamera];
+            story=hg_field_app_story(self.canvas.application);beforeStory=hg_story_revision(story);
+            [self.canvas keyDown:confirm];hg_field_app_step(self.canvas.application);
+            if(!strstr(hg_field_app_dialogue(self.canvas.application),[conversation[@"text"] UTF8String])||hg_story_revision(story)!=beforeStory||![self.canvas render])exit(1);
+            NSString *path=[@"build/evidence" stringByAppendingPathComponent:conversation[@"image"]];
+            [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:path atomically:YES];
+            unsigned ticks=0;BOOL second=NO,jumped=NO;double origin[3];hg_field_app_presentation(self.canvas.application,origin,NULL);
+            while(hg_field_app_interaction_busy(self.canvas.application)&&ticks++<2048) {
+                if(strstr(hg_field_app_dialogue(self.canvas.application),"What are you staring at?"))second=YES;
+                if(hg_field_app_dialogue(self.canvas.application)[0])[self.canvas keyDown:confirm];
+                hg_field_app_step(self.canvas.application);double world[3];hg_field_app_presentation(self.canvas.application,world,NULL);
+                if(!jumped&&world[1]>origin[1]+1) {
+                    jumped=YES;[self.canvas resetCamera];if(![self.canvas render])exit(1);
+                    [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/new-bark-rival-jump.png" atomically:YES];
+                }
+            }
+            if(ticks>=2048||hg_story_revision(story)!=beforeStory+1||![self.canvas render])exit(1);
+            if([conversation[@"image"] isEqualToString:@"new-bark-rival-dialogue.png"]&&(!second||!jumped))exit(1);
+        }
+        [self.canvas display];fprintf(stderr,"Map browser smoke: Elm, breeder and rival conversations, rival shove/jump and original completion, Mom, NPC paging, retained travel/session statistics, map-list/camera synchronization, walk/run, town sign, input, timing, search and AppKit display passed\n");[NSApp terminate:nil];
     });
 }
 @end

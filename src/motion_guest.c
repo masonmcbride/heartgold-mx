@@ -5,6 +5,7 @@
 #include "ds_thumb.h"
 #include "metatile_behavior.h"
 #include "field_data.h"
+#include "constants/sndseq.h"
 #include "field_guest.inc"
 _Static_assert(sizeof(hg_field_guest_image)<=0x8000,"Guest image overlaps marshaled field state");
 #include <stdlib.h>
@@ -26,7 +27,9 @@ _Static_assert(sizeof(hg_field_guest_image)<=0x8000,"Guest image overlaps marsha
  * FieldSystem or object is cast to the DS serialized layout. */
 typedef struct { PlayerAvatar *avatar; LocalMapObject *object;
     MapObjectManager *manager; HGFieldResources *field; VecFx32 *vector; HGFieldTile selected; const uint8_t *backgrounds; unsigned background_count; int selected_valid; int static_environment;
+    uint32_t *facing_handle;
     HGMotionSession *session;uint16_t input_keys;
+    FieldSystem *story_field;const uint8_t *coordinates;unsigned coordinate_count;
 } MotionBoundary;
 static int store(DSThumb *cpu,uint32_t address,uint32_t value,unsigned width) {
     if(address<0x02000000u+sizeof(hg_field_guest_image) ||
@@ -56,6 +59,15 @@ static int boundary(DSThumb *cpu, void *opaque) {
         cpu->r[0]=(uint32_t)height;return 1;
     }
     if(!name)return 0;
+    if(b->story_field&&!strcmp(name,"FieldSystem_VarGet")&&cpu->r[0]==FIELD_ADDRESS) {
+        unsigned var=cpu->r[1];if(var>=0x4170)return -1;
+        cpu->r[0]=FieldSystem_VarGet(b->story_field,(u16)var);return 1;
+    }
+    if(b->field&&b->object&&!strcmp(name,"PlaySE")&&(cpu->r[0]==SEQ_SE_DP_DANSA||cpu->r[0]==SEQ_SE_DP_SUTYA2)) {
+        /* Presentation boundary: accepted original jump cues; audio backend
+         * remains absent, like the selection cue in field dialogue. */
+        return 1;
+    }
     if(b->session && b->session->stats && !strcmp(name,"Save_GameStats_Get") && cpu->r[0]==SAVE_HANDLE) {
         /* Native save-owner lookup only; original SaveArray_Get is not run. */
         cpu->r[0]=STATS_HANDLE;return 1;
@@ -94,6 +106,7 @@ static int boundary(DSThumb *cpu, void *opaque) {
     TILE_PREDICATE(MetatileBehavior_IsWarpEntranceEast)
     TILE_PREDICATE(MetatileBehavior_IsDoor)
     TILE_PREDICATE(MetatileBehavior_IsSurfableWater)
+    TILE_PREDICATE(sub_0205B700)
     TILE_PREDICATE(MetatileBehavior_IsSnow)
     TILE_PREDICATE(MetatileBehavior_IsVeryTallGrass)
     TILE_PREDICATE(MetatileBehavior_IsMud)
@@ -107,6 +120,12 @@ static int boundary(DSThumb *cpu, void *opaque) {
     if(b->manager) {
         unsigned count=MapObjectManager_GetObjectCount(b->manager);
         LocalMapObject *objects=MapObjectManager_GetObjects2(b->manager);
+        if(!strcmp(name,"MapObjectManager_GetFirstObjectWithXAndZ")&&cpu->r[0]==MANAGER_HANDLE) {
+            LocalMapObject *found=MapObjectManager_GetFirstObjectWithXAndZ(b->manager,cpu->r[1],cpu->r[2],(BOOL)cpu->r[3]);
+            if(!found){cpu->r[0]=0;return 1;}
+            for(unsigned i=0;i<count;i++)if(objects+i==found){cpu->r[0]=found==b->object?HANDLE:OBJECT_BASE+4*i;return 1;}
+            return -1;
+        }
         if(!strcmp(name,"MapObjectManager_GetObjects2")&&cpu->r[0]==MANAGER_HANDLE) {
             cpu->r[0]=objects==b->object?HANDLE:OBJECT_BASE;return 1;
         }
@@ -178,6 +197,8 @@ static int boundary(DSThumb *cpu, void *opaque) {
     GET_OBJECT(MapObject_GetYRange)
     GET_OBJECT(MapObject_CheckFlag28)
     GET_OBJECT(MapObject_GetSpriteID)
+    GET_OBJECT(MapObject_CheckFlag19Disabled)
+    GET_OBJECT(MapObject_GetPositionVectorYCoordUInt)
     GET_OBJECT(sub_0205F8D0)
     GET_OBJECT(sub_0205F504)
     GET_OBJECT(MapObject_GetPreviousXCoord)
@@ -187,12 +208,19 @@ static int boundary(DSThumb *cpu, void *opaque) {
     GET_OBJECT(MapObject_GetZCoord)
     GET_OBJECT(MapObject_GetMovementCommand)
     GET_OBJECT(MapObject_GetMovementStep)
+    GET_OBJECT(MapObject_GetFacingDirection)
+    GET_OBJECT(MapObject_CheckVisible)
     GET_OBJECT(MapObject_CheckIgnoreHeights)
     GET_OBJECT(MapObject_CheckFlag29)
     if(object && !strcmp(name,"MapObject_SetPositionVector")) {
         uint32_t x,y,z;
         if(!load_word(cpu,cpu->r[1],&x)||!load_word(cpu,cpu->r[1]+4,&y)||!load_word(cpu,cpu->r[1]+8,&z))return -1;
         VecFx32 v={(int32_t)x,(int32_t)y,(int32_t)z};MapObject_SetPositionVector(object,&v);return 1;
+    }
+    if(object && !strcmp(name,"MapObject_SetFacingVector")) {
+        uint32_t x,y,z;
+        if(!load_word(cpu,cpu->r[1],&x)||!load_word(cpu,cpu->r[1]+4,&y)||!load_word(cpu,cpu->r[1]+8,&z))return -1;
+        VecFx32 v={(int32_t)x,(int32_t)y,(int32_t)z};MapObject_SetFacingVector(object,&v);return 1;
     }
 #define SET_OBJECT(n) if(!strcmp(name,#n)&&object){n(object,(int32_t)cpu->r[1]);return 1;}
     SET_OBJECT(MapObject_SetPreviousX)
@@ -203,6 +231,7 @@ static int boundary(DSThumb *cpu, void *opaque) {
     SET_OBJECT(MapObject_AddCurrentZ)
     SET_OBJECT(MapObject_SetCurrentY)
     SET_OBJECT(MapObject_SetOrQueueFacing)
+    SET_OBJECT(MapObject_SetFacingDirection)
     SET_OBJECT(MapObject_SetFlagsBits)
     SET_OBJECT(MapObject_ClearFlagsBits)
     SET_OBJECT(MapObject_SetMovementCommand)
@@ -219,6 +248,7 @@ static int run(MotionBoundary *b,uint32_t entry,uint32_t arg0,uint32_t arg1,uint
     cpu.r[13]=0x0200f000;cpu.r[15]=entry;cpu.r[0]=arg0;cpu.r[1]=arg1;cpu.r[2]=arg2;cpu.r[3]=arg3;
     if(b->object)memcpy(ram+MOVEMENT_ADDRESS-0x02000000u,sub_0205F3E4(b->object),16);
     if(b->field) {
+        if(b->manager)store(&cpu,FIELD_ADDRESS+0x3c,MANAGER_HANDLE,4);
         store(&cpu,FIELD_ADDRESS+0x40,HANDLE,4);
         store(&cpu,FIELD_ADDRESS+0x2c,LOADER_HANDLE,4);
         store(&cpu,FIELD_ADDRESS+0x60,DISPATCH_ADDRESS,4);
@@ -234,6 +264,11 @@ static int run(MotionBoundary *b,uint32_t entry,uint32_t arg0,uint32_t arg1,uint
         if(b->background_count>100){free(ram);return 0;}
         memcpy(ram+0xa000,b->backgrounds,20*b->background_count);
         cpu.r[0]=FIELD_ADDRESS;store(&cpu,FIELD_ADDRESS+0x40,HANDLE,4);
+    }
+    if(b->coordinates) {
+        if(b->coordinate_count>100){free(ram);return 0;}
+        memcpy(ram+0xa000,b->coordinates,16*b->coordinate_count);
+        store(&cpu,FIELD_ADDRESS+0x40,HANDLE,4);
     }
     if(b->vector) {
         cpu.r[0]=arg1;cpu.r[1]=arg2;cpu.r[2]=0x02008400;
@@ -254,6 +289,7 @@ static int run(MotionBoundary *b,uint32_t entry,uint32_t arg0,uint32_t arg1,uint
         ok=load_word(&cpu,0x02008400,&x)&&load_word(&cpu,0x02008404,&y)&&load_word(&cpu,0x02008408,&z);
         if(ok)*b->vector=(VecFx32){(int32_t)x,(int32_t)y,(int32_t)z};
     }
+    if(ok&&b->facing_handle)ok=load_word(&cpu,0x02008620,b->facing_handle);
     if(ok&&b->object)memcpy(sub_0205F3E4(b->object),ram+MOVEMENT_ADDRESS-0x02000000u,16);
     if(ok&&b->session)memcpy(b->session->follower,ram+FIELD_ADDRESS-0x02000000u+0xe4,32);
     if(ok&&result)*result=cpu.r[0];free(ram);return ok;
@@ -264,6 +300,11 @@ int hg_motion_direction(PlayerAvatar *avatar,uint16_t keys,int *direction) {
     if(!run(&b,HG_FIELD_GUEST_sub_0205DDD4,HANDLE,0,keys,0,&result))return 0;
     if(result!=UINT32_MAX&&result>3)return 0;
     *direction=(int32_t)result;return 1;
+}
+int hg_motion_clear_held(LocalMapObject *object) {
+    if(!object)return 0;LocalMapObject saved=*object;MotionBoundary b={.object=object};
+    if(run(&b,HG_FIELD_GUEST_MapObject_ClearHeldMovement,HANDLE,0,0,0,NULL))return 1;
+    *object=saved;return 0;
 }
 int hg_motion_grid_step(LocalMapObject *object,unsigned direction) {
     if(!object||direction>3)return 0;
@@ -372,12 +413,16 @@ int hg_motion_walk_begin(HGFieldResources *field,PlayerAvatar *avatar,uint16_t k
     }
     *out=move;return 1;
 }
-int hg_motion_walk_tick(HGFieldResources *field,LocalMapObject *object,int *complete) {
+int hg_motion_script_command(unsigned command) {
+    return command<=3||(command>=12&&command<=15)||(command>=32&&command<=35)||
+        (command>=56&&command<=59)||command==71||command==72||(command>=76&&command<=79);
+}
+static int command_tick(HGFieldResources *field,LocalMapObject *object,int *complete,int scripted) {
     if(!field||!object||!complete||!object->unkC8)return 0;
     HGFieldTile tile;
     if(!hg_field_resources_tile(field,MapObject_GetXCoord(object),MapObject_GetZCoord(object),&tile)||!hg_transition_supported(tile.map_header))return 0;
     unsigned command=MapObject_GetMovementCommand(object);
-    if(!((command>=12&&command<=15)||(command>=88&&command<=91))||MapObject_GetMovementStep(object)>1)return 0;
+    if(!(scripted?hg_motion_script_command(command):((command>=12&&command<=15)||(command>=88&&command<=91)))||MapObject_GetMovementStep(object)>1)return 0;
     LocalMapObject saved=*object;
     MotionBoundary b={.object=object,.field=field,.static_environment=1};uint32_t result;
     if(!run(&b,HG_FIELD_GUEST_sub_02062428,HANDLE,0,0,0,&result)||result>1){*object=saved;return 0;}
@@ -386,6 +431,8 @@ int hg_motion_walk_tick(HGFieldResources *field,LocalMapObject *object,int *comp
     }
     *complete=(int)result;return 1;
 }
+int hg_motion_walk_tick(HGFieldResources *field,LocalMapObject *object,int *complete) { return command_tick(field,object,complete,0); }
+int hg_motion_script_tick(HGFieldResources *field,LocalMapObject *object,int *complete) { return command_tick(field,object,complete,1); }
 
 int hg_motion_locomotion_begin(HGFieldResources *field,PlayerAvatar *avatar,uint16_t keys,HGMotionSession *session,HGMotionMove *out) {
     if(!field||!avatar||!session||!session->stats||!out||PlayerAvatar_GetState(avatar)!=0)return 0;
@@ -426,6 +473,30 @@ int hg_motion_background_event(PlayerAvatar *avatar,const uint8_t *backgrounds,u
     MotionBoundary b={.avatar=avatar,.backgrounds=backgrounds,.background_count=count};uint32_t result;
     if(!run(&b,HG_FIELD_GUEST_GetInteractedBackgroundEventScript,FIELD_ADDRESS,0x0200a000,count,0,&result)||result>65535)return 0;
     *script=result;return 1;
+}
+int hg_motion_coordinate_event(FieldSystem *field,PlayerAvatar *avatar,const uint8_t *bytes,unsigned count,unsigned *script) {
+    if(!field||!field->saveData||!avatar||!bytes||!script||count>100)return 0;
+    for(unsigned i=0;i<count;i++) {
+        const uint8_t *p=bytes+16*i;unsigned var=p[14]|(unsigned)p[15]<<8;
+        if(var>=0x4170)return 0; /* No live ScriptEnvironment special variables. */
+    }
+    MotionBoundary b={.avatar=avatar,.story_field=field,.coordinates=bytes,.coordinate_count=count};uint32_t result;
+    if(!run(&b,HG_FIELD_GUEST_sub_0203DE04,FIELD_ADDRESS,0x0200a000,count,0,&result)||result>65535)return 0;
+    *script=result;return 1;
+}
+int hg_motion_facing_object(HGFieldResources *field,PlayerAvatar *avatar,LocalMapObject **out) {
+    if(!field||!avatar||!out)return 0;
+    LocalMapObject *object=PlayerAvatar_GetMapObject(avatar);if(!object)return 0;
+    MapObjectManager *manager=MapObject_GetManager(object);if(!manager)return 0;
+    unsigned count=MapObjectManager_GetObjectCount(manager);LocalMapObject *objects=MapObjectManager_GetObjects2(manager);
+    if(!count||count>1024||!objects||PlayerAvatar_GetFacingDirection(avatar)>3)return 0;
+    unsigned member=0;for(unsigned i=0;i<count;i++)member|=objects+i==object;if(!member)return 0;
+    uint32_t handle,result;MotionBoundary boundary={.object=object,.avatar=avatar,.manager=manager,.field=field,.facing_handle=&handle};
+    if(!run(&boundary,HG_FIELD_GUEST_sub_0203DC64,FIELD_ADDRESS,0x02008620,0,0,&result)||result>1)return 0;
+    if(!result){*out=NULL;return 1;}
+    if(handle==HANDLE){*out=object;return 1;}
+    if(handle<OBJECT_BASE||((handle-OBJECT_BASE)&3)||(handle-OBJECT_BASE)/4>=count)return 0;
+    *out=objects+(handle-OBJECT_BASE)/4;return 1;
 }
 unsigned hg_field_guest_mom_spawn(void) {
     MotionBoundary boundary={0};uint32_t result;

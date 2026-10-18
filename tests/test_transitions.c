@@ -25,37 +25,7 @@ static int place(Actor *a,HGFieldResources *resources,int x,int z,unsigned direc
 }
 static const unsigned keys[]={0x40,0x80,0x20,0x10};
 static const int dx[]={0,0,-1,1},dz[]={-1,1,0,0};
-static void walk_to(HGFieldApp *app,int goalx,int goalz) {
-    /* Route discovery uses original collision admission; the route then runs
-     * through the actual app input, command dispatch and presentation path. */
-    unsigned map=hg_field_app_map(app);CHECK(hg_transition_supported(map));
-    int basex=map==60?672:0,basez=map==60?384:0;
-    HGFieldResources *resources=hg_field_resources_new(map);CHECK(resources);
-    Actor actor;init(&actor);int startx,startz;CHECK(hg_field_app_player(app,&startx,&startz));
-    int previous[1024],direction[1024],queue[1024];for(unsigned i=0;i<1024;i++)previous[i]=-1;
-    int start=(startz-basez)*32+startx-basex,goal=(goalz-basez)*32+goalx-basex,read=0,write=1;
-    queue[0]=start;previous[start]=start;
-    while(read<write&&previous[goal]<0) {
-        int at=queue[read++],x=basex+at%32,z=basez+at/32;
-        CHECK(place(&actor,resources,x,z,0));
-        for(unsigned d=0;d<4;d++) {
-            int nx=x+dx[d],nz=z+dz[d];if(nx<basex||nx>=basex+32||nz<basez||nz>=basez+32)continue;
-            int next=(nz-basez)*32+nx-basex;if(previous[next]>=0)continue;unsigned mask;int32_t height;
-            if(hg_field_resources_height(resources,nx,nz,0,0,&height)!=1)continue;
-            if(!hg_motion_player_collision(resources,actor.avatar,d,&mask)||mask)continue;
-            previous[next]=at;direction[next]=(int)d;queue[write++]=next;
-        }
-    }
-    CHECK(previous[goal]>=0);unsigned route[1024],length=0;
-    for(int at=goal;at!=start;at=previous[at])route[length++]=(unsigned)direction[at];
-    printf("Map %u route: ",map);for(unsigned i=length;i;i--)putchar("wsad"[route[i-1]]);putchar('\n');
-    while(length) {
-        unsigned d=route[--length];hg_field_app_input(app,keys[d]);hg_field_app_step(app);hg_field_app_input(app,0);
-        for(unsigned i=0;i<7;i++)hg_field_app_step(app);CHECK(hg_field_app_map(app)==map);
-    }
-    int x,z;CHECK(hg_field_app_player(app,&x,&z)&&x==goalx&&z==goalz);
-    PlayerAvatar_FreeToHeap(actor.avatar);hg_field_resources_free(resources);
-}
+#include "field_routes.h"
 int main(void) {
     const unsigned maps[]={60,61,62,63,64,65,66,384};unsigned portals=0,selected_maps=0;
     HGFieldLocation approaches[8][6]={0};
@@ -125,7 +95,7 @@ int main(void) {
         PlayerAvatar_FreeToHeap(actor.avatar);hg_field_resources_free(resources);
     }
     char error[256];HGFieldApp *app=hg_field_app_new(60,error,sizeof(error));CHECK(app);
-    walk_to(app,695,397);unsigned steps=hg_field_app_steps(app);const HGFieldView *town=hg_field_app_view(app);
+    hg_test_walk_to(app,695,397);unsigned steps=hg_field_app_steps(app);const HGFieldView *town=hg_field_app_view(app);
     hg_field_app_input(app,0x40);hg_field_app_step(app);hg_field_app_input(app,0);
     CHECK(hg_field_app_map(app)==63&&hg_field_app_view(app)!=town&&hg_field_app_steps(app)==steps);
     int x,z;CHECK(hg_field_app_player(app,&x,&z)&&x==3&&z==10);
@@ -143,11 +113,11 @@ int main(void) {
      * original selector, preserve the same owner and statistic across floors. */
     app=hg_field_app_new(63,error,sizeof(error));CHECK(app);
     HGFieldLocation upstairs=approaches[3][1],downstairs=approaches[4][0];
-    walk_to(app,upstairs.x,upstairs.z);steps=hg_field_app_steps(app);
+    hg_test_walk_to(app,upstairs.x,upstairs.z);steps=hg_field_app_steps(app);
     hg_field_app_input(app,keys[upstairs.direction]);hg_field_app_step(app);hg_field_app_input(app,0);
     CHECK(hg_field_app_map(app)==64&&hg_field_app_steps(app)==steps);
     hg_field_app_camera(app,&camera,256,192);CHECK(hg_field_app_render(app,&camera,pixels,256,192));
-    walk_to(app,downstairs.x,downstairs.z);steps=hg_field_app_steps(app);
+    hg_test_walk_to(app,downstairs.x,downstairs.z);steps=hg_field_app_steps(app);
     hg_field_app_input(app,keys[downstairs.direction]);hg_field_app_step(app);hg_field_app_input(app,0);
     CHECK(hg_field_app_map(app)==63&&hg_field_app_steps(app)==steps);hg_field_app_free(app);
     CHECK(!hg_transition_supported(67)&&!hg_transition_supported(540));

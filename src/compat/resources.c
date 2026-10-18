@@ -2,7 +2,7 @@
 #include "compat/resources.h"
 /* Process-lifetime cache. All callers run on the main thread. */
 typedef struct { uint8_t *bytes; DSNarc narc; } Cache;
-static Cache cache[16];
+static Cache cache[24];
 int native_resource_member(int archive,int group,int member,const uint8_t **bytes,size_t *size) {
     const char *name;int slot;
     if(archive==NARC_itemtool_itemdata_item_icon) { slot=0;name="item_icon.narc"; }
@@ -21,6 +21,11 @@ int native_resource_member(int archive,int group,int member,const uint8_t **byte
     else if(archive==NARC_data_mmodel_mmodel) { slot=13;name="characters.narc"; }
     else if(archive==NARC_fielddata_eventdata_zone_event) { slot=14;name="zone_event.narc"; }
     else if(archive==NARC_msgdata_msg && group==542) { slot=15;name="msg_0542.narc"; }
+    else if(archive==NARC_msgdata_msg && group>=543&&group<=549) {
+        static const char *const names[]={"msg_0543.narc","msg_0544.narc","msg_0545.narc","msg_0546.narc","msg_0547.narc","msg_0548.narc","msg_0549.narc"};
+        slot=16+group-543;name=names[group-543];
+    }
+    else if(archive==NARC_fielddata_script_scr_seq) { slot=23;name="field_scripts.narc"; }
     else return 0;
     Cache *c=&cache[slot];
     if(!c->bytes) {
@@ -59,9 +64,11 @@ void NARC_ReadFile(NARC *n,u32 length,void *out) {
 }
 
 int native_resource_file(const char *name,const uint8_t **out,size_t *size) {
-    static struct { uint8_t *bytes;size_t length; } files[3];
+    static struct { uint8_t *bytes;size_t length; } files[2];
+    static const char *const names[]={"bm_field_matshp.dat","bm_room_matshp.dat"};
     if(!name || !out || !size)return 0;
-    unsigned slot;if(!strcmp(name,"bm_field_matshp.dat"))slot=0;else if(!strcmp(name,"bm_room_matshp.dat"))slot=1;else if(!strcmp(name,"t20_script.bin"))slot=2;else return 0;
+    unsigned slot=NELEMS(names);for(unsigned i=0;i<NELEMS(names);i++)if(!strcmp(name,names[i])){slot=i;break;}
+    if(slot==NELEMS(names))return 0;
     uint8_t *bytes=files[slot].bytes;size_t length=files[slot].length;
     if(!bytes) {
         char path[4096];if(snprintf(path,sizeof(path),"%s/%s",HG_PACKED_ROOT,name)>=(int)sizeof(path))return 0;

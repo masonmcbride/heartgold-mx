@@ -228,6 +228,27 @@ int main(void) {
     CHECK(hg_field_resources_height(resources,32768,0,0,0,&no_height)==-1 && no_height==77);
     printf("Original player collision: %u edges, %u committed / %u denied; %u bike-water checks; height threshold checked\n",player_queries,committed,denied,water_edges);
     printf("Original normal-walk commands: %u complete eight-tick walks; every Q12 position, terrain height and completion callback checked\n",completions);
+    /* Script actors use the same original dispatcher. Check every admitted
+     * directional variant, including jump arcs and exact original durations. */
+    const unsigned bases[]={0,12,32,56,76},durations[]={1,8,9,16,6};
+    for(unsigned family=0;family<5;family++)for(unsigned d=0;d<4;d++) {
+        object=walk_sample;object.manager=&manager;sub_0205F47C(&object,completed);
+        int32_t height;CHECK(hg_field_resources_height(resources,688,400,0,0,&height)==1);
+        VecFx32 start={688*65536+32768,height,400*65536+32768},zero={0};
+        MapObject_SetPositionVector(&object,&start);MapObject_SetFacingVector(&object,&zero);
+        MapObject_SetCurrentX(&object,688);MapObject_SetCurrentZ(&object,400);MapObject_SetCurrentY(&object,(height>>3)/4096);
+        MapObject_ClearFlagsBits(&object,0x80|0x20);MapObject_SetMovementCommand(&object,bases[family]+d);MapObject_SetMovementStep(&object,0);
+        unsigned ticks=0;int done=0,arc=0;
+        while(!done&&ticks<64){CHECK(hg_motion_script_tick(resources,&object,&done));ticks++;VecFx32 v;MapObject_CopyFacingVector(&object,&v);arc|=v.y>0;}
+        CHECK(done&&ticks==durations[family]);unsigned tiles=family==1||family==4?1:family==3?2:0;
+        CHECK(MapObject_GetXCoord(&object)==688+dx[d]*(int)tiles&&MapObject_GetZCoord(&object)==400+dz[d]*(int)tiles);
+        CHECK((family==3)==arc);VecFx32 v;MapObject_CopyFacingVector(&object,&v);CHECK(!v.x&&!v.y&&!v.z);
+    }
+    for(unsigned command=71;command<=72;command++) {
+        MapObject_SetMovementCommand(&object,command);MapObject_SetMovementStep(&object,0);int done=0;
+        CHECK(hg_motion_script_tick(resources,&object,&done)&&done);CHECK(!!(object.flags&0x80)==(command==71));
+    }
+    CHECK(!hg_motion_script_command(4)&&!hg_motion_script_command(255));
     hg_field_resources_free(resources);
     PlayerAvatar_FreeToHeap(avatar);puts("Original avatar/object state executed");return 0;
 }

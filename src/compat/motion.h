@@ -26,5 +26,6 @@ u16 sub_0203769C(void);
 u32 ov01_021FE7DC(LocalMapObject *,u32,u32,u32,u32);
 void ov01_021F9FB0(MapObjectManager *,void *);
 u16 FieldSystem_VarGetObjectEventGraphicsId(FieldSystem *,u16);
+u16 FieldSystem_VarGet(FieldSystem *,u16);
 BOOL FieldSystem_FlagCheck(FieldSystem *,u16);
 void FieldSystem_FlagSet(FieldSystem *,u16);

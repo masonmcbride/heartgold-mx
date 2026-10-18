@@ -32,7 +32,7 @@ The host retains the viewer's immediate-facing input policy. Transition probing 
 
 A probe stages local-field changes privately and restores the live record and source event context before returning. The host loads the complete destination scene, validates destination terrain height, and only then commits the staged location/events and moves the existing actor. A modified, stale or already-consumed destination cannot commit. Failed selection leaves output unchanged. Failed scene/terrain loading preserves the source scene and local-field state. No duplicate native destination-selection algorithm is used.
 
-The static movement admission policy expands to these eight maps and still requires current and target tiles to belong to the same header. Walking across an outdoor map-header boundary remains unsupported. Terrain/height support remains the existing static provider; dynamic platforms and gym mechanics are excluded. NPC occupancy uses only the inspection player because actual map-event actors are not populated.
+The static movement admission policy expands to these eight maps and still requires current and target tiles to belong to the same header. Walking across an outdoor map-header boundary remains unsupported. Terrain/height support remains the existing static provider; dynamic platforms and gym mechanics are excluded. The subsequent [event actor integration](event-actors.md) adds twelve flag-selected static actors to original occupancy, with staged population replacement during travel. Original initialization/transition hooks now supply visibility; AI and full original reconciliation remain pending.
 
 ## Tested network
 
@@ -51,4 +51,6 @@ The static movement admission policy expands to these eight maps and still requi
 
 The same test discovers collision-checked routes and drives the actual application through a town → player house → town round trip, plus player-house stairs in both directions. It renders the destinations, checks retained step counts and verifies running after return. The AppKit smoke test sends keyboard events through the native canvas, verifies the house round trip without replacing the application, checks camera/map-list synchronization and saves ignored `build/evidence/new-bark-house-travel.png`. That image was visually inspected for the original room, props and player placement.
 
-All 25 CTests pass normally and with ASan/UBSan; the native window smoke test passes. These establish original warp decisions connected to native inspection travel. Full field/game startup, original transition choreography, event-object reconciliation, map-init/story scripts, outdoor header crossings, battles and disk saves remain pending.
+All 27 CTests pass normally and with ASan/UBSan; the native window smoke test passes. These establish original warp decisions connected to native inspection travel. Full field/game startup, original transition choreography, event-object reconciliation, map-init/story scripts, outdoor header crossings, battles and disk saves remain pending.
+
+Travel now stages the [story owner](story-runtime.md), original temporary-record reset and header-selected transition hook before publishing destination actors and local-field state. Failed travel retains the source story; successful travel retains the same owner. Resume/load/frame cutscenes remain separate pending work.

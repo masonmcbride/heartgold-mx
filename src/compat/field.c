@@ -18,8 +18,6 @@ void *AllocAtEndAndReadWholeNarcMemberByIdPair(NarcId archive,s32 member,enum He
 }
 static void unsupported(const char *name) { fprintf(stderr,"Unsupported field boundary: %s\n",name);abort(); }
 void GF_RTC_CopyDate(RTCDate *date) { (void)date;unsupported("calendar/save-dependent map variants"); }
-SaveVarsFlags *Save_VarsFlags_Get(SaveData *s) { (void)s;unsupported("Save_VarsFlags_Get");return NULL; }
-BOOL Save_VarsFlags_CheckFlagInArray(SaveVarsFlags *s,u16 f) { (void)s;(void)f;unsupported("save flags");return FALSE; }
 void sub_02066C1C(SaveVarsFlags *s,s32 f) { (void)s;(void)f;unsupported("save flags"); }
 void sub_02066C4C(SaveVarsFlags *s,s32 f) { (void)s;(void)f;unsupported("save flags"); }
 SafariZone *Save_SafariZone_Get(SaveData *s) { (void)s;unsupported("Safari Zone save");return NULL; }

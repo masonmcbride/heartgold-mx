@@ -1,6 +1,6 @@
 # HeartGold MX
 
-An experimental Apple Silicon build that compiles and executes original Pokémon HeartGold gameplay C with a small compatibility runtime. MX means M-series chips, with X as the variable. The current applications are an interactive inventory and a native searchable map browser; 453 of 540 map entries currently render. Original gameplay C runs natively; original ARM static terrain routines now execute through a bounded Thumb interpreter. New Bark and its seven interiors now support walking, running and door/stair travel through admitted original input, collision, command and warp logic, with native scene presentation. Full original field-controller execution is still incomplete.
+An experimental Apple Silicon build that compiles and executes original Pokémon HeartGold gameplay C with a small compatibility runtime. MX means M-series chips, with X as the variable. The current applications are an interactive inventory and a native searchable map browser; 453 of 540 map entries currently render. Original gameplay C runs natively; original ARM static terrain routines now execute through a bounded Thumb interpreter. New Bark and its seven interiors now support walking, running and door/stair travel through admitted original input, collision, command and warp logic, with native scene presentation. A persistent native story owner now runs original initialization and admitted conditional script handlers. Full original field-controller execution is still incomplete.
 
 See [platform architecture and field integration gates](docs/platform-architecture.md) for reusable DS boundaries, source-verified field relationships and current execution limits. See the [reuse audit](docs/reuse-audit.md) for measured function/import inventory, library and license findings, and the next continuous-gameplay integration sequence.
 
@@ -86,7 +86,7 @@ The cache is process-lifetime and main-thread-only. The font boundary validates 
 
 ## Memory and graphics architecture
 
-Native pointers are 64-bit; DS addresses are 32-bit values. `ds_memory.h` independently demonstrates bounded translation of DS main RAM starting at 0x02000000 into a host 4 MiB buffer. Gameplay currently uses ordinary native pointers and is not routed through that buffer. No low-address mapping or CPU emulation is performed.
+Native pointers are 64-bit; DS addresses are 32-bit values. `ds_memory.h` independently demonstrates bounded translation of DS main RAM starting at 0x02000000 into a host 4 MiB buffer. Gameplay currently uses ordinary native pointers and is not routed through that buffer. Native C gameplay uses ordinary host pointers. Admitted original Thumb routines execute in isolated guest RAM with typed native handles; no low-address host mapping or general CPU/hardware emulation is performed.
 
 Do not truncate native pointers to u32 or cast DS addresses directly to pointers. Fixed low mappings would not solve pointer-containing struct layouts, serialized pointers, assembly, function pointers, or MMIO. Native runtime objects should use native pointers; serialized/resource addresses need explicit 32-bit representations and boundary decoders. Future translated VRAM, palette, and OAM regions can track dirty writes. The current arena does not emulate mirrors, MMIO, DMA, caches, interrupts, or timing.
 
@@ -98,11 +98,11 @@ Do not truncate native pointers to u32 or cast DS addresses directly to pointers
 
 The scene uses the bag overlay's actual resource references: archive `a/0/1/5`, top tiles/palette/map 7/8/94, bottom 46/38/39, and pocket characters/palette/cells/animation 2/3/1/0. Item cell/animation indices come from original item functions. The native layout adds list panels and pocket labels; it is not an exact DS screenshot reproduction. The original bag's 3D model is not rendered.
 
-Current limits include affine OAM matrices, 8bpp, OBJ window/semitransparent modes, cell VRAM-transfer banks, reverse animation playback, and complete BG/OBJ priority/blending semantics. SRT resampling currently uses a 128x128 intermediate cell canvas, suitable for these bag assets. No 3D GX display-list path exists yet. All decoded addresses are file offsets or buffer indices; none are interpreted as host virtual addresses.
+Current limits include affine OAM matrices, 8bpp, OBJ window/semitransparent modes, cell VRAM-transfer banks, reverse animation playback, and complete BG/OBJ priority/blending semantics. SRT resampling currently uses a 128x128 intermediate cell canvas, suitable for these bag assets. There is no complete GX register/MMIO translation path; the later model renderer interprets its admitted model display-list commands. All decoded addresses are file offsets or buffer indices; none are interpreted as host virtual addresses.
 
 ## Tests and verified behavior
 
-Twenty-five CTest checks cover:
+Twenty-seven CTest checks cover:
 
 - original item/bag attributes, healing amount, limits, removal, compaction, sorting, registration, copy, moves, and item ID mappings;
 - DS scalar widths/qualifications and original personal/evolution data layouts, plus bitfield packing;
@@ -114,12 +114,14 @@ Twenty-five CTest checks cover:
 - textured rendering semantics: signed delta/full vertex equivalence, named material/texture/palette binding, addressing, depth order, cutout, alpha blending, shared-edge coverage, camera changes/reset and malformed texture resources;
 - original walk/run command selection, running-shoe/B gating, stateful diagonal input, step statistics, encrypted statistics records and RNG/encryption vectors;
 - all 14 New Bark portal anchors, staged local-field commits, interior movement, town/house and upstairs/downstairs travel with retained player statistics;
+- original event-object initialization, twelve visible NPCs, source metadata, real occupancy and staged population replacement;
+- original new-game flag script, conditional conversations, persistent variables/flags, original forward/backward control flow/frame and movement waits, player-name formatting, empty party query, isolated temporary state/RNG and publication/scene rollback;
 - original task priority/FIFO order, queue capacity/reuse, insertion/removal during dispatch, environment lifetime, four-queue routing, input-state preservation and bounded 60 Hz host timing;
 - original font direct/lazy loading and mode switching, glyph expansion and width measurement, all-item NCER rendering compared with the previous icon decoder, original pocket SRT animations and tilemaps, two-screen rendering and hit testing, and malformed/truncated sprite/animation resources.
 
 Tests keep their checks active in Release. Original ItemSlot and ItemData sizes are checked as 4 and 36 bytes. Those checks do not establish general binary save/SDK ABI compatibility.
 
-The separate graphical smoke test exercises actual buttons, a synthesized keyboard event, table selection, Classic/List switching, screen-coordinate mouse mapping, original item text, and a successfully completed Metal scene draw. The CPU scene preview has also been visually inspected; no original-game screenshot comparison has been performed, and physical controller input remains unverified. All fifteen checks pass normally and with AddressSanitizer + UndefinedBehaviorSanitizer on this host.
+The separate graphical smoke test exercises actual buttons, a synthesized keyboard event, table selection, Classic/List switching, screen-coordinate mouse mapping, original item text, and a successfully completed Metal scene draw. The CPU scene preview has also been visually inspected; no original-game screenshot comparison has been performed, and physical controller input remains unverified. All 27 checks pass normally and with AddressSanitizer + UndefinedBehaviorSanitizer on this host.
 
 Sanitizer checks for C code:
 
@@ -139,7 +141,7 @@ The native map browser now provides search, a scrollable map selector and Previo
 
 ## Repository hygiene
 
-Only our implementation, tests, scripts, CMake configuration, and documentation belong in Git. `upstream/` and `build*/` are ignored, as are common ROM/archive/resource formats. Never commit original source/assets, generated item/message tables, ROMs, SDK components, binaries, or game screenshots. Review staged files as well as ignore rules. The supplied directory has no Git repository, and this implementation creates no commits or Git history. Upstream must remain unmodified.
+Only our implementation, tests, scripts, CMake configuration, and documentation belong in Git. `upstream/` and `build*/` are ignored, as are common ROM/archive/resource formats. Never commit original source/assets, generated item/message tables, ROMs, SDK components, binaries, or game screenshots. Review staged files as well as ignore rules. Upstream must remain unmodified.
 
 ## Process and address isolation
 
@@ -171,9 +173,9 @@ See [docs/map-browser.md](docs/map-browser.md) for the 453/540 rendering audit, 
 
 The native viewer now executes the original overlay manager for its scene lifecycle. [Playable integration](docs/playable-integration.md) distinguishes this application shell from the original field/game loop.
 
-The native viewer also has a **Characters · sprite meshes** category: 182 standard overworld character sprites, including all 16 gym leaders, with search, orbit and zoom. These are original billboard sprite meshes, not full volumetric human models. See [character inspection](docs/character-browser.md).
+The native viewer also has a **Characters · sprite meshes** category: 192 supported overworld character sprites, including all 16 gym leaders, with search, orbit and zoom. These are original billboard sprite meshes, not full volumetric human models. See [character inspection](docs/character-browser.md).
 
 Original `task.c` now executes child/parent field tasks and application waits in the running scene app, on a native timer independent of camera redraws. See [field task runtime](docs/field-task-runtime.md) for execution evidence and the remaining avatar/field-loop boundary.
 
 
-Run `./build/heartgold_field_viewer`, select New Bark (60), click the scene and hold **WASD** to walk or **Shift + WASD** to run. Original collision checks gate each step; release stops movement. The camera follows the player; arrows/drag orbit, scroll or +/− zoom, shift-drag pans, and R recenters. Door and stair travel connects New Bark with its seven interiors, retaining the player and step count. Other maps remain inspection views. Original walking commands now advance the player’s position and static terrain height each tick through their original command tables. Original hero textures animate direction and stepping in a native billboard; pose selection remains native. See [original walking execution](docs/original-walking.md) and [walk/run control and statistics](docs/original-locomotion.md). Face the town or lab sign and press Enter/Space to read its original text; press again to close. See [original transition execution](docs/original-transitions.md) for the eight-map network and source/host boundaries. Original animation-controller execution, NPC population, general story interactions, outdoor header crossings and full game startup remain pending. See [background interaction](docs/field-interaction.md) for original event/script execution and native UI boundaries. See [player movement](docs/player-movement.md) for execution boundaries and tests.
+Run `./build/heartgold_field_viewer`, select New Bark (60), click the scene and hold **WASD** to walk or **Shift + WASD** to run. Original collision checks gate each step; release stops movement. The camera follows the player; arrows/drag orbit, scroll or +/− zoom, shift-drag pans, and R recenters. Door and stair travel connects New Bark with its seven interiors, retaining the player and step count. Other maps remain inspection views. Original walking commands now advance the player’s position and static terrain height each tick through their original command tables. Original hero textures animate direction and stepping in a native billboard; pose selection remains native. See [original walking execution](docs/original-walking.md) and [walk/run control and statistics](docs/original-locomotion.md). Face the town or lab sign and press Enter/Space to read its original text. Professor Elm, the red-haired rival at the window, the breeder, Mom, the town woman, the boy in Elm’s upstairs apartment and the southwest-house woman now use the [persistent script owner](docs/story-runtime.md). The rival’s two messages and original shove/jump movement complete before input resumes; the breeder and player-house sign format the inspection name Ethan. Admitted conditions execute original handlers and state survives travel. Unsupported interactions display a dismissible explanation; Elm’s automatic introductory cutscene and starter selection remain unfinished. Enter/Space advances pages and closes the final page. See [original transition execution](docs/original-transitions.md) for the eight-map network and source/host boundaries. Twelve actors selected by original flags now render and block movement through original occupancy; see [event actor integration](docs/event-actors.md). Original animation-controller execution, NPC AI, general story interactions, outdoor header crossings and full game startup remain pending. See [background interaction](docs/field-interaction.md) for original event/script execution and native UI boundaries. See [player movement](docs/player-movement.md) for execution boundaries and tests.

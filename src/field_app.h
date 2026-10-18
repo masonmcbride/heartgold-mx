@@ -1,5 +1,6 @@
 #pragma once
 #include "field_view.h"
+#include "field_script.h"
 /* Native scene application, driven by the original OverlayManager. Its
  * callbacks are host scene callbacks, not the original FieldMap overlay. */
 typedef struct HGFieldApp HGFieldApp;
@@ -21,6 +22,10 @@ int hg_field_app_presentation(const HGFieldApp *,double world[3],unsigned *frame
 
 void hg_field_app_interact(HGFieldApp *);
 const char *hg_field_app_dialogue(const HGFieldApp *);
+/* Current native page; dialogue() retains the complete original UTF-8 text. */
+const char *hg_field_app_dialogue_page(const HGFieldApp *);
+/* Includes message pages and scripted movement between messages. */
+int hg_field_app_interaction_busy(const HGFieldApp *);
 
 /* Wall-clock-driven simulation, bounded catch-up; first call primes the clock. */
 unsigned hg_field_app_advance(HGFieldApp *,uint64_t monotonic_ns);
@@ -30,3 +35,5 @@ void hg_field_app_clear_input(HGFieldApp *);
 /* Original in-memory step statistic; no disk save is loaded or written. */
 unsigned hg_field_app_steps(const HGFieldApp *);
 unsigned hg_field_app_map(const HGFieldApp *);
+/* Borrowed session owner, retained through native door/stair travel. */
+HGStoryState *hg_field_app_story(HGFieldApp *);

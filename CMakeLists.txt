@@ -109,6 +109,8 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${MATRIX_INPUTS}
  "${HG_UPSTREAM}/files/msgdata/NARC_msg.txt"
  "${HG_UPSTREAM}/files/fielddata/encountdata/gs_enc_data.json")
 add_library(hg_field STATIC "${HG_UPSTREAM}/src/map_matrix.c" "${HG_UPSTREAM}/src/map_header.c" "${HG_UPSTREAM}/src/metatile_behavior.c" src/compat/field.c src/land_data.c src/field_preview.c)
+target_sources(hg_field PRIVATE src/compat/story_records.c)
+target_compile_definitions(hg_field PRIVATE HG_ORIGINAL_SAVE_FLAGS="${HG_UPSTREAM}/src/save_vars_flags.c")
 target_link_libraries(hg_field PUBLIC hg_logic)
 target_include_directories(hg_field PRIVATE "${GEN}/files")
 target_compile_options(hg_field PUBLIC "$<$<COMPILE_LANGUAGE:C>:SHELL:-include \"${CMAKE_SOURCE_DIR}/src/compat/field.h\">")
@@ -186,7 +188,7 @@ target_link_libraries(heartgold_field_viewer PRIVATE hg_field_app)
 target_link_libraries(test_overlays PRIVATE hg_field_app)
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_characters.py" "${HG_UPSTREAM}" "${GEN}" COMMAND_ERROR_IS_FATAL ANY)
 file(GLOB CHARACTER_INPUTS CONFIGURE_DEPENDS "${HG_UPSTREAM}/files/data/mmodel/mmodel/*.NSBMD" "${HG_UPSTREAM}/files/data/mmodel/mmodel/*.NSBTX")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CHARACTER_INPUTS} "${CMAKE_SOURCE_DIR}/scripts/prepare_characters.py" "${HG_UPSTREAM}/include/constants/mmodel.h" "${HG_UPSTREAM}/asm/overlay_01_sprite_data.s")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CHARACTER_INPUTS} "${CMAKE_SOURCE_DIR}/scripts/prepare_characters.py" "${HG_UPSTREAM}/include/constants/mmodel.h" "${HG_UPSTREAM}/include/constants/sprites.h" "${HG_UPSTREAM}/asm/overlay_01_sprite_data.s")
 add_executable(test_characters tests/test_characters.c)
 target_link_libraries(test_characters PRIVATE hg_field_view)
 add_test(NAME character_sprite_catalog COMMAND test_characters)
@@ -206,13 +208,15 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_D
   "${HG_UPSTREAM}/include/field_types_def.h" "${HG_UPSTREAM}/include/map_events.h" "${HG_UPSTREAM}/include/save_local_field_data.h"
   "${HG_UPSTREAM}/src/map_events.c" "${HG_UPSTREAM}/src/save_local_field_data.c"
   "${HG_UPSTREAM}/src/field/field_control.c" "${HG_UPSTREAM}/src/field_warp_tasks.c")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/prepare_motion.py" "${HG_UPSTREAM}/include/map_events_internal.h")
-add_library(hg_motion STATIC "${HG_UPSTREAM}/src/map_object.c" "${HG_UPSTREAM}/src/player_avatar.c")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/prepare_motion.py" "${HG_UPSTREAM}/include/map_events_internal.h" "${HG_UPSTREAM}/include/map_object.h")
+add_library(hg_motion STATIC src/compat/map_objects.c "${HG_UPSTREAM}/src/player_avatar.c")
+target_compile_definitions(hg_motion PRIVATE HG_ORIGINAL_MAP_OBJECT="${HG_UPSTREAM}/src/map_object.c")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HG_UPSTREAM}/src/map_object.c")
 target_sources(hg_motion PRIVATE src/field_transition.c "${HG_UPSTREAM}/src/save_local_field_data.c")
 target_compile_definitions(hg_motion PRIVATE HG_ORIGINAL_MAP_EVENTS="${HG_UPSTREAM}/src/map_events.c")
 set_property(SOURCE "${HG_UPSTREAM}/src/save_local_field_data.c" APPEND PROPERTY COMPILE_OPTIONS
   -include "${CMAKE_SOURCE_DIR}/src/compat/transitions.h")
-target_link_libraries(hg_motion PUBLIC hg_field_tasks hg_props)
+target_link_libraries(hg_motion PUBLIC hg_field_tasks hg_props hg_field_view)
 target_compile_options(hg_motion PRIVATE "$<$<COMPILE_LANGUAGE:C>:SHELL:-include \"${CMAKE_SOURCE_DIR}/src/compat/motion.h\">")
 add_executable(test_motion tests/test_motion.c)
 target_compile_options(test_motion PRIVATE "$<$<COMPILE_LANGUAGE:C>:SHELL:-include \"${CMAKE_SOURCE_DIR}/src/compat/motion.h\">")
@@ -232,6 +236,9 @@ add_test(NAME original_locomotion_controller COMMAND test_locomotion)
 add_executable(test_transitions tests/test_transitions.c)
 target_link_libraries(test_transitions PRIVATE hg_field_app hg_motion)
 add_test(NAME original_field_transitions COMMAND test_transitions)
+add_executable(test_actors tests/test_actors.c)
+target_link_libraries(test_actors PRIVATE hg_field_app hg_motion)
+add_test(NAME original_event_actors COMMAND test_actors)
 add_test(NAME original_motion_state COMMAND test_motion)
 
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_field_guest.py" "${HG_UPSTREAM}" "${GEN}" "${CMAKE_C_COMPILER}" COMMAND_ERROR_IS_FATAL ANY)
@@ -251,17 +258,31 @@ target_link_libraries(hg_field_app PRIVATE hg_motion)
 
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_interaction.py" "${HG_UPSTREAM}" "${GEN}" "${CMAKE_C_COMPILER}" COMMAND_ERROR_IS_FATAL ANY)
 file(GLOB HG_EVENT_INPUTS CONFIGURE_DEPENDS "${HG_UPSTREAM}/files/fielddata/eventdata/zone_event/*.json" "${HG_UPSTREAM}/files/fielddata/script/scr_seq/event_*.h")
+file(GLOB HG_LOCAL_SCRIPT_INPUTS CONFIGURE_DEPENDS "${HG_UPSTREAM}/files/fielddata/script/scr_seq/scr_seq_*_T20*.s" "${HG_UPSTREAM}/files/msgdata/msg/msg_*_T20*.json")
 file(GLOB_RECURSE HG_JSONPROC_INPUTS CONFIGURE_DEPENDS "${HG_UPSTREAM}/tools/jsonproc/*.h" "${HG_UPSTREAM}/tools/jsonproc/*.hpp" "${HG_UPSTREAM}/tools/jsonproc/*.cpp")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${HG_EVENT_INPUTS} ${HG_JSONPROC_INPUTS}
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${HG_EVENT_INPUTS} ${HG_JSONPROC_INPUTS} ${HG_LOCAL_SCRIPT_INPUTS}
   "${HG_UPSTREAM}/files/fielddata/eventdata/zone_event.json.txt"
   "${HG_UPSTREAM}/asm/macros/script.inc" "${HG_UPSTREAM}/asm/macros/movement.inc"
   "${CMAKE_SOURCE_DIR}/scripts/prepare_interaction.py" "${CMAKE_SOURCE_DIR}/scripts/narc_tools.py"
   "${HG_UPSTREAM}/include/script.h" "${HG_UPSTREAM}/asm/unk_0203DB6C.s"
   "${HG_UPSTREAM}/files/fielddata/script/scr_seq/scr_seq_0842_T20.s"
   "${HG_UPSTREAM}/files/msgdata/msg/msg_0542_T20.json")
-add_library(hg_script STATIC "${HG_UPSTREAM}/src/script.c" src/sign_script.c)
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_script_kernel.py" "${HG_UPSTREAM}" "${GEN}" COMMAND_ERROR_IS_FATAL ANY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/prepare_script_kernel.py"
+  "${HG_UPSTREAM}/src/script_manager.c" "${HG_UPSTREAM}/src/scrcmd_c.c" "${HG_UPSTREAM}/src/sys_vars.c"
+  "${HG_UPSTREAM}/src/scrcmd_lottery.c" "${HG_UPSTREAM}/src/player_data.c" "${HG_UPSTREAM}/src/scrcmd_17.c"
+  "${HG_UPSTREAM}/src/party.c" "${HG_UPSTREAM}/src/scrcmd_party.c"
+  "${HG_UPSTREAM}/src/scrcmd_strbuf.c"
+  "${HG_UPSTREAM}/include/script.h" "${HG_UPSTREAM}/include/scrcmd.h" "${HG_UPSTREAM}/include/player_data.h"
+  "${HG_UPSTREAM}/include/save_vars_flags.h" "${HG_UPSTREAM}/src/save_vars_flags.c" "${HG_UPSTREAM}/src/data/fieldmap/script_cmd_table.h"
+  "${HG_UPSTREAM}/files/fielddata/script/scr_seq/scr_seq_0149.s" "${HG_UPSTREAM}/files/msgdata/msg/msg_0040.json")
+add_library(hg_script STATIC "${HG_UPSTREAM}/src/script.c" src/sign_script.c src/field_script.c)
 target_link_libraries(hg_script PUBLIC hg_field)
+target_link_libraries(hg_script PRIVATE hg_stats)
 target_compile_options(hg_script PRIVATE "$<$<COMPILE_LANGUAGE:C>:SHELL:-include \"${CMAKE_SOURCE_DIR}/src/compat/script.h\">")
+add_executable(test_story tests/test_story.c)
+target_link_libraries(test_story PRIVATE hg_script hg_stats)
+add_test(NAME original_story_runtime COMMAND test_story)
 target_sources(hg_field PRIVATE src/field_events.c)
 target_link_libraries(hg_motion PUBLIC hg_script)
 

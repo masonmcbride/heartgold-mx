@@ -17,6 +17,11 @@ int main(int argc,char **argv) {
     FontData_ModeSwitch(lazy,FONTARC_MODE_DIRECT,HEAP_ID_DEFAULT);TryLoadGlyph(lazy,299,&b);CHECK(!memcmp(&a,&b,sizeof(a)));
     FontData_Delete(direct);FontData_Delete(lazy);
     HGFont *font=hg_font_new();CHECK(font);CHECK(hg_font_width(font,"Ai é")==19);CHECK(hg_font_width(font,"")==0);
+    CHECK(hg_font_page_end(font,"One\rTwo",236,2)==4);
+    CHECK(hg_font_page_end(font,"A\nB\nC",236,2)==4);
+    CHECK(hg_font_page_end(font,"éé",hg_font_width(font,"é"),1)==2);
+    CHECK(hg_font_page_end(font,"éé",hg_font_width(font,"é"),2)==4);
+    CHECK(hg_font_page_end(font,"",236,2)==0&&!hg_font_page_end(font,"A",0,2));
     uint8_t *canvas=calloc(256*192,4);CHECK(canvas);hg_font_draw(font,"Poké Ball",canvas,256,192,4,4,240,0x303030,0xb0b0b0);
     unsigned ink=0;for(unsigned i=3;i<256*192*4;i+=4)ink+=canvas[i]!=0;CHECK(ink>80 && ink<1000);hg_font_free(font);
     DSBlob chars=member(NARC_itemtool_itemdata_item_icon,4),pal=member(NARC_itemtool_itemdata_item_icon,5),cells=member(NARC_itemtool_itemdata_item_icon,1),anim=member(NARC_itemtool_itemdata_item_icon,0);

@@ -31,6 +31,23 @@ static uint16_t next_glyph(const char **text) {
 unsigned hg_font_width(HGFont *f,const char *text) {
     unsigned width=0,max=0;while(*text) { u16 glyph=next_glyph(&text);if(glyph==CHAR_LF) { if(width>max)max=width;width=0; }else width+=GetGlyphWidth(f->data,glyph); }return width>max?width:max;
 }
+size_t hg_font_page_end(HGFont *f,const char *text,unsigned max_width,unsigned lines) {
+    if(!f||!text||!max_width||!lines)return 0;
+    const char *cursor=text;unsigned width=0,line=1;
+    while(*cursor) {
+        if(*cursor=='\r')return (size_t)(cursor-text)+1;
+        const char *next=cursor;u16 glyph=next_glyph(&next);
+        if(glyph==CHAR_LF) {
+            cursor=next;if(line==lines)break;line++;width=0;continue;
+        }
+        unsigned advance=GetGlyphWidth(f->data,glyph);
+        if(width&&advance>max_width-width) { if(line==lines)break;line++;width=0; }
+        /* Match draw's admitted oversized-first-glyph behavior while keeping
+         * subtraction bounded on the next iteration. */
+        width=advance>max_width-width?max_width:width+advance;cursor=next;
+    }
+    return (size_t)(cursor-text);
+}
 static void write_color(uint8_t *dst,uint32_t c) { dst[0]=(uint8_t)(c>>16);dst[1]=(uint8_t)(c>>8);dst[2]=(uint8_t)c;dst[3]=255; }
 void hg_font_draw(HGFont *f,const char *text,uint8_t *out,unsigned w,unsigned h,int x,int y,unsigned max_width,uint32_t fg,uint32_t shadow) {
     if(!w || !h || w>256 || h>192 || x<0 || y<0 || (unsigned)x>=w || (unsigned)y>=h || !max_width)return;

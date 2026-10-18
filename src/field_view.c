@@ -9,6 +9,7 @@
 #include "field_names.inc"
 #include "character_names.inc"
 #include "character_supported.inc"
+#include "character_sprites.inc"
 #include <stdarg.h>
 struct HGFieldView {
     DSRasterTriangle *triangles;size_t count,capacity;
@@ -136,10 +137,10 @@ size_t hg_field_view_triangles(const HGFieldView *v) { return v?v->count:0; }
 
 unsigned hg_character_count(void) { return 266; }
 const char *hg_character_name(unsigned id) { return id<266 && character_names[id]?character_names[id]:"Unnamed resource"; }
-static HGFieldView *character_load(unsigned id,char *error,size_t size,int player) {
+static HGFieldView *character_load(unsigned id,char *error,size_t size,int player,unsigned frame) {
     if(error && size)error[0]=0;
     if(id>=266)return load_error(error,size,"Invalid character ID");
-    if(!character_supported[id] && !(player && id==69))return load_error(error,size,"Specialized sprite template is not supported yet");
+    if(!character_supported[id] && !(player && character_type7[id]))return load_error(error,size,"Specialized sprite template is not supported yet");
     const uint8_t *mesh,*texture;size_t mesh_size,texture_size;DSModel model;DSTextureBank bank;
     if(!native_resource_member(NARC_data_mmodel_mmodel,0,player?272:266,&mesh,&mesh_size) || !ds_model_open(mesh,mesh_size,0,&model) ||
        !native_resource_member(NARC_data_mmodel_mmodel,0,(int)id,&texture,&texture_size) || !ds_texture_bank(texture,texture_size,&bank))
@@ -152,30 +153,58 @@ static HGFieldView *character_load(unsigned id,char *error,size_t size,int playe
         const char *suffix=strrchr(texture_name,'.');if(suffix && !strcmp(suffix,".5")) { found=1;break; }
     }
     if(!found)found=ds_texture_name(&bank,0,0,texture_name);
+    if(found&&frame) {
+        char *suffix=strrchr(texture_name,'.');
+        if(!suffix)found=0;
+        else { size_t offset=(size_t)(suffix-texture_name);int written=snprintf(suffix,sizeof(texture_name)-offset,".%u",frame);
+            if(written<0||(size_t)written>=sizeof(texture_name)-offset)found=0; }
+    }
     if(!found || !ds_texture_name(&bank,0,1,palette_name)) { hg_field_view_free(view);return load_error(error,size,"Missing character frame/palette"); }
     for(unsigned i=0;i<model.materials;i++) {
         DSModelMaterial mat;if(!ds_model_material(&model,i,&mat) || !ds_texture_find(&bank,texture_name,palette_name,&view->materials[i].texture)) {
             hg_field_view_free(view);return load_error(error,size,"Unsupported character texture");
         }
         view->materials[i].polygon=mat.polygon_attrs;view->materials[i].params=mat.texture_params;view->materials[i].textured=1;
-        /* Hero frames center their 16-pixel body in a 32-pixel texture. The
-         * type-7 mesh spans U=0..16; bind the center strip at this boundary. */
-        if(player)view->materials[i].uv_u=8;
     }
-    if(player)for(unsigned i=1;i<=32;i++) {
+    if(player==1)for(unsigned i=1;i<=32;i++) {
         char name[17];snprintf(name,sizeof(name),"hero.%u",i);
-        if(!ds_texture_find(&bank,name,palette_name,&view->player_frames[i-1])) {
+        if(!ds_texture_find(&bank,name,palette_name,&view->player_frames[i-1])||
+           view->player_frames[i-1].width!=view->materials[0].texture.width||
+           view->player_frames[i-1].height!=view->materials[0].texture.height) {
             hg_field_view_free(view);return load_error(error,size,"Missing hero frame %u",i);
         }
     }
     if(!ds_model_inspection_scene(&model,collect,view,&stats) || view->failed || !view->count) {
         load_error(error,size,"Character mesh/material unsupported: %s",view->failure);hg_field_view_free(view);return NULL;
     }
+    if(player) {
+        /* The native billboard used to crop type-7 textures to their center
+         * 16 columns. Sideways hats/arms extend outside that strip. Expand the
+         * horizontal canvas and UV span together: retain texel scale, original
+         * height and centered pivot, including transparent frame padding. */
+        double lo=view->triangles[0].v[0].u,hi=lo;
+        for(size_t i=0;i<view->count;i++)for(unsigned j=0;j<3;j++) {
+            double u=view->triangles[i].v[j].u;if(u<lo)lo=u;if(u>hi)hi=u;
+        }
+        if(hi<=lo){hg_field_view_free(view);return load_error(error,size,"Invalid sprite UV span");}
+        double scale=view->materials[0].texture.width/(hi-lo),center=(view->min[0]+view->max[0])/2;
+        for(size_t i=0;i<view->count;i++)for(unsigned j=0;j<3;j++) {
+            DSSceneVertex *vertex=&view->triangles[i].v[j];
+            vertex->x=center+(vertex->x-center)*scale;vertex->u=(vertex->u-lo)*scale;
+        }
+        view->min[0]=center+(view->min[0]-center)*scale;view->max[0]=center+(view->max[0]-center)*scale;
+    }
     return view;
 }
 
-HGFieldView *hg_character_view_load(unsigned id,char *error,size_t size) { return character_load(id,error,size,0); }
-HGFieldView *hg_player_sprite_load(char *error,size_t size) { return character_load(69,error,size,1); }
+HGFieldView *hg_character_view_load(unsigned id,char *error,size_t size) { return character_load(id,error,size,id<266&&character_type7[id]?2:0,0); }
+HGFieldView *hg_player_sprite_load(char *error,size_t size) { return character_load(69,error,size,1,0); }
+HGFieldView *hg_character_sprite_load(unsigned sprite,unsigned direction,char *error,size_t size) {
+    if(direction>3)return load_error(error,size,"Invalid sprite direction %u",direction);
+    for(unsigned i=0;i<NELEMS(character_sprites);i++)if(character_sprites[i].sprite==sprite)
+        return character_load(character_sprites[i].model,error,size,character_sprites[i].kind==7?2:0,1+4*direction);
+    return load_error(error,size,"Event sprite %u requires an unsupported template or graphics variable",sprite);
+}
 int hg_player_sprite_frame(HGFieldView *sprite,unsigned frame) {
     if(!sprite||frame<1||frame>32||!sprite->player_frames[frame-1].texels)return 0;
     for(unsigned i=0;i<sprite->material_count;i++)sprite->materials[i].texture=sprite->player_frames[frame-1];
@@ -183,21 +212,35 @@ int hg_player_sprite_frame(HGFieldView *sprite,unsigned frame) {
 }
 int hg_field_view_render_player(const HGFieldView *v,const HGFieldView *sprite,const double world[3],
                                const DSCamera *camera,uint8_t *out,unsigned w,unsigned h) {
-    if(!v||!sprite||!world||!camera)return 0;
-    size_t count=v->count+sprite->count;unsigned materials=v->material_count+sprite->material_count;
+    if(!world)return 0;HGFieldBillboard actor={.sprite=sprite};memcpy(actor.world,world,sizeof(actor.world));
+    return hg_field_view_render_actors(v,&actor,1,camera,out,w,h);
+}
+int hg_field_view_render_actors(const HGFieldView *v,const HGFieldBillboard *actors,size_t actor_count,
+                               const DSCamera *camera,uint8_t *out,unsigned w,unsigned h) {
+    if(!v||(!actors&&actor_count)||actor_count>64||!camera)return 0;
+    size_t count=v->count;unsigned materials=v->material_count;
+    for(size_t a=0;a<actor_count;a++) {
+        const HGFieldView *sprite=actors[a].sprite;
+        if(!sprite||!sprite->count||sprite->max[0]<=sprite->min[0]||sprite->max[1]<=sprite->min[1])return 0;
+        for(unsigned j=0;j<3;j++)if(!isfinite(actors[a].world[j]))return 0;
+        count+=sprite->count;materials+=sprite->material_count;
+    }
     DSRasterTriangle *tri=malloc(count*sizeof(*tri));DSRasterMaterial *mat=malloc(materials*sizeof(*mat));
     if(!tri||!mat){free(tri);free(mat);return 0;}
     memcpy(tri,v->triangles,v->count*sizeof(*tri));memcpy(mat,v->materials,v->material_count*sizeof(*mat));
-    memcpy(mat+v->material_count,sprite->materials,sprite->material_count*sizeof(*mat));
-    double width=sprite->max[0]-sprite->min[0],height=sprite->max[1]-sprite->min[1];
-    if(width<=0||height<=0){free(tri);free(mat);return 0;}
-    for(size_t i=0;i<sprite->count;i++)for(unsigned j=0;j<3;j++) {
-        DSSceneVertex vertex=sprite->triangles[i].v[j];
-        double x=(vertex.x-(sprite->min[0]+sprite->max[0])/2)*16/width;
-        vertex.x=world[0]-v->world_origin[0]+cos(camera->yaw)*x;
-        vertex.z=world[2]-v->world_origin[2]-sin(camera->yaw)*x;
-        vertex.y=world[1]+(vertex.y-sprite->min[1])*34/height+0.1;
-        vertex.material+=v->material_count;tri[v->count+i].v[j]=vertex;
+    size_t triangle_base=v->count;unsigned material_base=v->material_count;
+    for(size_t a=0;a<actor_count;a++) {
+        const HGFieldView *sprite=actors[a].sprite;const double *world=actors[a].world;
+        memcpy(mat+material_base,sprite->materials,sprite->material_count*sizeof(*mat));
+        for(size_t i=0;i<sprite->count;i++)for(unsigned j=0;j<3;j++) {
+            DSSceneVertex vertex=sprite->triangles[i].v[j];
+            double x=vertex.x-(sprite->min[0]+sprite->max[0])/2;
+            vertex.x=world[0]-v->world_origin[0]+cos(camera->yaw)*x;
+            vertex.z=world[2]-v->world_origin[2]-sin(camera->yaw)*x;
+            vertex.y=world[1]+vertex.y-sprite->min[1]+0.1;
+            vertex.material+=material_base;tri[triangle_base+i].v[j]=vertex;
+        }
+        triangle_base+=sprite->count;material_base+=sprite->material_count;
     }
     int ok=ds_raster_draw(tri,count,mat,materials,camera,out,w,h);free(tri);free(mat);return ok;
 }

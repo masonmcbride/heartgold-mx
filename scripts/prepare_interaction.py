@@ -56,19 +56,35 @@ for offset in range(symtab[4],symtab[4]+symtab[5],symtab[9]):
   members[int(text[9:])]=b'' if bad else member
 assert sorted(members)==list(range(len(inputs)))
 pack(resources/'zone_event.narc',[members[i] for i in range(len(inputs))])
-messages=json.loads((root/'files/msgdata/msg/msg_0542_T20.json').read_text())['messages']
-p=out/'msgdata/msg/msg_0542_T20.h';p.parent.mkdir(parents=True,exist_ok=True)
-p.write_text(''.join(f'#define {m["id"]} {i}\n' for i,m in enumerate(messages)))
-texts=[''.join(m['en_US']) if isinstance(m['en_US'],list) else m['en_US'] for m in messages]
-pack(resources/'msg_0542.narc',[t.encode()+b'\0' for t in texts])
-script=root/'files/fielddata/script/scr_seq/scr_seq_0842_T20.s'
-data=assemble(script,out/'t20_script.o');table,content,name=sections(data)
-bytecode=content(next(s for s in table if name(s[0])=='.text'))
-(resources/'t20_script.bin').write_bytes(bytecode)
+banks=[];headers=[];script_members={}
+scripts=sorted((root/'files/fielddata/script/scr_seq').glob('scr_seq_*_T20*.s'))
+scripts.append(root/'files/fielddata/script/scr_seq/scr_seq_0149.s')
+for script in scripts:
+ source=script.read_text();bank=int(script.stem.split('_')[2])
+ if script.stem.endswith('_hdr'):
+  data=assemble(script,out/f'field_header_{bank:04}.o');table,content,name=sections(data)
+  bytecode=content(next(s for s in table if name(s[0])=='.text'));script_members[bank]=bytecode
+  headers.append({'bank':bank,'source':str(script),'source_sha256':hashlib.sha256(script.read_bytes()).hexdigest(),'bytes':len(bytecode)})
+  continue
+ message_name=re.search(r'#include "msgdata/msg/(msg_\d+(?:_[^"]+)?)\.h"',source)[1]
+ messages=json.loads((root/'files/msgdata/msg'/f'{message_name}.json').read_text())['messages']
+ group=int(message_name.split('_')[1]);p=out/'msgdata/msg'/f'{message_name}.h';p.parent.mkdir(parents=True,exist_ok=True)
+ p.write_text(''.join(f'#define {m["id"]} {i}\n' for i,m in enumerate(messages)))
+ texts=[''.join(m.get('en_US','')) if isinstance(m.get('en_US',''),list) else m.get('en_US','') for m in messages]
+ pack(resources/f'msg_{group:04}.narc',[t.encode()+b'\0' for t in texts])
+ data=assemble(script,out/f'field_script_{bank:04}.o');table,content,name=sections(data)
+ bytecode=content(next(s for s in table if name(s[0])=='.text'))
+ script_members[bank]=bytecode
+ (resources/f'field_script_{bank:04}.bin').write_bytes(bytecode)
+ banks.append({'bank':bank,'entries':len(re.findall(r'^\s*ScrDef\s+\w+',source,re.M)),
+  'script_source':str(script),'script_source_sha256':hashlib.sha256(script.read_bytes()).hexdigest(),
+  'script_sha256':hashlib.sha256(bytecode).hexdigest(),'bytes':len(bytecode),'message_bank':group})
+(out/'field_script_banks.inc').write_text('static const struct { unsigned bank,entries; } field_script_banks[] = {\n'+''.join(f'{{{b["bank"]},{b["entries"]}}},\n' for b in banks)+'};\n')
+pack(resources/'field_scripts.narc',[script_members.get(i,b'') for i in range(max(script_members)+1)])
 # Keep original ScriptContext declaration/API without unrelated SDK headers.
 text=(root/'include/script.h').read_text()
 context=re.search(r'struct ScriptContext \{.*?\n\};',text,re.S)[0]
 prototypes=text[text.index('void InitScriptContext'):text.index('\n#endif',text.index('void InitScriptContext'))]
 (out/'script_types.inc').write_text('typedef struct ScriptContext ScriptContext;\ntypedef BOOL (*ScrCmdFunc)(ScriptContext *);\n'+context+'\n'+prototypes+'\n')
-(out/'interaction_provenance.json').write_text(json.dumps({'event_members':len(inputs),'unsupported_event_members':[i for i,m in members.items() if not m],'event_sources':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs},'script_source':str(script),'script_source_sha256':hashlib.sha256(script.read_bytes()).hexdigest(),'script_sha256':hashlib.sha256(bytecode).hexdigest()},indent=2)+'\n')
-print(f'Original event data: {len(inputs)} members; New Bark script: {len(bytecode)} bytes')
+(out/'interaction_provenance.json').write_text(json.dumps({'event_members':len(inputs),'unsupported_event_members':[i for i,m in members.items() if not m],'event_sources':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs},'script_banks':banks,'header_banks':headers},indent=2)+'\n')
+print(f'Original event data: {len(inputs)} members; {len(banks)} local script banks')
