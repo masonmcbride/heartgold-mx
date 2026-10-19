@@ -7,9 +7,13 @@
 typedef struct HGFieldPlayer HGFieldPlayer;
 HGFieldPlayer *hg_field_player_new(void);
 HGFieldPlayer *hg_field_player_new_map(unsigned map);
+HGFieldPlayer *hg_field_player_new_game(void);
 void hg_field_player_free(HGFieldPlayer *);
 /* Admit one ordinary walk/run. Original commands advance it on tick. */
 int hg_field_player_move(HGFieldPlayer *,uint16_t keys);
+int hg_field_player_pending_map(const HGFieldPlayer *);
+int hg_field_player_commit_zone(HGFieldPlayer *);
+void hg_field_player_cancel_step(HGFieldPlayer *);
 int hg_field_player_walking(const HGFieldPlayer *);
 int hg_field_player_running(const HGFieldPlayer *);
 unsigned hg_field_player_steps(const HGFieldPlayer *);
@@ -34,6 +38,7 @@ int hg_field_player_probe_transition(HGFieldPlayer *,uint16_t,HGWarpDestination 
 int hg_field_player_transition(HGFieldPlayer *,const HGWarpDestination *);
 typedef struct {
     unsigned id,sprite,movement,script,direction;int x,z;
+    int hidden;int emote;double emote_offset;
     HGFieldBillboard billboard;
 } HGFieldActor;
 typedef struct { unsigned events,active,conditional,unsupported; } HGFieldActorCounts;
@@ -41,3 +46,33 @@ typedef struct { unsigned events,active,conditional,unsupported; } HGFieldActorC
  * Borrowed sprite lifetime ends at facing changes, travel or destruction. */
 HGFieldActorCounts hg_field_player_actor_counts(const HGFieldPlayer *);
 int hg_field_player_actor(const HGFieldPlayer *,unsigned index,HGFieldActor *);
+
+const HGFieldView *hg_field_player_props(const HGFieldPlayer *);
+unsigned hg_field_player_prop_count(const HGFieldPlayer *);
+
+/* Admitted coordinate scheduling: 1 started, 0 no event, -1 rejected. */
+int hg_field_player_coordinate_begin(HGFieldPlayer *);
+/* Check original header frame conditions before accepting field input.
+ * Rejected conditions retry only after story state changes or map travel. */
+int hg_field_player_frame_begin(HGFieldPlayer *);
+
+#include "compat/starter.h"
+int hg_field_player_starter_pending(const HGFieldPlayer *);
+int hg_field_player_starter_option(HGFieldPlayer *,unsigned,HGStarterOption *);
+int hg_field_player_choose_starter(HGFieldPlayer *,unsigned);
+double hg_field_player_starter_fade(const HGFieldPlayer *);
+
+int hg_field_player_menu_pending(const HGFieldPlayer *);
+int hg_field_player_menu_choose(HGFieldPlayer *,unsigned);
+int hg_field_player_menu_choice_supported(HGFieldPlayer *,unsigned);
+
+int hg_field_player_follower(const HGFieldPlayer *,unsigned *,int *,int *);
+
+int hg_field_player_present_props(const HGFieldPlayer *,HGFieldView *);
+
+int hg_field_player_running_shoes(const HGFieldPlayer *);
+
+/* Scenery/player-only session; original terrain motion and portals, no story/NPCs. */
+HGFieldPlayer *hg_field_player_new_explore(unsigned map);
+
+int hg_field_player_brightness(const HGFieldPlayer *);

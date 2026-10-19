@@ -7,11 +7,15 @@ from narc_tools import pack
 icons={int(p.stem.rsplit('_',1)[1]):p.read_bytes() for p in (root/'files/itemtool/itemdata/item_icon').glob('item_icon_*') if p.suffix in ('.NCGR','.NCLR','.NCER','.NANR')}
 if set(icons)!=set(range(max(icons)+1)):raise ValueError('Icon archive has gaps')
 pack(out/'item_icon.narc',[icons[i] for i in range(len(icons))])
-for group in (221,222,251):
-    messages=json.loads((root/f'files/msgdata/msg/msg_{group:04}.json').read_text())['messages']
+message_groups=set()
+for source in sorted((root/'files/msgdata/msg').glob('msg_*.json')):
+    group=int(source.stem.split('_')[1])
+    if group in message_groups:raise ValueError('Duplicate original message bank')
+    message_groups.add(group)
+    messages=json.loads(source.read_text())['messages']
     members=[]
+    if len({m['id'] for m in messages})!=len(messages):raise ValueError('Duplicate message identifiers')
     for index,message in enumerate(messages):
-        if int(message['id'].rsplit('_',1)[1])!=index:raise ValueError('Message order changed')
         text=message.get('en_US','');text=''.join(text) if isinstance(text,list) else text
         members.append(text.encode('utf-8')+b'\0')
     pack(out/f'msg_{group:04}.narc',members)

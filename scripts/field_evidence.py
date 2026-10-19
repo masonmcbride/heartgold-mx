@@ -79,11 +79,11 @@ def main():
     counts=resolve_trace(events,symbols,base,graph,manifest)
     implemented=set(manifest['native_boundaries']);unsupported=set(manifest['unsupported_boundaries'])
     external={call for value in graph.values() for call in value['calls'] if call not in graph}
-    # Assertions are precondition failures, not an implementation of game behavior.
-    if unknown:=external-implemented-unsupported-{'abort'}:raise ValueError(f'Unclassified boundary contracts: {unknown}')
+    # Assertions and their host diagnostics are precondition failures, not game behavior.
+    if unknown:=external-implemented-unsupported-{'abort','fprintf'}:raise ValueError(f'Unclassified boundary contracts: {unknown}')
     def blockers(name,seen=frozenset()):
         if name in seen:return set()
-        if name not in graph:return {name} if name not in implemented and name!='abort' else set()
+        if name not in graph:return {name} if name not in implemented and name not in {'abort','fprintf'} else set()
         result=set()
         for call in graph[name]['calls']:result|=blockers(call,seen|{name})
         return result

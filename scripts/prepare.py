@@ -1,7 +1,25 @@
 #!/usr/bin/env python3
 """Generate private build inputs without modifying the local upstream checkout."""
-import csv, pathlib, re, sys
+import csv, hashlib, json, pathlib, re, sys
 root, out = map(pathlib.Path, sys.argv[1:])
+# Match upstream msgenc Json::WriteHeader's ordinal IDs for every message
+# bank. Both include spellings occur upstream. No message text is emitted.
+message_inputs = {}
+for source in sorted((root/'files/msgdata/msg').glob('*.json')):
+    messages = json.loads(source.read_text())['messages']
+    ids = [message['id'] for message in messages]
+    if len(ids) != len(set(ids)) or any(not re.fullmatch(r'[A-Za-z_]\w*', name) for name in ids):
+        raise ValueError(f'Invalid or duplicate message identifiers: {source}')
+    definitions = ''.join(f'#define {name} {i}\n' for i, name in enumerate(ids))
+    guard = 'HG_GENERATED_' + source.stem.upper() + '_H'
+    header = f'#ifndef {guard}\n#define {guard}\n' + definitions + '#endif\n'
+    for prefix in ('msgdata/msg', 'files/msgdata/msg'):
+        dest = out/prefix/(source.stem+'.h')
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(header)
+    message_inputs[source.relative_to(root).as_posix()] = hashlib.sha256(source.read_bytes()).hexdigest()
+(out/'message_indices_provenance.json').write_text(json.dumps({'sources':message_inputs, 'banks':len(message_inputs)}, indent=2)+'\n')
+(out/'message_bank_count.inc').write_text('#define HG_MESSAGE_BANK_COUNT '+str(1+max(int(pathlib.Path(p).stem.split('_')[1]) for p in message_inputs))+'\n')
 text = (root / 'src/item.c').read_text()
 for name in ('item_data', 'item_icon'):
     dest = out / 'files/itemtool/itemdata' / (name + '.naix')

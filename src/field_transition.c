@@ -5,6 +5,8 @@
 #include "motion_guest.h"
 #include "metatile_behavior.h"
 #include "constants/maps.h"
+#include "map_header.h"
+#include "compat/resources.h"
 #include HG_ORIGINAL_MAP_EVENTS
 _Static_assert(sizeof(BgEvent)==20&&sizeof(ObjectEvent)==32&&sizeof(WarpEvent)==12&&sizeof(CoordEvent)==16,"Native event record widths differ from validated disk arrays");
 u16 GetMomSpawnId(void) { return (u16)hg_field_guest_mom_spawn(); }
@@ -17,7 +19,15 @@ struct HGTransition {
     HGWarpDestination request;int requested,failed;
     uint8_t *pending_local,*pending_source;int pending,pending_x,pending_z;
 };
-int hg_transition_supported(unsigned map) { return (map>=60&&map<=66)||map==384; }
+int hg_transition_supported(unsigned map) {
+    if(map>=MAP_ID_MAX)return 0;
+    static signed char cached[MAP_ID_MAX];if(cached[map])return cached[map]>0;
+    const uint8_t *bytes;size_t size;HGEventView events;
+    int ready=hg_event_load(map,&events)&&
+        native_resource_member(NARC_fielddata_script_scr_seq,0,MapHeader_GetScriptsBank(map),&bytes,&size)&&size&&
+        native_resource_member(NARC_fielddata_script_scr_seq,0,MapHeader_GetScriptHeaderBank(map),&bytes,&size)&&size;
+    cached[map]=ready?1:-1;return ready;
+}
 static HGTransition *owner(FieldSystem *field) { return (HGTransition *)((char *)field-(size_t)offsetof(HGTransition,field)); }
 static LocalFieldData *native_local(SaveData *save) { return ((HGTransition *)(void *)save)->local; }
 static int load_events(HGTransition *t,unsigned map) {
@@ -52,6 +62,10 @@ static void native_exit(FieldSystem *field,u32 map,int warp,int x,int z,int dire
 #define NewFieldTransitionEnvironment native_transition
 #define sub_02055CD8 native_exit
 #include "transition_kernel.inc"
+HGFieldLocation hg_field_new_game_location(void) {
+    Location location;Location_SetToPlayerRoom(&location);
+    return (HGFieldLocation){location.mapId,location.warpId,location.x,location.y,location.direction};
+}
 
 HGTransition *hg_transition_new(unsigned map,PlayerAvatar *avatar) {
     if(!avatar||!PlayerAvatar_GetPlayerSaveData(avatar)||!PlayerAvatar_GetMapObject(avatar)||!hg_transition_supported(map))return NULL;
@@ -109,6 +123,10 @@ int hg_transition_commit(HGTransition *t,const HGWarpDestination *destination) {
        MapObject_GetMovementCommand(PlayerAvatar_GetMapObject(t->field.playerAvatar))!=255)return 0;
     if(!load_events(t,(unsigned)destination->map))return 0;
     memcpy(t->local,t->pending_local,Save_LocalFieldData_sizeof());t->pending=0;return 1;
+}
+int hg_transition_commit_zone(HGTransition *t,unsigned map) {
+    if(!t||!hg_transition_supported(map)||!load_events(t,map))return 0;
+    t->location->mapId=(int)map;t->pending=0;hg_transition_sync_player(t);return 1;
 }
 int hg_transition_inspect(HGTransition *t,HGTransitionState *out) {
     if(!t||!out)return 0;

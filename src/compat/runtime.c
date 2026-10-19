@@ -7,6 +7,7 @@ static void unavailable(const char *name) { fprintf(stderr, "Unsupported native 
 void *Heap_Alloc(enum HeapID heap, u32 size) { (void)heap; void *p = malloc(size); if (!p) abort(); return p; }
 void Heap_Free(void *p) { free(p); }
 void Heap_FreeExplicit(enum HeapID heap, void *p) { (void)heap; free(p); }
+void MI_CpuClear8(void *p,u32 n) { memset(p,0,n); }
 void MI_CpuClear16(void *p, u32 n) { memset(p, 0, n); }
 void MI_CpuCopy8(const void *p, void *q, u32 n) { memcpy(q, p, n); }
 void *AllocAndReadWholeNarcMemberByIdPair(int archive, int member, enum HeapID heap) {

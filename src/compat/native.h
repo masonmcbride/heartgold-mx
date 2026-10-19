@@ -15,7 +15,7 @@
 #define POKEHEARTGOLD_BAG_VIEW_H
 #include <nitro/types.h>
 #define NELEMS(a) (sizeof(a)/sizeof((a)[0]))
-#define GF_ASSERT(x) do { if (!(x)) abort(); } while (0)
+#define GF_ASSERT(x) do { if (!(x)) { fprintf(stderr,"Assertion failed: %s:%d: %s\n",__FILE__,__LINE__,#x);abort(); } } while (0)
 #include "constants/heap.h"
 #include "constants/save_arrays.h"
 typedef struct String String;
@@ -27,6 +27,7 @@ typedef struct BagView BagView;
 void *Heap_Alloc(enum HeapID, u32);
 void Heap_Free(void *);
 void Heap_FreeExplicit(enum HeapID, void *);
+void MI_CpuClear8(void *, u32);
 void MI_CpuClear16(void *, u32);
 void MI_CpuCopy8(const void *, void *, u32);
 void *SaveArray_Get(SaveData *, int);
@@ -42,7 +43,8 @@ void NARC_Delete(NARC *);
 void NARC_ReadFromMember(NARC *,u32,u32,u32,void *);
 void NARC_ReadFromAbsolutePos(NARC *,u32,u32,void *);
 void NARC_GetMemberImageStartOffset(NARC *,u32,u32 *);
-enum { MSGDATA_LOAD_LAZY };
+/* Original MsgDataLoadType values; direct loading remains unsupported. */
+enum { MSGDATA_LOAD_DIRECT = 0, MSGDATA_LOAD_LAZY = 1 };
 void *AllocAndReadWholeNarcMemberByIdPair(int, int, enum HeapID);
 void *AllocAndReadFromNarcMemberByIdPair(int, int, enum HeapID, u32, u32);
 MsgData *NewMsgDataFromNarc(int, int, int, enum HeapID);

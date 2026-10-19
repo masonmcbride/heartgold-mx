@@ -56,6 +56,7 @@ AreaDataManager *hg_prop_area_new(const uint8_t *p,size_t n) {
     for(unsigned i=0;i<shapes;i++) { area->attributes.shapes[i][0]=r16(p+4+4*models+4*i);area->attributes.shapes[i][1]=r16(p+6+4*models+4*i); }
     return area;
 }
+int hg_prop_area_has_model(const AreaDataManager *area,unsigned model) { return area&&model<area->attributes.model_count; }
 void hg_prop_area_free(AreaDataManager *a) { if(a) { free(a->attributes.models);free(a->attributes.shapes);free(a); } }
 AreaDataManager_Sub8AC *ov01_021FB9F4(AreaDataManager *a) { if(!a)abort();return &a->attributes; }
 void ov01_021EA9B0(ModelAttributes *a,NNSG3dResMdl *b,u32 c) { (void)a;(void)b;(void)c;unsupported("model lighting attributes"); }

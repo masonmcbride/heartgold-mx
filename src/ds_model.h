@@ -33,3 +33,6 @@ int ds_model_node(const DSModel *,unsigned,DSTransform *);
 /* Inspection only: freeze simple SBC billboard orientation in model space.
  * Not camera-facing billboard emulation or support in normal game scenes. */
 int ds_model_inspection_scene(const DSModel *,DSSceneTriangle,void *,DSModelStats *);
+
+#include "ds_joint_animation.h"
+int ds_model_scene_pose(const DSModel *,int shape,int material,const DSJointPose *,DSSceneTriangle,void *,DSModelStats *);

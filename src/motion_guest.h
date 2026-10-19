@@ -2,6 +2,9 @@
 #include <stdint.h>
 /* Native-owned original objects. These calls do not perform collision checks. */
 typedef struct PlayerAvatar PlayerAvatar;
+/* Original Thumb surf eligibility predicate; does not initiate surfing. */
+int hg_motion_can_surf(PlayerAvatar *,unsigned standing,unsigned facing,int *);
+int hg_motion_rock_climb(unsigned facing,unsigned direction,int *);
 typedef struct LocalMapObject LocalMapObject;
 int hg_motion_direction(PlayerAvatar *, uint16_t held_keys, int *direction);
 int hg_motion_grid_step(LocalMapObject *, unsigned direction);
@@ -46,7 +49,7 @@ int hg_motion_script_tick(HGFieldResources *,LocalMapObject *,int *complete);
 typedef struct GameStats GameStats;
 /* Native-owned statistics plus a pointer-free serialized follower notification.
  * This is not an original SaveData layout or a populated follower actor. */
-typedef struct { GameStats *stats; uint8_t follower[32]; } HGMotionSession;
+typedef struct HGMotionSession { GameStats *stats; uint8_t follower[32]; } HGMotionSession;
 /* Scoped original sub_0205D4B4 walk/run branch, plus original input-history
  * update. B is bit 1; original running-shoe ownership gates running. Only zero
  * collision masks are admitted; other movement types remain unsupported. */
@@ -65,3 +68,29 @@ typedef struct FieldSystem FieldSystem;
 int hg_motion_coordinate_event(FieldSystem *,PlayerAvatar *,const uint8_t *,unsigned count,unsigned *script);
 /* Original spawn-table helper for local-field record initialization. */
 unsigned hg_field_guest_mom_spawn(void);
+
+int hg_motion_sync_previous(LocalMapObject *);
+int hg_motion_settle(HGFieldResources *,LocalMapObject *);
+
+/* Native effect allocation/presentation; original Thumb update owns the arc,
+ * hold duration and completion. No original NNS model/task is claimed. */
+typedef struct { uint32_t state[17];int32_t position[3];int active,visible; } HGMotionEffect;
+int hg_motion_script_effect_tick(HGFieldResources *,LocalMapObject *,HGMotionEffect *,int *);
+
+int hg_motion_location_compatible(unsigned,int *);
+int hg_motion_map_location(unsigned,unsigned,unsigned *);
+
+int hg_motion_follow_tick(HGFieldResources *,PlayerAvatar *,LocalMapObject *,HGMotionSession *,int init,unsigned movement);
+
+int hg_motion_follow_position(HGFieldResources *,PlayerAvatar *,LocalMapObject *,unsigned offset_direction,unsigned facing);
+
+/* Preserve completed held flags until other original object controllers have observed this frame. Caller then clears held movement. */
+int hg_motion_player_tick(HGFieldResources *,LocalMapObject *,int *);
+
+int hg_motion_apricorn_sprite(unsigned kind,int available,unsigned *out);
+
+/* Copyable original FadeWork and heap environment. Pointers are guest-local
+ * fixed addresses, so private script continuations own independent copies. */
+typedef struct HGMotionFade { uint8_t work[48],environment[28];int brightness,active;unsigned type; } HGMotionFade;
+int hg_motion_fade_begin(HGMotionFade *,unsigned type,unsigned color,unsigned steps,unsigned frames_per_step);
+int hg_motion_fade_tick(HGMotionFade *);

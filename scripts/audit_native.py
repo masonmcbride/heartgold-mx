@@ -154,7 +154,7 @@ def main():
     parser.add_argument('--generated', required=True, type=pathlib.Path)
     parser.add_argument('--output', required=True, type=pathlib.Path)
     parser.add_argument('--compiler', required=True)
-    parser.add_argument('--runtime-library', type=pathlib.Path)
+    parser.add_argument('--runtime-library', type=pathlib.Path, action='append', default=[])
     parser.add_argument('--field-library', type=pathlib.Path)
     parser.add_argument('--jobs', type=int, default=4)
     args = parser.parse_args()
@@ -218,8 +218,10 @@ def main():
     results.sort(key=lambda r:(r['mode'],r['group'],r['source']))
     successful = [r for r in results if r['mode']=='compat' and r['compiled']]
     defined, users = set(), collections.defaultdict(list)
-    if args.runtime_library and args.runtime_library.is_file():
-        defined |= symbols(args.runtime_library)
+    for library in args.runtime_library:
+        if not library.is_file():
+            parser.error(f'Missing runtime library: {library}')
+        defined |= symbols(library)
     if args.field_library and args.field_library.is_file():
         defined |= symbols(args.field_library)
     for row in successful:
@@ -237,7 +239,9 @@ def main():
     unresolved.sort(key=lambda item:(-len(item['users']),item['symbol']))
     headers = collections.Counter((r['mode'],r['missing_header']) for r in results if r['missing_header'])
     after = hashes()
+    libraries = args.runtime_library + ([args.field_library] if args.field_library else [])
     data = {'revision':subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip(),
+            'provider_libraries': {str(p.resolve()): hashlib.sha256(p.read_bytes()).hexdigest() for p in libraries},
             'compiler_version':subprocess.check_output([args.compiler,'--version'],text=True),
             'created_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'scope':{group:{'c':len(c),'asm':len(asm)} for group,c,asm in groups},

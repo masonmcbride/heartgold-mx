@@ -8,6 +8,9 @@ typedef struct TaskManager TaskManager;
 typedef struct MapEvents MapEvents;
 typedef struct MapObjectManager MapObjectManager;
 typedef struct Location Location;
+typedef struct HGFieldResources HGFieldResources;
+typedef struct MapPropManager MapPropManager;
+typedef struct MapPropAnimationManager MapPropAnimationManager;
 struct FieldSystem {
     TaskManager *taskman;
     PlayerAvatar *playerAvatar;
@@ -17,6 +20,14 @@ struct FieldSystem {
     MapObjectManager *mapObjectManager;
     Location *location;
     SaveData *saveData;
+    struct HGStarter *native_starter;
+    struct LocalFieldData *native_local_field;
+    struct HGMotionFade *native_fade;
+    struct HGPropAnimations *native_prop_animations;
+    struct HGMotionSession *native_follow_session;
+    MapPropManager *mapPropManager;
+    MapPropAnimationManager *mapPropAnimationManager;
+    HGFieldResources *native_scene_resources; /* Host-only static terrain owner. */
 };
 #include "task.h"
 void *Heap_AllocAtEnd(enum HeapID,u32);

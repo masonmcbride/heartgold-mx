@@ -3,6 +3,12 @@
 #include <stdint.h>
 typedef struct HGStoryState HGStoryState;
 typedef struct HGFieldScript HGFieldScript;
+struct FieldSystem;
+void hg_story_bind_field(HGStoryState *,struct FieldSystem *);
+int hg_story_enter_zone(HGStoryState *,unsigned map,char *error,size_t);
+/* Muted native sound-request state. No audio synthesis/output is claimed. */
+typedef struct { unsigned sequence,fade_ticks,requests; } HGStoryMusic;
+HGStoryMusic hg_story_music(const HGStoryState *);
 /* Original flags/variables/profile initialization plus the complete original
  * std_init script. Native inspection profile/seed; not complete game startup. */
 HGStoryState *hg_story_new(void);
@@ -43,3 +49,11 @@ int hg_story_enter_map(HGStoryState *,unsigned map,char *,size_t);
  * querying a frame hook does not execute its cutscene. */
 int hg_story_map_script(HGStoryState *,unsigned map,unsigned type,unsigned *entry);
 int hg_story_header_script(HGStoryState *,const uint8_t *,size_t,unsigned type,unsigned *entry);
+
+int hg_field_script_menu_pending(const HGFieldScript *);
+int hg_field_script_menu_choice_supported(HGFieldScript *,unsigned choice);
+int hg_field_script_menu_choose(HGFieldScript *,unsigned);
+/* Read the retained original phonebook; no Pokegear application is launched. */
+int hg_story_phone_registered(const HGStoryState *,unsigned contact);
+
+int hg_story_apricorn_tree(const HGStoryState *,unsigned index,unsigned *kind,int *available);

@@ -13,6 +13,8 @@ endif()
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(GEN "${CMAKE_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${GEN}")
+file(GLOB HG_MESSAGE_INDEX_INPUTS CONFIGURE_DEPENDS "${HG_UPSTREAM}/files/msgdata/msg/*.json")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${HG_MESSAGE_INDEX_INPUTS})
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare.py" "${HG_UPSTREAM}" "${GEN}" COMMAND_ERROR_IS_FATAL ANY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HG_UPSTREAM}/src/item.c" "${HG_UPSTREAM}/files/itemtool/itemdata/item_data.csv" "${HG_UPSTREAM}/files/itemtool/itemdata/item_data.txt" "${CMAKE_SOURCE_DIR}/scripts/prepare.py")
 # Locally authored SDK scalar interface; no proprietary SDK headers/libraries.
@@ -27,7 +29,7 @@ enable_testing()
 add_executable(test_items tests/test_items.c)
 target_link_libraries(test_items PRIVATE hg_logic)
 add_test(NAME original_items COMMAND test_items)
-add_library(ds_platform STATIC src/ds_graphics.c src/ds_resources.c src/ds_model.c src/ds_texture.c src/ds_raster.c src/ds_transform.c src/ds_frame_clock.c)
+add_library(ds_platform STATIC src/ds_brightness.c src/ds_graphics.c src/ds_resources.c src/ds_model.c src/ds_joint_animation.c src/ds_texture.c src/ds_raster.c src/ds_transform.c src/ds_frame_clock.c)
 target_include_directories(ds_platform PUBLIC src)
 # These per-pixel loops run in the interactive app even in a Debug build.
 # Keep assertions/debug symbols/sanitizers; do not enable fast-math.
@@ -72,7 +74,19 @@ add_custom_target(audit_native
     --output "${CMAKE_BINARY_DIR}/audit"
     --compiler "${CMAKE_C_COMPILER}"
     --runtime-library "$<TARGET_FILE:hg_logic>"
+    --runtime-library "$<TARGET_FILE:hg_motion>"
+    --runtime-library "$<TARGET_FILE:hg_script>"
+    --runtime-library "$<TARGET_FILE:hg_stats>"
+    --runtime-library "$<TARGET_FILE:hg_pokemon>"
+    --runtime-library "$<TARGET_FILE:hg_props>"
+    --runtime-library "$<TARGET_FILE:hg_field_tasks>"
+    --runtime-library "$<TARGET_FILE:hg_overlays>"
+    --runtime-library "$<TARGET_FILE:hg_field_app>"
+    --runtime-library "$<TARGET_FILE:hg_field_view>"
+    --runtime-library "$<TARGET_FILE:ds_platform>"
     --field-library "$<TARGET_FILE:hg_field>"
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/audit_workstreams.py"
+    --upstream "${HG_UPSTREAM}" --audit "${CMAKE_BINARY_DIR}/audit"
   DEPENDS hg_logic
   USES_TERMINAL
   VERBATIM)
@@ -102,7 +116,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${MATRIX_INPUTS}
  "${HG_UPSTREAM}/files/fielddata/build_model/bm_room_matshp.dat" "${HG_UPSTREAM}/files/a/1/4/8"
  "${HG_UPSTREAM}/files/a/0/4/0" "${HG_UPSTREAM}/files/a/0/4/3"
  "${HG_UPSTREAM}/files/a/0/4/2" "${HG_UPSTREAM}/files/a/0/4/4"
- "${HG_UPSTREAM}/files/a/0/6/5"
+ "${HG_UPSTREAM}/files/a/0/6/5" "${HG_UPSTREAM}/files/a/1/0/6" "${HG_UPSTREAM}/files/a/1/0/7" "${HG_UPSTREAM}/files/a/1/0/8"
  "${HG_UPSTREAM}/files/fielddata/mapmatrix/map_matrix/meson.build"
  "${HG_UPSTREAM}/files/fielddata/eventdata/zone_event/meson.build"
  "${HG_UPSTREAM}/files/fielddata/script/scr_seq/meson.build"
@@ -128,8 +142,8 @@ add_executable(test_model tests/test_model.c)
 target_link_libraries(test_model PRIVATE ds_platform)
 add_test(NAME model_geometry COMMAND test_model)
 
-add_executable(heartgold_field_viewer src/field_viewer.m)
-target_compile_options(heartgold_field_viewer PRIVATE -fobjc-arc)
+add_executable(heartgold_field_viewer src/field_viewer.m tests/field_ui_routes.c)
+target_compile_options(heartgold_field_viewer PRIVATE "$<$<COMPILE_LANGUAGE:OBJC>:-fobjc-arc>")
 target_link_libraries(heartgold_field_viewer PRIVATE "-framework Cocoa")
 add_executable(test_raster tests/test_raster.c)
 target_link_libraries(test_raster PRIVATE ds_platform)
@@ -139,8 +153,8 @@ target_link_libraries(test_field_view PRIVATE hg_field_view)
 add_test(NAME original_textured_field_view COMMAND test_field_view)
 
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_props.py" "${HG_UPSTREAM}" "${GEN}" COMMAND_ERROR_IS_FATAL ANY)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/prepare_props.py" "${HG_UPSTREAM}/include/field/overlay_01_02204004.h" "${HG_UPSTREAM}/include/unk_02097268.h" "${HG_UPSTREAM}/include/field/map_load_manager.h")
-add_library(hg_props STATIC "${HG_UPSTREAM}/src/field/map_prop_manager.c" src/compat/props.c)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/prepare_props.py" "${HG_UPSTREAM}/include/field/overlay_01_02204004.h" "${HG_UPSTREAM}/include/unk_02097268.h" "${HG_UPSTREAM}/include/field/map_load_manager.h" "${HG_UPSTREAM}/include/field/map_prop_animation.h" "${HG_UPSTREAM}/src/field/map_prop_animation.c" "${HG_UPSTREAM}/src/field/overlay_01_02204004.c")
+add_library(hg_props STATIC "${HG_UPSTREAM}/src/field/map_prop_manager.c" src/compat/props.c src/compat/prop_animation.c)
 target_link_libraries(hg_props PUBLIC hg_field)
 target_compile_options(hg_props PUBLIC "$<$<COMPILE_LANGUAGE:C>:SHELL:-include \"${CMAKE_SOURCE_DIR}/src/compat/props.h\">")
 set_source_files_properties("${HG_UPSTREAM}/src/field/map_prop_manager.c" PROPERTIES COMPILE_OPTIONS "-finstrument-functions")
@@ -247,23 +261,27 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_D
   "${HG_UPSTREAM}/asm/unk_02054648.s" "${HG_UPSTREAM}/asm/unk_02062108.s"
   "${HG_UPSTREAM}/asm/unk_data_020FCBD8.s" "${HG_UPSTREAM}/asm/unk_data_020FDB44.s"
   "${HG_UPSTREAM}/asm/unk_data_020FD978.s"
-  "${HG_UPSTREAM}/asm/overlay_01_022053EC.s"
+  "${HG_UPSTREAM}/asm/overlay_01_022053EC.s" "${HG_UPSTREAM}/asm/overlay_01_022001E4.s"
   "${HG_UPSTREAM}/asm/unk_0203BA5C.s"
   "${HG_UPSTREAM}/files/msgdata/msg/msg_0096_D31R0201.json"
   "${HG_UPSTREAM}/files/msgdata/msg/msg_0066_D23R0102.json")
 target_sources(hg_motion PRIVATE src/motion_guest.c)
 
-target_sources(hg_motion PRIVATE src/field_player.c)
+target_sources(hg_motion PRIVATE src/field_player.c src/compat/script_scene.c src/compat/field_control.c)
 target_link_libraries(hg_field_app PRIVATE hg_motion)
 
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_interaction.py" "${HG_UPSTREAM}" "${GEN}" "${CMAKE_C_COMPILER}" COMMAND_ERROR_IS_FATAL ANY)
 file(GLOB HG_EVENT_INPUTS CONFIGURE_DEPENDS "${HG_UPSTREAM}/files/fielddata/eventdata/zone_event/*.json" "${HG_UPSTREAM}/files/fielddata/script/scr_seq/event_*.h")
-file(GLOB HG_LOCAL_SCRIPT_INPUTS CONFIGURE_DEPENDS "${HG_UPSTREAM}/files/fielddata/script/scr_seq/scr_seq_*_T20*.s" "${HG_UPSTREAM}/files/msgdata/msg/msg_*_T20*.json")
+file(GLOB HG_LOCAL_SCRIPT_INPUTS CONFIGURE_DEPENDS "${HG_UPSTREAM}/files/fielddata/script/scr_seq/scr_seq_*.s" "${HG_UPSTREAM}/files/msgdata/msg/msg_*.json")
+file(GLOB_RECURSE HG_SCRIPT_CONSTANT_INPUTS CONFIGURE_DEPENDS "${HG_UPSTREAM}/include/constants/*.h")
 file(GLOB_RECURSE HG_JSONPROC_INPUTS CONFIGURE_DEPENDS "${HG_UPSTREAM}/tools/jsonproc/*.h" "${HG_UPSTREAM}/tools/jsonproc/*.hpp" "${HG_UPSTREAM}/tools/jsonproc/*.cpp")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${HG_EVENT_INPUTS} ${HG_JSONPROC_INPUTS} ${HG_LOCAL_SCRIPT_INPUTS}
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${HG_EVENT_INPUTS} ${HG_JSONPROC_INPUTS} ${HG_LOCAL_SCRIPT_INPUTS} ${HG_SCRIPT_CONSTANT_INPUTS}
+  "${HG_UPSTREAM}/files/fielddata/script/scr_seq/meson.build"
+  "${HG_UPSTREAM}/src/location_backup.c" "${HG_UPSTREAM}/asm/overlay_01_021F1AFC.s"
   "${HG_UPSTREAM}/files/fielddata/eventdata/zone_event.json.txt"
   "${HG_UPSTREAM}/asm/macros/script.inc" "${HG_UPSTREAM}/asm/macros/movement.inc"
   "${CMAKE_SOURCE_DIR}/scripts/prepare_interaction.py" "${CMAKE_SOURCE_DIR}/scripts/narc_tools.py"
+  "${HG_UPSTREAM}/src/script_manager.c" "${HG_UPSTREAM}/include/constants/std_script.h"
   "${HG_UPSTREAM}/include/script.h" "${HG_UPSTREAM}/asm/unk_0203DB6C.s"
   "${HG_UPSTREAM}/files/fielddata/script/scr_seq/scr_seq_0842_T20.s"
   "${HG_UPSTREAM}/files/msgdata/msg/msg_0542_T20.json")
@@ -273,10 +291,12 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_D
   "${HG_UPSTREAM}/src/scrcmd_lottery.c" "${HG_UPSTREAM}/src/player_data.c" "${HG_UPSTREAM}/src/scrcmd_17.c"
   "${HG_UPSTREAM}/src/party.c" "${HG_UPSTREAM}/src/scrcmd_party.c"
   "${HG_UPSTREAM}/src/scrcmd_strbuf.c"
+  "${HG_UPSTREAM}/src/scrcmd_sound.c" "${HG_UPSTREAM}/src/sys_flags.c" "${HG_UPSTREAM}/include/constants/sndseq.h"
   "${HG_UPSTREAM}/include/script.h" "${HG_UPSTREAM}/include/scrcmd.h" "${HG_UPSTREAM}/include/player_data.h"
   "${HG_UPSTREAM}/include/save_vars_flags.h" "${HG_UPSTREAM}/src/save_vars_flags.c" "${HG_UPSTREAM}/src/data/fieldmap/script_cmd_table.h"
   "${HG_UPSTREAM}/files/fielddata/script/scr_seq/scr_seq_0149.s" "${HG_UPSTREAM}/files/msgdata/msg/msg_0040.json")
-add_library(hg_script STATIC "${HG_UPSTREAM}/src/script.c" src/sign_script.c src/field_script.c)
+add_library(hg_script STATIC "${HG_UPSTREAM}/src/script.c" src/sign_script.c src/field_script.c src/compat/pokegear.c src/compat/apricorn.c)
+target_compile_definitions(hg_script PRIVATE HG_ORIGINAL_POKEGEAR="${HG_UPSTREAM}/src/save_pokegear.c" HG_ORIGINAL_APRICORN="${HG_UPSTREAM}/src/apricorn_tree_sys.c")
 target_link_libraries(hg_script PUBLIC hg_field)
 target_link_libraries(hg_script PRIVATE hg_stats)
 target_compile_options(hg_script PRIVATE "$<$<COMPILE_LANGUAGE:C>:SHELL:-include \"${CMAKE_SOURCE_DIR}/src/compat/script.h\">")
@@ -307,3 +327,90 @@ foreach(HG_AUDIT_TARGET IN LISTS HG_AUDIT_TARGETS)
     add_dependencies(reuse_audit "${HG_AUDIT_TARGET}")
   endif()
 endforeach()
+
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_pokemon.py" "${HG_UPSTREAM}" "${GEN}" "${CMAKE_C_COMPILER}" COMMAND_ERROR_IS_FATAL ANY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/prepare_pokemon.py"
+  "${HG_UPSTREAM}/src/pokemon.c" "${HG_UPSTREAM}/src/party.c" "${HG_UPSTREAM}/src/pm_string.c"
+  "${HG_UPSTREAM}/src/string_util.c" "${HG_UPSTREAM}/src/mail.c" "${HG_UPSTREAM}/src/mail_message.c"
+  "${HG_UPSTREAM}/src/move.c" "${HG_UPSTREAM}/src/seal_case.c")
+add_library(hg_pokemon STATIC src/compat/pokemon.c "${HG_UPSTREAM}/src/pm_version.c")
+target_compile_options(hg_pokemon PRIVATE "SHELL:-include config.h")
+target_link_libraries(hg_pokemon PUBLIC hg_stats)
+add_executable(test_pokemon tests/test_pokemon.c)
+target_link_libraries(test_pokemon PRIVATE hg_pokemon hg_motion)
+add_test(NAME original_pokemon_creation COMMAND test_pokemon)
+
+target_link_libraries(hg_script PRIVATE hg_pokemon)
+add_dependencies(reuse_audit test_pokemon)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${HG_UPSTREAM}/files/poketool/personal/personal.json" "${HG_UPSTREAM}/files/poketool/personal/personal.json.txt"
+  "${HG_UPSTREAM}/files/poketool/personal/growtbl.csv" "${HG_UPSTREAM}/files/poketool/personal/wotbl.narc"
+  "${HG_UPSTREAM}/files/poketool/waza/waza_tbl.narc" "${HG_UPSTREAM}/files/msgdata/msg/msg_0237.json"
+  "${HG_UPSTREAM}/include/pokemon.h" "${HG_UPSTREAM}/include/pm_string.h" "${HG_UPSTREAM}/include/struct_defs/personal_narc_structs.h"
+  "${HG_UPSTREAM}/include/constants/pokemon.h" "${HG_UPSTREAM}/include/constants/abilities.h"
+  "${HG_UPSTREAM}/include/constants/items.h" "${HG_UPSTREAM}/include/constants/moves.h" "${HG_UPSTREAM}/tools/msgenc/charmap.txt")
+
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${HG_UPSTREAM}/asm/unk_02017FAC.s" "${HG_UPSTREAM}/src/trainer_memo.c"
+  "${HG_UPSTREAM}/src/pokedex.c" "${HG_UPSTREAM}/src/unk_02091278.c" "${HG_UPSTREAM}/include/pokedex.h")
+
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HG_UPSTREAM}/src/options.c")
+
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${HG_UPSTREAM}/src/choose_starter.c" "${HG_UPSTREAM}/src/update_dex_received.c")
+target_sources(hg_motion PRIVATE src/compat/starter.c)
+add_executable(test_starter tests/test_starter.c)
+target_link_libraries(test_starter PRIVATE hg_motion hg_pokemon hg_script)
+add_test(NAME original_starter_task COMMAND test_starter)
+add_dependencies(reuse_audit test_starter)
+
+# Include every game compatibility archive in provider resolution. This is still
+# symbol evidence, not a successful whole-game link or executed coverage.
+foreach(HG_PROVIDER hg_motion hg_script hg_stats hg_pokemon hg_props hg_field_tasks hg_overlays hg_field_app hg_field_view ds_platform)
+  add_dependencies(audit_native "${HG_PROVIDER}")
+endforeach()
+
+# Generated call closures grow across source files. Their recorded inputs, not
+# a hand-maintained selection of roots, determine when configure must rerun.
+file(READ "${GEN}/pokemon_provenance.json" HG_POKEMON_PROVENANCE)
+foreach(HG_INPUT_GROUP sources resource_and_declaration_inputs)
+  string(JSON HG_INPUT_COUNT LENGTH "${HG_POKEMON_PROVENANCE}" "${HG_INPUT_GROUP}")
+  if(HG_INPUT_COUNT GREATER 0)
+    math(EXPR HG_INPUT_LAST "${HG_INPUT_COUNT} - 1")
+    foreach(HG_INPUT_INDEX RANGE 0 ${HG_INPUT_LAST})
+      string(JSON HG_INPUT_PATH MEMBER "${HG_POKEMON_PROVENANCE}" "${HG_INPUT_GROUP}" ${HG_INPUT_INDEX})
+      set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HG_UPSTREAM}/${HG_INPUT_PATH}")
+    endforeach()
+  endif()
+endforeach()
+
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_follow.py" "${HG_UPSTREAM}" "${GEN}" COMMAND_ERROR_IS_FATAL ANY)
+target_sources(hg_motion PRIVATE src/compat/follow.c)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/prepare_follow.py" "${HG_UPSTREAM}/src/follow_mon.c" "${HG_UPSTREAM}/asm/unk_020658D4.s" "${HG_UPSTREAM}/files/fielddata/tsurepoke/tp_param.csv" "${HG_UPSTREAM}/files/fielddata/tsurepoke/tp_param.csv.txt")
+add_executable(test_follow tests/test_follow.c)
+target_link_libraries(test_follow PRIVATE hg_motion)
+add_test(NAME original_follower_controller COMMAND test_follow)
+add_dependencies(reuse_audit test_follow)
+
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HG_UPSTREAM}/include/constants/follow_mon_idx.h" "${HG_UPSTREAM}/include/follow_mon.h" "${HG_UPSTREAM}/files/fielddata/script/scr_seq/scr_seq_0003.s")
+
+add_executable(test_prop_animation tests/test_prop_animation.c)
+target_link_libraries(test_prop_animation PRIVATE hg_motion)
+add_test(NAME original_prop_animation COMMAND test_prop_animation)
+
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HG_UPSTREAM}/include/save_misc_data.h" "${HG_UPSTREAM}/src/apricorn_tree_sys.c" "${HG_UPSTREAM}/asm/unk_020632B0.s" "${HG_UPSTREAM}/asm/overlay_01_sprite_data.s")
+add_executable(test_apricorn tests/test_apricorn.c)
+target_link_libraries(test_apricorn PRIVATE hg_motion)
+add_test(NAME original_apricorn_state COMMAND test_apricorn)
+
+add_executable(test_exploration tests/test_exploration.c)
+target_link_libraries(test_exploration PRIVATE hg_field_app hg_motion)
+add_test(NAME free_field_exploration COMMAND test_exploration)
+
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HG_UPSTREAM}/asm/unk_0201010C.s" "${HG_UPSTREAM}/include/screen_fade.h")
+add_executable(test_screen_fade tests/test_screen_fade.c)
+target_link_libraries(test_screen_fade PRIVATE hg_motion ds_platform)
+add_test(NAME original_screen_fade COMMAND test_screen_fade)
+add_executable(test_rest tests/test_rest.c)
+target_link_libraries(test_rest PRIVATE hg_script hg_pokemon)
+add_test(NAME original_rest_and_pokedex COMMAND test_rest)

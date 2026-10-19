@@ -5,6 +5,7 @@
  * callbacks are host scene callbacks, not the original FieldMap overlay. */
 typedef struct HGFieldApp HGFieldApp;
 HGFieldApp *hg_field_app_new(unsigned map,char *error,size_t error_size);
+HGFieldApp *hg_field_app_new_game(char *error,size_t error_size);
 void hg_field_app_free(HGFieldApp *);
 const HGFieldView *hg_field_app_view(const HGFieldApp *);
 int hg_field_app_render(HGFieldApp *,const DSCamera *,uint8_t *,unsigned,unsigned);
@@ -29,6 +30,8 @@ int hg_field_app_interaction_busy(const HGFieldApp *);
 
 /* Wall-clock-driven simulation, bounded catch-up; first call primes the clock. */
 unsigned hg_field_app_advance(HGFieldApp *,uint64_t monotonic_ns);
+/* After an external suspension, discard elapsed wall time and held input. */
+void hg_field_app_resume(HGFieldApp *);
 
 /* Cancel held and latched input on focus loss/map ownership changes. */
 void hg_field_app_clear_input(HGFieldApp *);
@@ -37,3 +40,18 @@ unsigned hg_field_app_steps(const HGFieldApp *);
 unsigned hg_field_app_map(const HGFieldApp *);
 /* Borrowed session owner, retained through native door/stair travel. */
 HGStoryState *hg_field_app_story(HGFieldApp *);
+
+int hg_field_app_starter_pending(const HGFieldApp *);
+int hg_field_app_menu_pending(const HGFieldApp *);
+int hg_field_app_menu_choice_supported(HGFieldApp *,unsigned);
+
+int hg_field_app_follower(const HGFieldApp *,unsigned *,int *,int *);
+const char *hg_field_app_error(const HGFieldApp *);
+
+int hg_field_app_running_shoes(const HGFieldApp *);
+
+HGFieldApp *hg_field_app_new_explore(unsigned map,char *error,size_t error_size);
+int hg_field_app_is_exploring(const HGFieldApp *);
+
+/* Current original master-brightness level, including the live script scene. */
+int hg_field_app_brightness(const HGFieldApp *);

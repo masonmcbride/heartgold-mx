@@ -4,9 +4,13 @@
 #include <time.h>
 #define WIDTH 800
 #define HEIGHT 600
+static void field_fail(unsigned line) { fprintf(stderr,"Field viewer check failed at src/field_viewer.m:%u\n",line);exit(EXIT_FAILURE); }
+void hg_ui_test_approach(HGFieldApp *,unsigned);
 @interface FieldCanvas : NSView
 @property const HGFieldView *field;
 @property HGFieldApp *application;
+@property HGFieldApp *suspendedStory;
+@property BOOL exploring;
 @property HGFieldView *characterScene;
 @property DSCamera camera;
 @property(strong) NSBitmapImageRep *bitmap;
@@ -20,12 +24,13 @@
 - (void)resetCamera;
 - (BOOL)loadMap:(unsigned)map error:(char *)error;
 - (BOOL)loadCharacter:(unsigned)model error:(char *)error;
+- (BOOL)setExplorationEnabled:(BOOL)enabled error:(char *)error;
 @end
 @implementation FieldCanvas
 - (instancetype)initWithFrame:(NSRect)rect {
     if(!(self=[super initWithFrame:rect]))return nil;
     self.bitmap=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:WIDTH pixelsHigh:HEIGHT bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:WIDTH*4 bitsPerPixel:32];
-    if(!self.bitmap)return nil;char error[256];if(![self loadMap:60 error:error])return nil;
+    if(!self.bitmap)return nil;char error[256];if(![self loadMap:64 error:error])return nil;
     __weak FieldCanvas *weakCanvas=self;
     self.simulationTimer=[NSTimer timerWithTimeInterval:1.0/60.0 repeats:YES block:^(NSTimer *timer) {
         (void)timer;FieldCanvas *canvas=weakCanvas;if(canvas.application) {
@@ -38,19 +43,35 @@
             hg_field_app_presentation(canvas.application,after,NULL);
             if(revision!=hg_field_app_revision(canvas.application)) {
                 DSCamera camera=canvas.camera;camera.x+=after[0]-before[0];camera.y+=after[1]-before[1];camera.z+=after[2]-before[2];canvas.camera=camera;
-                if(![canvas render])exit(1);
+                if(![canvas render])field_fail(__LINE__);
             }
         }
     }];
     [[NSRunLoop mainRunLoop] addTimer:self.simulationTimer forMode:NSRunLoopCommonModes];return self;
 }
-- (void)dealloc { [self.simulationTimer invalidate];hg_field_app_free(self.application);hg_field_view_free(self.characterScene); }
+- (void)dealloc { [self.simulationTimer invalidate];hg_field_app_free(self.application);hg_field_app_free(self.suspendedStory);hg_field_view_free(self.characterScene); }
 - (BOOL)loadMap:(unsigned)map error:(char *)error {
     self.movementKeys=0;hg_field_view_free(self.characterScene);self.characterScene=NULL;
-    HGFieldApp *next=hg_field_app_new(map,error,256);hg_field_app_free(self.application);self.application=next;self.field=hg_field_app_view(next);
+    HGFieldApp *next=self.exploring?hg_field_app_new_explore(map,error,256):map==64?hg_field_app_new_game(error,256):hg_field_app_new(map,error,256);hg_field_app_free(self.application);self.application=next;self.field=hg_field_app_view(next);
     if(next)[self resetCamera];
     if(![self render]) { snprintf(error,256,"Rasterization failed");hg_field_app_free(self.application);self.application=NULL;self.field=NULL;[self render];return NO; }
     return next!=NULL;
+}
+- (BOOL)setExplorationEnabled:(BOOL)enabled error:(char *)error {
+    if(enabled==self.exploring)return YES;
+    BOOL success=YES;
+    unsigned map=self.application?hg_field_app_map(self.application):64;
+    self.movementKeys=0;hg_field_app_clear_input(self.application);
+    if(enabled) {
+        self.suspendedStory=self.application;self.application=NULL;self.exploring=YES;
+        if([self loadMap:map error:error])return YES;
+        success=NO;self.application=self.suspendedStory;self.suspendedStory=NULL;self.exploring=NO;
+    } else {
+        hg_field_app_free(self.application);self.application=self.suspendedStory;self.suspendedStory=NULL;self.exploring=NO;
+        if(!self.application)return [self loadMap:map error:error];
+    }
+    hg_field_app_resume(self.application);self.field=hg_field_app_view(self.application);[self resetCamera];
+    if(![self render]){snprintf(error,256,"Rasterization failed after restoring story");return NO;}return success;
 }
 - (BOOL)loadCharacter:(unsigned)model error:(char *)error {
     self.movementKeys=0;HGFieldView *next=hg_character_view_load(model,error,256);
@@ -101,7 +122,7 @@
         else if([key isEqualToString:@"r"]) { [self resetCamera];c=self.camera; }
         else changed=NO;
     }
-    if(changed) { c.pan_x=fmax(-2000,fmin(2000,c.pan_x));c.pan_y=fmax(-2000,fmin(2000,c.pan_y));self.camera=c;if(![self render])exit(1); }else [super keyDown:event];
+    if(changed) { c.pan_x=fmax(-2000,fmin(2000,c.pan_x));c.pan_y=fmax(-2000,fmin(2000,c.pan_y));self.camera=c;if(![self render])field_fail(__LINE__); }else [super keyDown:event];
 }
 - (void)keyUp:(NSEvent *)event {
     NSString *key=event.charactersIgnoringModifiers.lowercaseString;
@@ -119,7 +140,7 @@
 }
 - (void)scrollWheel:(NSEvent *)event {
     if(!self.field)return;
-    DSCamera c=self.camera;c.scale=fmax(0.02,fmin(200,c.scale*exp(-event.scrollingDeltaY*0.025)));self.camera=c;if(![self render])exit(1);
+    DSCamera c=self.camera;c.scale=fmax(0.02,fmin(200,c.scale*exp(-event.scrollingDeltaY*0.025)));self.camera=c;if(![self render])field_fail(__LINE__);
 }
 - (void)mouseDown:(NSEvent *)event { self.dragPoint=event.locationInWindow;[self.window makeFirstResponder:self]; }
 - (void)mouseDragged:(NSEvent *)event {
@@ -127,7 +148,7 @@
     NSPoint p=event.locationInWindow;DSCamera c=self.camera;double x=p.x-self.dragPoint.x,y=p.y-self.dragPoint.y;
     if(event.modifierFlags&NSEventModifierFlagShift) { c.pan_x=fmax(-2000,fmin(2000,c.pan_x+x));c.pan_y=fmax(-2000,fmin(2000,c.pan_y-y)); }
     else { c.yaw+=x*0.008;c.pitch=fmax(0.1,fmin(1.5,c.pitch+y*0.008)); }
-    self.camera=c;self.dragPoint=p;if(![self render])exit(1);
+    self.camera=c;self.dragPoint=p;if(![self render])field_fail(__LINE__);
 }
 @end
 static NSString *mapTitle(unsigned map) {
@@ -144,12 +165,15 @@ static NSString *mapTitle(unsigned map) {
 @property BOOL characters;
 @property(strong) NSTableView *table;
 @property(strong) NSTextField *status;
+@property(strong) NSButton *exploration;
 @property(strong) NSButton *previous;
 @property(strong) NSButton *next;
 @property(strong) NSMutableArray<NSNumber *> *rows;
 @property(strong) NSMutableDictionary<NSNumber *,NSString *> *results;
 @property unsigned selectedMap;
 @property BOOL smoke;
+@property BOOL exploreAtLaunch;
+@property unsigned initialMap;
 @property BOOL synchronizingSelection;
 @end
 @implementation FieldApp
@@ -167,8 +191,14 @@ static NSString *mapTitle(unsigned map) {
     return [[[NSString stringWithUTF8String:hg_character_name(model)] stringByReplacingOccurrencesOfString:@"_" withString:@" "] capitalizedString];
 }
 - (void)changeCategory:(id)sender {
-    (void)sender;self.characters=self.category.indexOfSelectedItem==1;self.selectedMap=self.characters?146:60;
+    (void)sender;self.characters=self.category.indexOfSelectedItem==1;self.exploration.enabled=!self.characters;self.selectedMap=self.characters?146:60;
     self.results=[NSMutableDictionary new];self.search.stringValue=@"";[self filterMaps];
+}
+- (void)changeExploration:(id)sender {
+    (void)sender;char error[256];BOOL enabled=self.exploration.state==NSControlStateValueOn;
+    if(![self.canvas setExplorationEnabled:enabled error:error]) { self.exploration.state=self.canvas.exploring?NSControlStateValueOn:NSControlStateValueOff;self.status.stringValue=[NSString stringWithUTF8String:error];return; }
+    self.selectedMap=hg_field_app_map(self.canvas.application);self.search.stringValue=@"";self.results=[NSMutableDictionary new];self.synchronizingSelection=YES;[self filterMaps];self.synchronizingSelection=NO;
+    [self updateSceneStatus:self.selectedMap success:YES reason:@""];[self.window makeFirstResponder:self.canvas];
 }
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)table { (void)table;return self.rows.count; }
 - (NSView *)tableView:(NSTableView *)table viewForTableColumn:(NSTableColumn *)column row:(NSInteger)row {
@@ -190,7 +220,9 @@ static NSString *mapTitle(unsigned map) {
 - (void)updateSceneStatus:(unsigned)map success:(BOOL)ok reason:(NSString *)reason {
     NSInteger row=self.table.selectedRow;
     self.status.stringValue=ok?[NSString stringWithFormat:@"%u · %@ — %zu triangles · %lu entries in list",map,[self titleFor:map],hg_field_view_triangles(self.canvas.field),(unsigned long)self.rows.count]:[NSString stringWithFormat:@"%u · %@ — %@",map,[self titleFor:map],reason];
-    if(ok && !self.characters && hg_field_app_player(self.canvas.application,NULL,NULL))self.status.stringValue=[self.status.stringValue stringByAppendingString:@" · WASD walk · Shift run · Doors/stairs travel"];
+    if(ok&&!self.characters&&hg_field_app_is_exploring(self.canvas.application))self.status.stringValue=[self.status.stringValue stringByAppendingString:hg_field_app_player(self.canvas.application,NULL,NULL)?@" · Exploration · WASD / Shift run · Story and NPCs off":@" · Exploration · View only; walking unavailable"];
+    else if(ok && !self.characters && hg_field_app_player(self.canvas.application,NULL,NULL))self.status.stringValue=[self.status.stringValue stringByAppendingString:@" · WASD walk · Shift run · Doors/stairs travel"];
+    else if(ok&&!self.characters)self.status.stringValue=[self.status.stringValue stringByAppendingString:@" · Inspection only; field gameplay unavailable"];
     self.status.toolTip=self.status.stringValue;
     self.window.title=[NSString stringWithFormat:@"HeartGold MX — %@%@",[self titleFor:map],ok?@"":@" (not supported yet)"];
     if(row>=0)[self.table reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:row] columnIndexes:[NSIndexSet indexSetWithIndex:0]];
@@ -214,8 +246,8 @@ static NSString *mapTitle(unsigned map) {
 - (void)previousMap:(id)sender { (void)sender;NSInteger row=self.table.selectedRow;if(row>0) { [self.table selectRowIndexes:[NSIndexSet indexSetWithIndex:row-1] byExtendingSelection:NO];[self.table scrollRowToVisible:row-1]; } }
 - (void)nextMap:(id)sender { (void)sender;NSInteger row=self.table.selectedRow;if(row>=0 && row+1<(NSInteger)self.rows.count) { [self.table selectRowIndexes:[NSIndexSet indexSetWithIndex:row+1] byExtendingSelection:NO];[self.table scrollRowToVisible:row+1]; } }
 - (void)applicationDidFinishLaunching:(NSNotification *)note {
-    (void)note;self.selectedMap=60;self.results=[NSMutableDictionary new];
-    self.canvas=[[FieldCanvas alloc] initWithFrame:NSMakeRect(270,42,WIDTH,HEIGHT)];if(!self.canvas) { fprintf(stderr,"Cannot load New Bark field resources\n");exit(1); }
+    (void)note;self.selectedMap=self.exploreAtLaunch?self.initialMap:self.smoke?60:64;self.results=[NSMutableDictionary new];
+    self.canvas=[[FieldCanvas alloc] initWithFrame:NSMakeRect(270,42,WIDTH,HEIGHT)];if(!self.canvas) { fprintf(stderr,"Cannot load New Bark field resources\n");field_fail(__LINE__); }
     __weak FieldApp *weakApp=self;
     self.canvas.mapChanged=^(unsigned map) {
         FieldApp *app=weakApp;if(!app)return;app.selectedMap=map;app.search.stringValue=@"";
@@ -224,6 +256,7 @@ static NSString *mapTitle(unsigned map) {
     };
     NSView *root=[[NSView alloc] initWithFrame:NSMakeRect(0,0,1080,650)];self.canvas.autoresizingMask=NSViewWidthSizable|NSViewHeightSizable;self.canvas.toolTip=@"WASD walk · Shift + WASD run · Enter/Space read town/lab signs · Drag/arrows orbit · Scroll ± zoom · Shift-drag pan · R reset";[root addSubview:self.canvas];
     self.category=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(10,612,248,28) pullsDown:NO];[self.category addItemsWithTitles:@[@"Maps",@"Characters · sprite meshes"]];self.category.target=self;self.category.action=@selector(changeCategory:);self.category.autoresizingMask=NSViewMinYMargin;[root addSubview:self.category];
+    self.exploration=[NSButton checkboxWithTitle:@"Explore freely" target:self action:@selector(changeExploration:)];self.exploration.frame=NSMakeRect(280,612,180,28);self.exploration.autoresizingMask=NSViewMinYMargin;self.exploration.toolTip=@"Browse scenery without story events or NPCs. Untick to resume your previous session.";[root addSubview:self.exploration];
     self.search=[[NSSearchField alloc] initWithFrame:NSMakeRect(10,578,248,28)];self.search.placeholderString=@"Search name or enter an ID";self.search.delegate=self;self.search.autoresizingMask=NSViewMinYMargin;[root addSubview:self.search];
     NSScrollView *scroll=[[NSScrollView alloc] initWithFrame:NSMakeRect(10,48,248,520)];scroll.hasVerticalScroller=YES;scroll.autoresizingMask=NSViewHeightSizable;
     self.table=[[NSTableView alloc] initWithFrame:scroll.bounds];NSTableColumn *column=[[NSTableColumn alloc] initWithIdentifier:@"map"];column.width=240;[self.table addTableColumn:column];self.table.headerView=nil;self.table.rowHeight=28;self.table.dataSource=self;self.table.delegate=self;self.table.allowsEmptySelection=YES;scroll.documentView=self.table;[root addSubview:scroll];
@@ -231,54 +264,59 @@ static NSString *mapTitle(unsigned map) {
     self.next=[NSButton buttonWithTitle:@"Next" target:self action:@selector(nextMap:)];self.next.frame=NSMakeRect(138,10,120,28);[root addSubview:self.next];
     self.status=[NSTextField labelWithString:@""];self.status.frame=NSMakeRect(280,10,790,24);self.status.autoresizingMask=NSViewWidthSizable;self.status.lineBreakMode=NSLineBreakByTruncatingMiddle;[root addSubview:self.status];
     self.window=[[NSWindow alloc] initWithContentRect:root.frame styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable|NSWindowStyleMaskMiniaturizable backing:NSBackingStoreBuffered defer:NO];
-    self.window.contentView=root;self.window.contentMinSize=NSMakeSize(900,580);[self filterMaps];
+    self.window.contentView=root;self.window.contentMinSize=NSMakeSize(900,580);
+    if(self.exploreAtLaunch) {
+        char error[256];if(![self.canvas setExplorationEnabled:YES error:error]){fprintf(stderr,"%s\n",error);field_fail(__LINE__);}
+        self.exploration.state=NSControlStateValueOn;
+    }
+    [self filterMaps];
     [self.window center];[self.window makeKeyAndOrderFront:nil];[self.window makeFirstResponder:self.canvas];[NSApp activateIgnoringOtherApps:YES];
     if(self.smoke)dispatch_after(dispatch_time(DISPATCH_TIME_NOW,300*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
-        if(hg_field_app_ticks(self.canvas.application)<3)exit(1);
+        if(hg_field_app_ticks(self.canvas.application)<3)field_fail(__LINE__);
         NSData *before=[NSData dataWithBytes:self.canvas.bitmap.bitmapData length:WIDTH*HEIGHT*4];
         NSEvent *key=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"" charactersIgnoringModifiers:@"" isARepeat:NO keyCode:124];
         [self.canvas keyDown:key];NSData *after=[NSData dataWithBytes:self.canvas.bitmap.bitmapData length:WIDTH*HEIGHT*4];
-        if([before isEqual:after])exit(1);
-        [self nextMap:nil];if(self.selectedMap!=61)exit(1);
-        [self previousMap:nil];if(self.selectedMap!=60 || !self.canvas.field)exit(1);
-        self.search.stringValue=@"Route 5";[self filterMaps];if(self.selectedMap!=13 || !self.canvas.field)exit(1);
-        self.search.stringValue=@"player house";[self filterMaps];if(!self.rows.count || !self.canvas.field)exit(1);
-        self.search.stringValue=@"Route 2";[self filterMaps];if(self.selectedMap!=10 || self.canvas.field)exit(1);
-        self.search.stringValue=@"no such map xyz";[self filterMaps];if(self.rows.count || self.next.enabled || self.previous.enabled)exit(1);
-        self.search.stringValue=@"";self.selectedMap=60;[self filterMaps];if(!self.canvas.field || self.rows.count!=hg_field_map_count())exit(1);
-        [self.category selectItemAtIndex:1];[self changeCategory:nil];if(!self.canvas.characterScene || self.selectedMap!=146)exit(1);
+        if([before isEqual:after])field_fail(__LINE__);
+        [self nextMap:nil];if(self.selectedMap!=61)field_fail(__LINE__);
+        [self previousMap:nil];if(self.selectedMap!=60 || !self.canvas.field)field_fail(__LINE__);
+        self.search.stringValue=@"Route 5";[self filterMaps];if(self.selectedMap!=13 || !self.canvas.field)field_fail(__LINE__);
+        self.search.stringValue=@"player house";[self filterMaps];if(!self.rows.count || !self.canvas.field)field_fail(__LINE__);
+        self.search.stringValue=@"Route 2";[self filterMaps];if(self.selectedMap!=10 || self.canvas.field)field_fail(__LINE__);
+        self.search.stringValue=@"no such map xyz";[self filterMaps];if(self.rows.count || self.next.enabled || self.previous.enabled)field_fail(__LINE__);
+        self.search.stringValue=@"";self.selectedMap=60;[self filterMaps];if(!self.canvas.field || self.rows.count!=hg_field_map_count())field_fail(__LINE__);
+        [self.category selectItemAtIndex:1];[self changeCategory:nil];if(!self.canvas.characterScene || self.selectedMap!=146)field_fail(__LINE__);
         NSData *characterBefore=[NSData dataWithBytes:self.canvas.bitmap.bitmapData length:WIDTH*HEIGHT*4];[self.canvas keyDown:key];
-        NSData *characterAfter=[NSData dataWithBytes:self.canvas.bitmap.bitmapData length:WIDTH*HEIGHT*4];if([characterBefore isEqual:characterAfter])exit(1);
-        self.search.stringValue=@"Whitney";[self filterMaps];if(self.selectedMap!=148 || !self.canvas.characterScene)exit(1);
-        [self.category selectItemAtIndex:0];[self changeCategory:nil];if(!self.canvas.application || self.selectedMap!=60)exit(1);
-        int px,pz,nx,nz;if(!hg_field_app_player(self.canvas.application,&px,&pz))exit(1);
+        NSData *characterAfter=[NSData dataWithBytes:self.canvas.bitmap.bitmapData length:WIDTH*HEIGHT*4];if([characterBefore isEqual:characterAfter])field_fail(__LINE__);
+        self.search.stringValue=@"Whitney";[self filterMaps];if(self.selectedMap!=148 || !self.canvas.characterScene)field_fail(__LINE__);
+        [self.category selectItemAtIndex:0];[self changeCategory:nil];if(!self.canvas.application || self.selectedMap!=60)field_fail(__LINE__);
+        int px,pz,nx,nz;if(!hg_field_app_player(self.canvas.application,&px,&pz))field_fail(__LINE__);
         NSEvent *walk=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"w" charactersIgnoringModifiers:@"w" isARepeat:NO keyCode:13];
-        [self.canvas keyDown:walk];if(self.canvas.movementKeys!=0x40)exit(1);
+        [self.canvas keyDown:walk];if(self.canvas.movementKeys!=0x40)field_fail(__LINE__);
         for(unsigned i=0;i<8;i++)hg_field_app_step(self.canvas.application);
-        if(!hg_field_app_player(self.canvas.application,&nx,&nz)||(nx==px&&nz==pz))exit(1);
+        if(!hg_field_app_player(self.canvas.application,&nx,&nz)||(nx==px&&nz==pz))field_fail(__LINE__);
         NSEvent *release=[NSEvent keyEventWithType:NSEventTypeKeyUp location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"w" charactersIgnoringModifiers:@"w" isARepeat:NO keyCode:13];
-        [self.canvas keyUp:release];if(self.canvas.movementKeys)exit(1);
+        [self.canvas keyUp:release];if(self.canvas.movementKeys)field_fail(__LINE__);
         for(unsigned i=0;i<16;i++)hg_field_app_step(self.canvas.application);
-        if(!hg_field_app_player(self.canvas.application,&px,&pz)||px!=nx||pz!=nz)exit(1);
-        char reloadError[256];if(![self.canvas loadMap:60 error:reloadError])exit(1);
+        if(!hg_field_app_player(self.canvas.application,&px,&pz)||px!=nx||pz!=nz)field_fail(__LINE__);
+        char reloadError[256];if(![self.canvas loadMap:60 error:reloadError])field_fail(__LINE__);
         double runStart[3],runStep[3];unsigned runPose;
         hg_field_app_presentation(self.canvas.application,runStart,NULL);
         NSEvent *run=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:NSEventModifierFlagShift timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"W" charactersIgnoringModifiers:@"w" isARepeat:NO keyCode:13];
-        [self.canvas keyDown:run];if(self.canvas.movementKeys!=0x42)exit(1);hg_field_app_step(self.canvas.application);
+        [self.canvas keyDown:run];if(self.canvas.movementKeys!=0x42)field_fail(__LINE__);hg_field_app_step(self.canvas.application);
         hg_field_app_presentation(self.canvas.application,runStep,&runPose);
-        if(runStep[2]!=runStart[2]-4 || (runPose!=18&&runPose!=20) || hg_field_app_steps(self.canvas.application)!=1)exit(1);
+        if(runStep[2]!=runStart[2]-4 || (runPose!=18&&runPose!=20) || hg_field_app_steps(self.canvas.application)!=1)field_fail(__LINE__);
         NSEvent *shiftUp=[NSEvent keyEventWithType:NSEventTypeFlagsChanged location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"" charactersIgnoringModifiers:@"" isARepeat:NO keyCode:56];
-        [self.canvas flagsChanged:shiftUp];if(self.canvas.movementKeys!=0x40)exit(1);
+        [self.canvas flagsChanged:shiftUp];if(self.canvas.movementKeys!=0x40)field_fail(__LINE__);
         for(unsigned tick=0;tick<3;tick++)hg_field_app_step(self.canvas.application);
-        hg_field_app_presentation(self.canvas.application,runStep,NULL);if(runStep[2]!=runStart[2]-16)exit(1);
+        hg_field_app_presentation(self.canvas.application,runStep,NULL);if(runStep[2]!=runStart[2]-16)field_fail(__LINE__);
         hg_field_app_step(self.canvas.application);hg_field_app_presentation(self.canvas.application,runStep,NULL);
-        if(runStep[2]!=runStart[2]-18 || hg_field_app_steps(self.canvas.application)!=2)exit(1);
-        [self.canvas keyUp:release];if(![self.canvas loadMap:60 error:reloadError])exit(1);
+        if(runStep[2]!=runStart[2]-18 || hg_field_app_steps(self.canvas.application)!=2)field_fail(__LINE__);
+        [self.canvas keyUp:release];if(![self.canvas loadMap:60 error:reloadError])field_fail(__LINE__);
         /* Exercise both sideways stride poses through actual modifier-bearing
          * input, including frames 26/32 that previously lost 42 opaque texels. */
-        if(![[NSFileManager defaultManager] createDirectoryAtPath:@"build/evidence/hero-crop" withIntermediateDirectories:YES attributes:nil error:nil])exit(1);
+        if(![[NSFileManager defaultManager] createDirectoryAtPath:@"build/evidence/hero-crop" withIntermediateDirectories:YES attributes:nil error:nil])field_fail(__LINE__);
         for(NSString *letter in @[@"a",@"d"]) {
-            if(![self.canvas loadMap:60 error:reloadError])exit(1);
+            if(![self.canvas loadMap:60 error:reloadError])field_fail(__LINE__);
             DSCamera closeup=self.canvas.camera;closeup.scale=6;self.canvas.camera=closeup;
             hg_field_app_presentation(self.canvas.application,runStart,NULL);
             NSEvent *sideRun=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:NSEventModifierFlagShift timestamp:0 windowNumber:self.window.windowNumber context:nil characters:letter.uppercaseString charactersIgnoringModifiers:letter isARepeat:NO keyCode:0];
@@ -289,18 +327,18 @@ static NSString *mapTitle(unsigned map) {
                 if(runPose==26||runPose==28||runPose==30||runPose==32) {
                     unsigned bit=1u<<(runPose-25);
                     if(!(poses&bit)) {
-                        if(![self.canvas render])exit(1);
+                        if(![self.canvas render])field_fail(__LINE__);
                         NSString *path=[NSString stringWithFormat:@"build/evidence/hero-crop/running-%u.png",runPose];
-                        if(![[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:path atomically:YES])exit(1);
+                        if(![[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:path atomically:YES])field_fail(__LINE__);
                         poses|=bit;
                     }
                 }
             }
             BOOL west=[letter isEqualToString:@"a"];
-            if(poses!=(west?10u:160u)||runStep[0]!=runStart[0]+(west?-32:32)||runStep[2]!=runStart[2])exit(1);
+            if(poses!=(west?10u:160u)||runStep[0]!=runStart[0]+(west?-32:32)||runStep[2]!=runStart[2])field_fail(__LINE__);
             [self.canvas keyUp:sideUp];
         }
-        if(![self.canvas loadMap:60 error:reloadError])exit(1);
+        if(![self.canvas loadMap:60 error:reloadError])field_fail(__LINE__);
         NSString *route=@"aassa";
         for(NSUInteger i=0;i<route.length;i++) {
             NSString *letter=[route substringWithRange:NSMakeRange(i,1)];
@@ -309,21 +347,31 @@ static NSString *mapTitle(unsigned map) {
             NSEvent *up=[NSEvent keyEventWithType:NSEventTypeKeyUp location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:letter charactersIgnoringModifiers:letter isARepeat:NO keyCode:0];[self.canvas keyUp:up];
         }
         NSEvent *confirm=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"\r" charactersIgnoringModifiers:@"\r" isARepeat:NO keyCode:36];
+        void (^settleAutomatic)(HGFieldApp *)=^(HGFieldApp *session) {
+            unsigned idle=0;
+            for(unsigned tick=0;tick<4096;tick++) {
+                hg_field_app_step(session);
+                if(strstr(hg_field_app_dialogue(session),"isn’t available yet"))field_fail(__LINE__);
+                if(hg_field_app_dialogue(session)[0]||hg_field_app_menu_pending(session))[self.canvas keyDown:confirm];
+                if(!hg_field_app_interaction_busy(session)&&!hg_field_app_dialogue(session)[0]){if(++idle==2)return;}else idle=0;
+            }
+            field_fail(__LINE__);
+        };
         [self.canvas keyDown:confirm];hg_field_app_step(self.canvas.application);
-        if(strcmp(hg_field_app_dialogue(self.canvas.application),"New Bark Town\nWinds of a New Beginning"))exit(1);
-        if(![self.canvas render])exit(1);
+        if(strcmp(hg_field_app_dialogue(self.canvas.application),"New Bark Town\nWinds of a New Beginning"))field_fail(__LINE__);
+        if(![self.canvas render])field_fail(__LINE__);
         [[NSFileManager defaultManager] createDirectoryAtPath:@"build/evidence" withIntermediateDirectories:YES attributes:nil error:nil];
         [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/new-bark-dialogue.png" atomically:YES];
         [self.canvas keyDown:confirm];hg_field_app_step(self.canvas.application);
-        if(hg_field_app_dialogue(self.canvas.application)[0])exit(1);
-        if(!hg_field_app_player(self.canvas.application,&px,&pz))exit(1);
+        if(hg_field_app_dialogue(self.canvas.application)[0])field_fail(__LINE__);
+        if(!hg_field_app_player(self.canvas.application,&px,&pz))field_fail(__LINE__);
         [self.canvas keyDown:walk];[self.canvas keyUp:release];
-        if(hg_field_app_advance(self.canvas.application,UINT64_C(1000000000)))exit(1);
-        if(hg_field_app_advance(self.canvas.application,UINT64_C(1100000000))!=6)exit(1);
-        if(!hg_field_app_player(self.canvas.application,&nx,&nz)||nx!=px||nz!=pz-1)exit(1);
+        if(hg_field_app_advance(self.canvas.application,UINT64_C(1000000000)))field_fail(__LINE__);
+        if(hg_field_app_advance(self.canvas.application,UINT64_C(1100000000))!=6)field_fail(__LINE__);
+        if(!hg_field_app_player(self.canvas.application,&nx,&nz)||nx!=px||nz!=pz-1)field_fail(__LINE__);
         hg_field_app_advance(self.canvas.application,UINT64_C(1133333334));
-        if(![self.canvas render])exit(1);
-        if(![self.canvas loadMap:60 error:reloadError])exit(1);
+        if(![self.canvas render])field_fail(__LINE__);
+        if(![self.canvas loadMap:60 error:reloadError])field_fail(__LINE__);
         HGFieldApp *travelSession=self.canvas.application;NSString *houseRoute=@"wdddddddw";
         for(NSUInteger i=0;i<houseRoute.length;i++) {
             NSString *letter=[houseRoute substringWithRange:NSMakeRange(i,1)];
@@ -332,14 +380,16 @@ static NSString *mapTitle(unsigned map) {
             [self.canvas keyDown:down];hg_field_app_step(self.canvas.application);[self.canvas keyUp:up];
             for(unsigned tick=0;tick<7;tick++)hg_field_app_step(self.canvas.application);
         }
-        if(hg_field_app_map(travelSession)!=63 || hg_field_app_steps(travelSession)!=8 || ![self.canvas render])exit(1);
-        if(self.canvas.application!=travelSession || self.selectedMap!=63 || self.rows[self.table.selectedRow].unsignedIntValue!=63)exit(1);
+        if(hg_field_app_map(travelSession)!=63 || hg_field_app_steps(travelSession)!=8 || ![self.canvas render])field_fail(__LINE__);
+        if(self.canvas.application!=travelSession || self.selectedMap!=63 || self.rows[self.table.selectedRow].unsignedIntValue!=63)field_fail(__LINE__);
         [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/new-bark-house-travel.png" atomically:YES];
+        settleAutomatic(travelSession);
+        if(hg_field_app_steps(travelSession)!=8)field_fail(__LINE__);
         NSEvent *exitHouse=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"s" charactersIgnoringModifiers:@"s" isARepeat:NO keyCode:1];
         [self.canvas keyDown:exitHouse];hg_field_app_step(self.canvas.application);
-        if(hg_field_app_map(travelSession)!=60 || hg_field_app_steps(travelSession)!=8 || ![self.canvas render])exit(1);
-        if(self.canvas.application!=travelSession || self.selectedMap!=60 || self.canvas.movementKeys)exit(1);
-        if(![self.canvas loadMap:65 error:reloadError])exit(1);
+        if(hg_field_app_map(travelSession)!=60 || hg_field_app_steps(travelSession)!=8 || ![self.canvas render])field_fail(__LINE__);
+        if(self.canvas.application!=travelSession || self.selectedMap!=60 || self.canvas.movementKeys)field_fail(__LINE__);
+        if(![self.canvas loadMap:65 error:reloadError])field_fail(__LINE__);
         for(unsigned step=0;step<3;step++) {
             [self.canvas keyDown:walk];hg_field_app_step(self.canvas.application);[self.canvas keyUp:release];
             for(unsigned tick=1;tick<8;tick++)hg_field_app_step(self.canvas.application);
@@ -347,43 +397,33 @@ static NSString *mapTitle(unsigned map) {
         NSEvent *faceNpc=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"d" charactersIgnoringModifiers:@"d" isARepeat:NO keyCode:2];
         [self.canvas keyDown:faceNpc];hg_field_app_step(self.canvas.application);self.canvas.movementKeys=0;hg_field_app_clear_input(self.canvas.application);
         [self.canvas keyDown:confirm];hg_field_app_step(self.canvas.application);
-        if(strcmp(hg_field_app_dialogue_page(self.canvas.application),"PIKACHU is an evolved Pokémon.")||![self.canvas render])exit(1);
+        if(strcmp(hg_field_app_dialogue_page(self.canvas.application),"PIKACHU is an evolved Pokémon.")||![self.canvas render])field_fail(__LINE__);
         [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/new-bark-npc-dialogue.png" atomically:YES];
         unsigned pages=0;
         while(hg_field_app_dialogue(self.canvas.application)[0]&&pages++<16){[self.canvas keyDown:confirm];hg_field_app_step(self.canvas.application);}
-        if(pages<3||pages>=16||hg_field_app_dialogue(self.canvas.application)[0]||![self.canvas render])exit(1);
-        if(![self.canvas loadMap:63 error:reloadError])exit(1);
-        NSString *momRoute=@"wwwddd";
-        for(NSUInteger i=0;i<momRoute.length;i++) {
-            NSString *letter=[momRoute substringWithRange:NSMakeRange(i,1)];
-            NSEvent *down=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:letter charactersIgnoringModifiers:letter isARepeat:NO keyCode:0];
-            NSEvent *up=[NSEvent keyEventWithType:NSEventTypeKeyUp location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:letter charactersIgnoringModifiers:letter isARepeat:NO keyCode:0];
-            [self.canvas keyDown:down];hg_field_app_step(self.canvas.application);[self.canvas keyUp:up];for(unsigned tick=1;tick<8;tick++)hg_field_app_step(self.canvas.application);
-        }
+        if(pages<3||pages>=16||hg_field_app_dialogue(self.canvas.application)[0]||![self.canvas render])field_fail(__LINE__);
+        if(![self.canvas loadMap:63 error:reloadError])field_fail(__LINE__);
+        settleAutomatic(self.canvas.application);
+        hg_ui_test_approach(self.canvas.application,2);
         HGStoryState *story=hg_field_app_story(self.canvas.application);unsigned long long beforeStory=hg_story_revision(story);
         [self.canvas keyDown:confirm];hg_field_app_step(self.canvas.application);
-        if(strcmp(hg_field_app_dialogue(self.canvas.application),"Professor Elm has been waiting for\nyou, dear. Please, go and help him.")||hg_story_revision(story)!=beforeStory||![self.canvas render])exit(1);
+        if(strcmp(hg_field_app_dialogue(self.canvas.application),"Professor Elm has been waiting for\nyou, dear. Please, go and help him.")||hg_story_revision(story)!=beforeStory||![self.canvas render])field_fail(__LINE__);
         [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/new-bark-mom-story.png" atomically:YES];
         [self.canvas keyDown:confirm];hg_field_app_step(self.canvas.application);
-        if(hg_field_app_dialogue(self.canvas.application)[0]||hg_story_revision(story)!=beforeStory+1||![self.canvas render])exit(1);
+        settleAutomatic(self.canvas.application);
+        if(hg_field_app_dialogue(self.canvas.application)[0]||hg_story_revision(story)!=beforeStory+1||![self.canvas render])field_fail(__LINE__);
         NSArray *conversations=@[
-            @{@"map":@60,@"route":@"sssssssasssaa",@"text":@"Yo, Ethan!",@"image":@"new-bark-breeder-dialogue.png"},
-            @{@"map":@61,@"route":@"wwwwwwwwwdd",@"text":@"Professor Elm: If a wild Pokémon",@"image":@"new-bark-elm-dialogue.png"},
-            @{@"map":@60,@"route":@"wwwwaaaaaaawwwd",@"text":@"So this is the famous Elm",@"image":@"new-bark-rival-dialogue.png"}
+            @{@"map":@60,@"script":@16,@"text":@"Yo, Ethan!",@"image":@"new-bark-breeder-dialogue.png"},
+            @{@"map":@61,@"script":@1,@"text":@"Professor Elm: If a wild Pokémon",@"image":@"new-bark-elm-dialogue.png"},
+            @{@"map":@60,@"script":@1,@"text":@"So this is the famous Elm",@"image":@"new-bark-rival-dialogue.png"}
         ];
         for(NSDictionary *conversation in conversations) {
-            if(![self.canvas loadMap:[conversation[@"map"] unsignedIntValue] error:reloadError])exit(1);
-            NSString *route=conversation[@"route"];
-            for(NSUInteger i=0;i<route.length;i++) {
-                NSString *letter=[route substringWithRange:NSMakeRange(i,1)];
-                NSEvent *down=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:letter charactersIgnoringModifiers:letter isARepeat:NO keyCode:0];
-                NSEvent *up=[NSEvent keyEventWithType:NSEventTypeKeyUp location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:letter charactersIgnoringModifiers:letter isARepeat:NO keyCode:0];
-                [self.canvas keyDown:down];hg_field_app_step(self.canvas.application);[self.canvas keyUp:up];for(unsigned tick=1;tick<8;tick++)hg_field_app_step(self.canvas.application);
-            }
+            if(![self.canvas loadMap:[conversation[@"map"] unsignedIntValue] error:reloadError])field_fail(__LINE__);
+            hg_ui_test_approach(self.canvas.application,[conversation[@"script"] unsignedIntValue]);
             [self.canvas resetCamera];
             story=hg_field_app_story(self.canvas.application);beforeStory=hg_story_revision(story);
             [self.canvas keyDown:confirm];hg_field_app_step(self.canvas.application);
-            if(!strstr(hg_field_app_dialogue(self.canvas.application),[conversation[@"text"] UTF8String])||hg_story_revision(story)!=beforeStory||![self.canvas render])exit(1);
+            if(!strstr(hg_field_app_dialogue(self.canvas.application),[conversation[@"text"] UTF8String])||hg_story_revision(story)!=beforeStory||![self.canvas render])field_fail(__LINE__);
             NSString *path=[@"build/evidence" stringByAppendingPathComponent:conversation[@"image"]];
             [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:path atomically:YES];
             unsigned ticks=0;BOOL second=NO,jumped=NO;double origin[3];hg_field_app_presentation(self.canvas.application,origin,NULL);
@@ -392,14 +432,32 @@ static NSString *mapTitle(unsigned map) {
                 if(hg_field_app_dialogue(self.canvas.application)[0])[self.canvas keyDown:confirm];
                 hg_field_app_step(self.canvas.application);double world[3];hg_field_app_presentation(self.canvas.application,world,NULL);
                 if(!jumped&&world[1]>origin[1]+1) {
-                    jumped=YES;[self.canvas resetCamera];if(![self.canvas render])exit(1);
+                    jumped=YES;[self.canvas resetCamera];if(![self.canvas render])field_fail(__LINE__);
                     [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/new-bark-rival-jump.png" atomically:YES];
                 }
             }
-            if(ticks>=2048||hg_story_revision(story)!=beforeStory+1||![self.canvas render])exit(1);
-            if([conversation[@"image"] isEqualToString:@"new-bark-rival-dialogue.png"]&&(!second||!jumped))exit(1);
+            if(ticks>=2048||hg_story_revision(story)!=beforeStory+1||![self.canvas render])field_fail(__LINE__);
+            if([conversation[@"image"] isEqualToString:@"new-bark-rival-dialogue.png"]&&(!second||!jumped))field_fail(__LINE__);
         }
-        [self.canvas display];fprintf(stderr,"Map browser smoke: Elm, breeder and rival conversations, rival shove/jump and original completion, Mom, NPC paging, retained travel/session statistics, map-list/camera synchronization, walk/run, town sign, input, timing, search and AppKit display passed\n");[NSApp terminate:nil];
+        hg_ui_test_approach(self.canvas.application,16);
+        hg_field_app_interact(self.canvas.application);hg_field_app_step(self.canvas.application);
+        if(!hg_field_app_interaction_busy(self.canvas.application))field_fail(__LINE__);
+        NSString *retainedPage=[NSString stringWithUTF8String:hg_field_app_dialogue_page(self.canvas.application)];
+        char exploreError[256];HGFieldApp *retained=self.canvas.application;int retainedX,retainedZ;
+        if(!hg_field_app_player(retained,&retainedX,&retainedZ))field_fail(__LINE__);
+        unsigned long long retainedRevision=hg_story_revision(hg_field_app_story(retained));
+        self.exploration.state=NSControlStateValueOn;[self changeExploration:nil];
+        if(self.canvas.application==retained||self.canvas.suspendedStory!=retained||!hg_field_app_is_exploring(self.canvas.application))field_fail(__LINE__);
+        if(![self.canvas loadMap:143 error:exploreError])field_fail(__LINE__);
+        for(unsigned i=0;i<64;i++)hg_field_app_step(self.canvas.application);
+        if(hg_field_app_interaction_busy(self.canvas.application)||![self.canvas render])field_fail(__LINE__);
+        [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/exploration-mr-pokemon.png" atomically:YES];
+        self.exploration.state=NSControlStateValueOff;[self changeExploration:nil];
+        int restoredX,restoredZ;
+        if(self.canvas.application!=retained||self.canvas.suspendedStory||!hg_field_app_player(retained,&restoredX,&restoredZ)||restoredX!=retainedX||restoredZ!=retainedZ||hg_story_revision(hg_field_app_story(retained))!=retainedRevision)field_fail(__LINE__);
+        if(![retainedPage isEqualToString:[NSString stringWithUTF8String:hg_field_app_dialogue_page(retained)]]||!hg_field_app_interaction_busy(retained))field_fail(__LINE__);
+        settleAutomatic(retained);
+        [self.canvas display];fprintf(stderr,"Map browser smoke: Elm, breeder and rival conversations, rival shove/jump and original completion, Mom, NPC paging, retained travel/session statistics, map-list/camera synchronization, walk/run, town sign, input, timing, search, exploration/session restoration and AppKit display passed\n");[NSApp terminate:nil];
     });
 }
 @end
@@ -416,9 +474,14 @@ int main(int argc,const char **argv) {
             NSData *png=[canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
             return [png writeToFile:[NSString stringWithUTF8String:argv[argc-1]] atomically:YES]?0:1;
         }
-        if(argc!=1 && (argc!=2 || strcmp(argv[1],"--smoke"))) { fprintf(stderr,"Usage: heartgold_field_viewer [--smoke | --render-only path.png | --render-map ID path.png | --render-character ID path.png]\n");return 2; }
+        unsigned exploreMap=0;BOOL explore=argc==3&&!strcmp(argv[1],"--explore");
+        if(explore) {
+            char *end;unsigned long map=strtoul(argv[2],&end,10);
+            if(!argv[2][0]||*end||map>=hg_field_map_count())return 2;exploreMap=(unsigned)map;
+        }
+        if(!explore&&argc!=1 && (argc!=2 || strcmp(argv[1],"--smoke"))) { fprintf(stderr,"Usage: heartgold_field_viewer [--explore ID | --smoke | --render-only path.png | --render-map ID path.png | --render-character ID path.png]\n");return 2; }
         NSApplication *app=[NSApplication sharedApplication];[app setActivationPolicy:NSApplicationActivationPolicyRegular];
         NSMenu *main=[NSMenu new],*menu=[NSMenu new];NSMenuItem *root=[NSMenuItem new];[main addItem:root];root.submenu=menu;[menu addItemWithTitle:@"Quit HeartGold MX Field" action:@selector(terminate:) keyEquivalent:@"q"];app.mainMenu=main;
-        FieldApp *delegate=[FieldApp new];delegate.smoke=argc==2;app.delegate=delegate;[app run];
+        FieldApp *delegate=[FieldApp new];delegate.smoke=argc==2;delegate.exploreAtLaunch=explore;delegate.initialMap=exploreMap;app.delegate=delegate;[app run];
     }return 0;
 }

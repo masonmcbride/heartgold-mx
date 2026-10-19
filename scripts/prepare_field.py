@@ -50,3 +50,6 @@ shutil.copyfile(root/"files/fielddata/build_model/bm_field_matshp.dat",out/"reso
 
 shutil.copyfile(root/"files/a/1/4/8",out/"resources/room_props.narc")
 shutil.copyfile(root/"files/fielddata/build_model/bm_room_matshp.dat",out/"resources/bm_room_matshp.dat")
+
+for source,name in (("a/1/0/6","prop_animations.narc"),("a/1/0/7","field_prop_animations.narc"),("a/1/0/8","room_prop_animations.narc")):
+    shutil.copyfile(root/"files"/source,out/"resources"/name)

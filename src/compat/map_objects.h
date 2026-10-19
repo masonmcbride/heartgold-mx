@@ -5,3 +5,7 @@
  * caller supplies an inactive slot. Conditional flags and dynamic graphics
  * require the bound story owner; otherwise they fail. Failure preserves slot. */
 int hg_map_object_init_event(LocalMapObject *,MapObjectManager *,unsigned map,const ObjectEvent *);
+
+void hg_map_object_set_map(LocalMapObject *,unsigned);
+
+void hg_map_object_set_movement(LocalMapObject *,unsigned);

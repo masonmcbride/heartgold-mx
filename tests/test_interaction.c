@@ -5,9 +5,24 @@
 #include "ds_resources.h"
 #include "compat/resources.h"
 #include "compat/story.h"
+#include "compat/pokemon.h"
+#include "bag.h"
+#include "constants/phone_contacts.h"
+#include "save_pokegear.h"
 #include <string.h>
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"%s:%d %s\n",__FILE__,__LINE__,#x);exit(1);}}while(0)
 #include "field_routes.h"
+static void acceptance_frame(HGFieldApp *app,unsigned species,const char *stage) {
+    const char *folder=getenv("HG_ACCEPT_EVIDENCE");
+    uint8_t pixels[512*384*4];DSCamera camera;hg_field_app_camera(app,&camera,512,384);CHECK(hg_field_app_render(app,&camera,pixels,512,384));
+    if(!strcmp(stage,"mr-pokemon-black"))for(unsigned i=0;i<512*384;i++)CHECK(!pixels[4*i]&&!pixels[4*i+1]&&!pixels[4*i+2]);
+    if(!strcmp(stage,"menu")||!strcmp(stage,"choice")) {
+        unsigned highlight=0;for(unsigned i=0;i<512*384;i++)highlight+=pixels[4*i]==184&&pixels[4*i+1]==216&&pixels[4*i+2]==240;CHECK(highlight>1000);
+    }
+    if(!folder)return;
+    char path[4096];CHECK(snprintf(path,sizeof(path),"%s/starter-%u-%s.ppm",folder,species,stage)>0);FILE *f=fopen(path,"wb");CHECK(f);CHECK(fprintf(f,"P6\n512 384\n255\n")>0);
+    for(unsigned i=0;i<512*384;i++)CHECK(fwrite(pixels+4*i,1,3,f)==3);CHECK(!fclose(f));
+}
 static void close_conversation(HGFieldApp *app) {
     unsigned pages=0,ticks=0;
     while(hg_field_app_interaction_busy(app)&&ticks++<2048) {
@@ -133,11 +148,10 @@ int main(void) {
     hg_field_app_interact(app);hg_field_app_step(app);
     CHECK(!strcmp(hg_field_app_dialogue(app),"Professor Elm has been waiting for\nyou, dear. Please, go and help him."));
     CHECK(hg_story_revision(story)==revision);close_conversation(app);CHECK(hg_story_revision(story)==revision+1&&hg_field_app_steps(app)==steps);
-    CHECK(hg_story_var_set(story,VAR_SCENE_NEW_BARK_TOWN_OW,1));
     hg_test_walk_to(app,3,10);hg_field_app_input(app,0x80);hg_field_app_step(app);hg_field_app_clear_input(app);
-    CHECK(hg_field_app_map(app)==60&&hg_field_app_story(app)==story);uint16_t scene;CHECK(hg_story_var_get(story,VAR_SCENE_NEW_BARK_TOWN_OW,&scene)&&scene==1);
+    CHECK(hg_field_app_map(app)==60&&hg_field_app_story(app)==story);uint16_t scene;CHECK(hg_story_var_get(story,VAR_SCENE_NEW_BARK_TOWN_OW,&scene)&&scene==0);
     hg_test_approach(app,2);hg_field_app_interact(app);hg_field_app_step(app);
-    CHECK(strstr(hg_field_app_dialogue(app),"adorable"));close_conversation(app);hg_field_app_free(app);
+    CHECK(strstr(hg_field_app_dialogue(app),"I like your Bag!"));close_conversation(app);hg_field_app_free(app);
     app=hg_field_app_new(62,error,sizeof(error));CHECK(app);hg_test_approach(app,2);
     hg_field_app_interact(app);hg_field_app_step(app);CHECK(strstr(hg_field_app_dialogue(app),"Pokémon Professor!"));
     close_conversation(app);hg_field_app_free(app);
@@ -177,6 +191,191 @@ int main(void) {
         CHECK(hg_field_player_steps(player)==before_steps);CHECK(hg_field_player_actor(player,0,&rival)&&rival.x==682&&rival.z==391&&rival.direction==3);
         hg_field_player_free(player);
     }
+    /* Acceptance begins at the original bedroom spawn, without running shoes.
+     * All story advancement below comes from original automatic scripts. */
+    const unsigned expected[]={152,155,158};
+    for(unsigned starter_choice=0;starter_choice<3;starter_choice++) {
+    HGFieldApp *arrival=hg_field_app_new_game(error,sizeof(error));CHECK(arrival);
+    CHECK(hg_field_app_map(arrival)==64&&hg_field_app_player(arrival,&px,&pz)&&px==6&&pz==6);
+    CHECK(!hg_field_app_running_shoes(arrival));
+    acceptance_frame(arrival,expected[starter_choice],"bedroom");
+    HGStoryState *arrival_story=hg_field_app_story(arrival);FieldSystem opening_field={0};hg_story_bind_field(arrival_story,&opening_field);
+    CHECK(PlayerProfile_GetMoney(hg_story_save_profile(opening_field.saveData))==3000);
+    hg_test_portal(arrival,63);
+    CHECK(hg_field_app_map(arrival)==63&&hg_field_app_story(arrival)==arrival_story);
+    CHECK(hg_test_settle(arrival)>0);int opening_flag;
+    CHECK(hg_story_flag_get(arrival_story,FLAG_GOT_BAG,&opening_flag)&&opening_flag);
+    CHECK(hg_story_flag_get(arrival_story,FLAG_GOT_TRAINER_CARD,&opening_flag)&&opening_flag);
+    hg_test_walk_to(arrival,3,10);hg_field_app_input(arrival,0x80);hg_field_app_step(arrival);hg_field_app_clear_input(arrival);
+    CHECK(hg_field_app_map(arrival)==60&&hg_field_app_story(arrival)==arrival_story);
+    hg_test_settle(arrival);
+    hg_test_walk_to(arrival,684,394);
+    hg_field_app_input(arrival,0x40);hg_field_app_step(arrival);hg_field_app_clear_input(arrival);
+    CHECK(hg_field_app_map(arrival)==61&&hg_field_app_story(arrival)==arrival_story);
+    for(unsigned step=0;step<4;step++) {
+        hg_field_app_input(arrival,0x40);hg_field_app_step(arrival);hg_field_app_clear_input(arrival);
+        for(unsigned tick=1;tick<8;tick++)hg_field_app_step(arrival);
+    }
+    CHECK(hg_field_app_interaction_busy(arrival));unsigned arrival_ticks=0,emote_pixels=0;
+    while(hg_field_app_interaction_busy(arrival)&&arrival_ticks++<2048) {
+        if(hg_field_app_dialogue(arrival)[0])hg_field_app_interact(arrival);
+        hg_field_app_step(arrival);
+        if(arrival_ticks%5==0&&!hg_field_app_dialogue(arrival)[0]) {
+            uint8_t frame[320*240*4];DSCamera view_camera;hg_field_app_camera(arrival,&view_camera,320,240);
+            CHECK(hg_field_app_render(arrival,&view_camera,frame,320,240));
+            for(unsigned i=0;i<320*240;i++)emote_pixels+=frame[4*i]==255&&frame[4*i+1]==224&&frame[4*i+2]==64;
+        }
+    }
+    CHECK(arrival_ticks<2048&&emote_pixels);
+    int arrival_flag;CHECK(hg_story_flag_get(arrival_story,FLAG_ELMS_LAB_PREVENT_PLAYER_ESCAPE,&arrival_flag)&&arrival_flag);
+    CHECK(hg_field_app_player(arrival,&px,&pz)&&px==4&&pz==7);
+    hg_test_walk_to(arrival,8,5);hg_field_app_input(arrival,0x40);hg_field_app_step(arrival);hg_field_app_clear_input(arrival);
+    unsigned long long choice_before=hg_story_revision(arrival_story);
+    hg_field_app_interact(arrival);hg_field_app_step(arrival);
+    unsigned chosen=0,menu=0,starter_ticks=0;
+    while(hg_field_app_interaction_busy(arrival)&&starter_ticks++<4096) {
+        CHECK(!strstr(hg_field_app_dialogue(arrival),"isn’t available yet"));
+        if(hg_field_app_starter_pending(arrival)){acceptance_frame(arrival,expected[starter_choice],"choice");chosen++;for(unsigned i=0;i<starter_choice;i++){hg_field_app_input(arrival,0x80);hg_field_app_step(arrival);}hg_field_app_interact(arrival);}
+        else if(hg_field_app_menu_pending(arrival)){acceptance_frame(arrival,expected[starter_choice],"menu");menu++;hg_field_app_interact(arrival);}
+        else if(hg_field_app_dialogue(arrival)[0])hg_field_app_interact(arrival);
+        hg_field_app_step(arrival);
+    }
+    CHECK(starter_ticks<4096&&chosen==1&&menu==1);
+    CHECK(hg_story_revision(arrival_story)==choice_before+1);
+    CHECK(hg_story_flag_get(arrival_story,FLAG_GOT_STARTER,&arrival_flag)&&arrival_flag);
+    CHECK(hg_story_flag_get(arrival_story,FLAG_ELMS_LAB_PREVENT_PLAYER_ESCAPE,&arrival_flag)&&!arrival_flag);
+    unsigned species;int fx,fz;
+    CHECK(hg_field_app_follower(arrival,&species,&fx,&fz)&&species==expected[starter_choice]);
+    FieldSystem saved_field={0};hg_story_bind_field(arrival_story,&saved_field);
+    Party *saved_party=hg_story_save_party(saved_field.saveData);CHECK(Party_GetCount(saved_party)==1);
+    CHECK(GetMonData(Party_GetMonByIndex(saved_party,0),MON_DATA_SPECIES,NULL)==species);
+    CHECK(Pokedex_CheckMonCaughtFlag(hg_story_save_dex(saved_field.saveData),species));
+    acceptance_frame(arrival,species,"lab");
+    hg_test_walk_to(arrival,4,14);
+    hg_field_app_input(arrival,0x80);hg_field_app_step(arrival);hg_field_app_clear_input(arrival);
+    CHECK(hg_field_app_map(arrival)==60&&hg_field_app_story(arrival)==arrival_story);
+    CHECK(hg_field_app_follower(arrival,&species,&fx,&fz)&&species==expected[starter_choice]);
+    CHECK(hg_field_app_player(arrival,&px,&pz)&&fx==px&&fz==pz);
+    CHECK(hg_test_settle(arrival)>0); /* Original friend/Marill frame event. */
+    uint16_t town_scene;CHECK(hg_story_var_get(arrival_story,VAR_SCENE_NEW_BARK_TOWN_OW,&town_scene)&&town_scene==2);
+    for(unsigned step=0;step<2;step++) {
+        hg_field_app_input(arrival,0x80);hg_field_app_step(arrival);hg_field_app_clear_input(arrival);
+        for(unsigned tick=0;tick<16;tick++)hg_field_app_step(arrival);
+    }
+    CHECK(hg_field_app_player(arrival,&px,&pz)&&hg_field_app_follower(arrival,&species,&fx,&fz));
+    if(fx!=px||fz!=pz-1)fprintf(stderr,"Following outside: player %d,%d follower %d,%d\n",px,pz,fx,fz);
+    CHECK(fx==px&&fz==pz-1);
+    uint16_t lab_scene;CHECK(hg_story_var_get(arrival_story,VAR_SCENE_ELMS_LAB,&lab_scene)&&lab_scene==2);
+    CHECK(Bag_GetQuantity(hg_story_save_bag(saved_field.saveData),ITEM_POTION,HEAP_ID_FIELD1)==5);
+    acceptance_frame(arrival,species,"outside");
+    int outside_z=pz;hg_field_app_input(arrival,0x40);hg_field_app_step(arrival);hg_field_app_clear_input(arrival);
+    for(unsigned tick=0;tick<16;tick++)hg_field_app_step(arrival);
+    CHECK(hg_field_app_player(arrival,&px,&pz)&&pz==outside_z-1);
+    hg_test_walk_to(arrival,684,394);hg_field_app_input(arrival,0x40);hg_field_app_step(arrival);hg_field_app_clear_input(arrival);
+    CHECK(hg_field_app_map(arrival)==61&&hg_field_app_follower(arrival,&species,&fx,&fz)&&species==expected[starter_choice]);
+    CHECK(Party_GetCount(saved_party)==1&&Bag_GetQuantity(hg_story_save_bag(saved_field.saveData),ITEM_POTION,HEAP_ID_FIELD1)==5);
+    hg_test_portal(arrival,60);hg_test_settle(arrival);
+    hg_test_portal(arrival,63);hg_test_settle(arrival);hg_test_approach(arrival,2);
+    hg_field_app_interact(arrival);hg_field_app_step(arrival);CHECK(hg_test_settle_choice(arrival,starter_choice%2)>0);
+    CHECK(hg_story_flag_get(arrival_story,FLAG_GOT_POKEGEAR,&arrival_flag)&&arrival_flag);
+    CHECK(Party_GetCount(saved_party)==1&&Bag_GetQuantity(hg_story_save_bag(saved_field.saveData),ITEM_POTION,HEAP_ID_FIELD1)==5);
+    hg_test_portal(arrival,60);hg_test_settle(arrival);CHECK(hg_field_app_story(arrival)==arrival_story);
+    /* Original mandatory farewell: actual prop frames, Elm walks out, gives
+     * his number, returns through the door, and clears the original gate. */
+    CHECK(hg_story_phone_registered(arrival_story,PHONE_CONTACT_MOTHER));
+    CHECK(!hg_story_phone_registered(arrival_story,PHONE_CONTACT_PROF__ELM));
+    hg_test_walk_to(arrival,677,398);
+    hg_field_app_input(arrival,0x20);hg_field_app_step(arrival);hg_field_app_clear_input(arrival);
+    for(unsigned tick=0;tick<16;tick++)hg_field_app_step(arrival);
+    CHECK(hg_test_settle(arrival)>0);
+    CHECK(!hg_field_app_error(arrival)[0]);
+    CHECK(hg_story_phone_registered(arrival_story,PHONE_CONTACT_PROF__ELM));
+    uint16_t farewell;CHECK(hg_story_var_get(arrival_story,VAR_SCENE_NEW_BARK_WEST_EXIT,&farewell)&&farewell==1);
+    CHECK(Party_GetCount(saved_party)==1&&Bag_GetQuantity(hg_story_save_bag(saved_field.saveData),ITEM_POTION,HEAP_ID_FIELD1)==5);
+    acceptance_frame(arrival,species,"elm-farewell");
+    hg_test_walk_to(arrival,672,398);unsigned border_steps=hg_field_app_steps(arrival);
+    unsigned long long border_revision=hg_story_revision(arrival_story);
+    hg_field_app_input(arrival,0x20);hg_field_app_step(arrival);hg_field_app_clear_input(arrival);
+    for(unsigned tick=0;tick<16;tick++)hg_field_app_step(arrival);
+    CHECK(hg_field_app_map(arrival)==33&&hg_field_app_player(arrival,&px,&pz)&&px==671&&pz==398);
+    CHECK(hg_field_app_steps(arrival)==border_steps+1&&hg_story_revision(arrival_story)>border_revision);
+    CHECK(hg_field_app_story(arrival)==arrival_story&&hg_story_phone_registered(arrival_story,PHONE_CONTACT_PROF__ELM));
+    CHECK(Party_GetCount(saved_party)==1&&Bag_GetQuantity(hg_story_save_bag(saved_field.saveData),ITEM_POTION,HEAP_ID_FIELD1)==5);
+    acceptance_frame(arrival,species,"route-29");
+    hg_test_approach(arrival,std_apricorn_tree);
+    hg_field_app_interact(arrival);hg_field_app_step(arrival);CHECK(hg_test_settle(arrival)>0);
+    CHECK(!hg_field_app_error(arrival)[0]);
+    acceptance_frame(arrival,species,"apricorn-tree");
+    hg_test_portal(arrival,67);hg_test_settle(arrival);
+    hg_test_walk_to(arrival,565,398);hg_test_settle(arrival);
+    uint16_t guide_scene;CHECK(hg_story_var_get(arrival_story,VAR_SCENE_CHERRYGROVE_CITY_OW,&guide_scene)&&guide_scene==1);
+    CHECK(hg_field_app_running_shoes(arrival));
+    CHECK(hg_story_flag_get(arrival_story,FLAG_HIDE_CHERRYGROVE_GUIDE_GENT,&arrival_flag)&&arrival_flag);
+    acceptance_frame(arrival,species,"cherrygrove");
+    hg_test_portal(arrival,34);hg_test_settle(arrival);
+    CHECK(hg_story_var_get(arrival_story,VAR_SCENE_CHERRYGROVE_CITY_OW,&guide_scene)&&guide_scene==2);
+    CHECK(Pokegear_GetRegisteredCardsArray(hg_story_save_pokegear(saved_field.saveData))&GEARCARD_MAP);
+    CHECK(hg_field_app_running_shoes(arrival));
+    acceptance_frame(arrival,species,"route-30");
+    Pokemon *resting=Party_GetMonByIndex(saved_party,0);u32 damaged=1,condition=8;u8 empty_pp=0;
+    SetMonData(resting,MON_DATA_HP,&damaged);SetMonData(resting,MON_DATA_STATUS,&condition);SetMonData(resting,MON_DATA_MOVE1_PP,&empty_pp);
+    hg_test_portal(arrival,143);
+    CHECK(hg_story_flag_get(arrival_story,FLAG_GOT_APRICORN_BOX,&arrival_flag)&&arrival_flag);
+    CHECK(Bag_GetQuantity(hg_story_save_bag(saved_field.saveData),ITEM_APRICORN_BOX,HEAP_ID_FIELD1)==1);
+    unsigned rest_ticks=0;int fade_out=0,black=0,fade_in=0;
+    for(;rest_ticks<8192;rest_ticks++) {
+        hg_field_app_step(arrival);int brightness=hg_field_app_brightness(arrival);
+        if(brightness<0&&brightness> -16&&!fade_out){acceptance_frame(arrival,species,"mr-pokemon-fade-out");fade_out=1;}
+        if(brightness== -16&&!black){acceptance_frame(arrival,species,"mr-pokemon-black");black=1;}
+        if(black&&brightness<0&&brightness> -16&&!fade_in){acceptance_frame(arrival,species,"mr-pokemon-fade-in");fade_in=1;}
+        if(strstr(hg_field_app_dialogue(arrival),"isn’t available yet"))fprintf(stderr,"House: %s\n",hg_field_app_error(arrival));
+        CHECK(!strstr(hg_field_app_dialogue(arrival),"isn’t available yet"));
+        if(hg_field_app_dialogue(arrival)[0])hg_field_app_interact(arrival);
+        if(!hg_field_app_interaction_busy(arrival)&&!hg_field_app_dialogue(arrival)[0]&&rest_ticks>1)break;
+    }
+    CHECK(rest_ticks<8192&&fade_out&&black&&fade_in&&!hg_field_app_brightness(arrival));
+    CHECK(GetMonData(resting,MON_DATA_HP,NULL)==GetMonData(resting,MON_DATA_MAX_HP,NULL));
+    CHECK(!GetMonData(resting,MON_DATA_STATUS,NULL)&&GetMonData(resting,MON_DATA_MOVE1_PP,NULL)>0);
+    CHECK(!hg_field_app_error(arrival)[0]);
+    CHECK(Bag_GetQuantity(hg_story_save_bag(saved_field.saveData),ITEM_MYSTERY_EGG,HEAP_ID_FIELD1)==1);
+    CHECK(hg_story_flag_get(arrival_story,FLAG_GOT_POKEDEX,&arrival_flag)&&arrival_flag);
+    CHECK(Pokedex_IsEnabled(hg_story_save_dex(saved_field.saveData)));
+    CHECK(hg_story_phone_registered(arrival_story,PHONE_CONTACT_PROF__OAK));
+    CHECK(Save_SysInfo_GetMysteryGiftActive(hg_story_save_sys_info(saved_field.saveData)));
+    CHECK(*hg_story_save_blackout_spawn(saved_field.saveData)==2);
+    acceptance_frame(arrival,species,"mr-pokemon");
+    hg_test_portal(arrival,34);
+    unsigned long long phone_revision=hg_story_revision(arrival_story);
+    for(unsigned tick=0;tick<64&&!hg_field_app_dialogue(arrival)[0];tick++)hg_field_app_step(arrival);
+    CHECK(strstr(hg_field_app_dialogue(arrival),"isn’t available yet")&&strstr(hg_field_app_error(arrival),"opcode 430"));
+    CHECK(hg_story_revision(arrival_story)==phone_revision);
+    CHECK(hg_story_flag_get(arrival_story,FLAG_GOT_ELMS_PANIC_CALL,&arrival_flag)&&!arrival_flag);
+    CHECK(Bag_GetQuantity(hg_story_save_bag(saved_field.saveData),ITEM_MYSTERY_EGG,HEAP_ID_FIELD1)==1);
+    CHECK(hg_field_app_running_shoes(arrival));
+    CHECK(hg_field_app_story(arrival)==arrival_story&&hg_story_phone_registered(arrival_story,PHONE_CONTACT_PROF__ELM));
+
+    hg_field_app_free(arrival);
+    }
+    /* Full original introduction from its real coordinate-trigger row. */
+    HGFieldPlayer *intro=hg_field_player_new_map(61);CHECK(intro);
+    for(unsigned step=0;step<4;step++) {
+        CHECK(hg_field_player_move(intro,0x40));for(unsigned tick=0;tick<8;tick++)CHECK(hg_field_player_tick(intro));
+    }
+    CHECK(hg_field_player_position(intro,&px,&pz,NULL)&&px==4&&pz==10);
+    if(!hg_field_player_start_script(intro,12,-1))fprintf(stderr,"Intro: %s\n",hg_field_player_interaction_error(intro));
+    CHECK(hg_field_player_interaction_busy(intro));
+    char intro_message[HG_SCRIPT_TEXT_CAPACITY];unsigned intro_ticks=0,intro_messages=0;int intro_emote=0;
+    while(hg_field_player_interaction_busy(intro)&&intro_ticks++<2048) {
+        int status=hg_field_player_interaction_tick(intro,intro_message,sizeof(intro_message));
+        CHECK(status!=HG_SCRIPT_ERROR);
+        for(unsigned actor=0;actor<hg_field_player_actor_counts(intro).active;actor++) {
+            HGFieldActor info;CHECK(hg_field_player_actor(intro,actor,&info));intro_emote|=info.emote;
+        }
+        if(status==HG_SCRIPT_MESSAGE){intro_messages++;CHECK(hg_field_player_interaction_ack(intro));}
+    }
+    CHECK(intro_ticks<2048&&intro_emote&&intro_messages==4);
+    int intro_flag;CHECK(hg_story_flag_get(hg_field_player_story(intro),FLAG_ELMS_LAB_PREVENT_PLAYER_ESCAPE,&intro_flag)&&intro_flag);
+    CHECK(hg_field_player_position(intro,&px,&pz,NULL)&&px==4&&pz==7);hg_field_player_free(intro);
     /* An unsupported later Elm branch explains the limitation visibly and
      * leaves the original story candidate unpublished. */
     app=hg_field_app_new(61,error,sizeof(error));CHECK(app);hg_test_approach(app,1);story=hg_field_app_story(app);

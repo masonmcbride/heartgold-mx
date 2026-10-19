@@ -5,6 +5,9 @@
 #include <stdio.h>
 #include <string.h>
 
+_Static_assert(_Alignof(u64)==4&&_Alignof(s64)==4,"Original DS 64-bit scalar alignment");
+typedef struct { u32 first;u64 value;u32 last; } DSAligned64;
+_Static_assert(sizeof(DSAligned64)==16&&offsetof(DSAligned64,value)==4,"Original DS 64-bit member placement");
 _Static_assert(CHAR_BIT == 8, "DS byte width");
 _Static_assert(sizeof(u8)==1 && sizeof(s8)==1, "8-bit scalars");
 _Static_assert(sizeof(u16)==2 && sizeof(s16)==2, "16-bit scalars");

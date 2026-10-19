@@ -2,7 +2,7 @@
 
 The field viewer now supports walking, running and door/stair travel through **New Bark and its seven interiors**. Approach a door and move into it; use the original direction indicated by a stair tile. Selecting one of these eight maps directly also creates an inspection player at its first warp, except New Bark which retains its existing town-center spawn. Other maps remain inspection-only scenes.
 
-The player, running-shoe state, original step-statistics record and native application owner survive travel. The camera resets around the destination, the map list follows the player, and map-list synchronization does not recreate the session. The native host clears held/pending input after travel to prevent an immediate repeat. Scene replacement is immediate; original door animations, fades, sound, NPC reconciliation and story/map-init scripts are not executed.
+The player, running-shoe state, original step-statistics record and native application owner survive travel. The camera resets around the destination, the map list follows the player, and map-list synchronization does not recreate the session. The native host clears held/pending input after travel to prevent an immediate repeat. Scene replacement is immediate; original door animations, fades, sound and full NPC reconciliation are not executed. Admitted story transition hooks and the lab’s resume script run through the separate staged story boundary.
 
 ## Original code executed
 
@@ -53,4 +53,4 @@ The same test discovers collision-checked routes and drives the actual applicati
 
 All 27 CTests pass normally and with ASan/UBSan; the native window smoke test passes. These establish original warp decisions connected to native inspection travel. Full field/game startup, original transition choreography, event-object reconciliation, map-init/story scripts, outdoor header crossings, battles and disk saves remain pending.
 
-Travel now stages the [story owner](story-runtime.md), original temporary-record reset and header-selected transition hook before publishing destination actors and local-field state. Failed travel retains the source story; successful travel retains the same owner. Resume/load/frame cutscenes remain separate pending work.
+Travel now stages the [story owner](story-runtime.md), original temporary-record reset and header-selected transition hook before publishing destination actors and local-field state. Failed travel retains the source story; successful travel retains the same owner. Elm’s lab now also stages its header-selected resume script, actor placement and script-created prop geometry before publication. Other resume/load hooks and frame cutscenes remain pending. Re-entry and rejected-resume scenarios verify fresh prop ownership and source-state preservation.

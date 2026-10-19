@@ -1,5 +1,7 @@
 # Whole-source native compilation audit
 
+For the current whole-source classification and batch fixes, see [full-game workstreams](full-game-workstreams.md).
+
 This document records the initial baseline before the scalar SDK header was added. For current before/after results and exposed dependencies, see [the scalar compatibility milestone](sdk-types.md). Current raw evidence is regenerated under `build/audit/`. The later [field-data milestone](field-data.md) now brings compilation to 32 game C units with source-specific field compatibility. The subsequently completed [scheduler milestone](scheduler.md) brings game C compilation to 28 units and executes the original queue/API/environment code.
 
 Measured on Apple Silicon macOS with Apple Clang 17, against upstream revision `708163e10169173d2bbab252538231721d983155`. This audit compiles original files directly and never runs their output. It does not create a full game executable or establish a port-completion percentage.

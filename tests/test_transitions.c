@@ -101,9 +101,13 @@ int main(void) {
     int x,z;CHECK(hg_field_app_player(app,&x,&z)&&x==3&&z==10);
     unsigned char pixels[256*192*4];DSCamera camera;hg_field_app_camera(app,&camera,256,192);
     CHECK(hg_field_app_render(app,&camera,pixels,256,192));
+    CHECK(hg_test_settle(app)>0); /* Entering the house now runs Mom's scene. */
+    CHECK(hg_field_app_map(app)==63);
+    hg_test_walk_to(app,3,10);steps=hg_field_app_steps(app);
     hg_field_app_input(app,0x80);hg_field_app_step(app);hg_field_app_input(app,0);
     CHECK(hg_field_app_map(app)==60&&hg_field_app_steps(app)==steps);
     CHECK(hg_field_app_player(app,&x,&z)&&x==695&&z==396);
+    hg_test_settle(app);
     hg_field_app_input(app,0x82);hg_field_app_step(app);hg_field_app_input(app,0);
     for(unsigned i=0;i<3;i++)hg_field_app_step(app);
     CHECK(hg_field_app_map(app)==60&&hg_field_app_steps(app)==steps+1);
@@ -120,7 +124,24 @@ int main(void) {
     hg_test_walk_to(app,downstairs.x,downstairs.z);steps=hg_field_app_steps(app);
     hg_field_app_input(app,keys[downstairs.direction]);hg_field_app_step(app);hg_field_app_input(app,0);
     CHECK(hg_field_app_map(app)==63&&hg_field_app_steps(app)==steps);hg_field_app_free(app);
-    CHECK(!hg_transition_supported(67)&&!hg_transition_supported(540));
+    CHECK(hg_transition_supported(33)&&!hg_transition_supported(540));
+    /* Component scenario: exercise the movement/zone owner directly, without
+     * claiming the field controller's mandatory story or encounter services.
+     * No story flags are changed to make this a gameplay route. */
+    HGFieldPlayer *zone_player=hg_field_player_new_map(60);CHECK(zone_player);
+    unsigned zone_steps=0;
+    for(unsigned i=0;i<32;i++) {
+        if(!hg_field_player_move(zone_player,0x20)) {
+            fprintf(stderr,"Header component stopped after %u steps: %s\n",zone_steps,hg_field_player_interaction_error(zone_player));break;
+        }
+        int pending=hg_field_player_pending_map(zone_player);
+        for(unsigned tick=0;tick<16&&hg_field_player_walking(zone_player);tick++)CHECK(hg_field_player_tick(zone_player)>=0);
+        CHECK(!hg_field_player_walking(zone_player));zone_steps++;
+        if(pending>=0){CHECK(pending==33&&hg_field_player_commit_zone(zone_player));break;}
+    }
+    CHECK(zone_steps==17&&hg_field_player_pending_map(zone_player)==-1&&hg_field_player_steps(zone_player)==17);
+    CHECK(hg_field_player_position(zone_player,&x,&z,NULL)&&x==671&&z==398);
+    hg_field_player_free(zone_player);
     printf("Original warp kernel: %u portals across %u maps, original anchors/local-field records, staged commit/rejection; app town-house-town round trip and retained running/statistics passed\n",portals,selected_maps);
     return 0;
 }

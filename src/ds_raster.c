@@ -39,6 +39,18 @@ static int paint(const Triangle *t,const DSRasterMaterial *m,uint8_t *rgba,doubl
     }
     return 1;
 }
+int ds_raster_project(const DSCamera *camera,const double world[3],unsigned w,unsigned h,double screen[3]) {
+    if(!camera||!world||!screen||!w||!h)return 0;
+    const double fields[]={camera->yaw,camera->pitch,camera->scale,camera->x,camera->y,camera->z,camera->pan_x,camera->pan_y,world[0],world[1],world[2]};
+    for(unsigned i=0;i<11;i++)if(!isfinite(fields[i]))return 0;
+    if(camera->scale<=0||camera->scale>1000)return 0;
+    double x=world[0]-camera->x,y=world[1]-camera->y,z=world[2]-camera->z;
+    double xr=cos(camera->yaw)*x-sin(camera->yaw)*z,zr=sin(camera->yaw)*x+cos(camera->yaw)*z;
+    screen[0]=w/2.0+camera->scale*xr+camera->pan_x;
+    screen[1]=h/2.0+camera->scale*(sin(camera->pitch)*zr-cos(camera->pitch)*y)+camera->pan_y;
+    screen[2]=cos(camera->pitch)*zr+sin(camera->pitch)*y;
+    return isfinite(screen[0])&&isfinite(screen[1])&&isfinite(screen[2]);
+}
 int ds_raster_draw(const DSRasterTriangle *src,size_t count,const DSRasterMaterial *materials,size_t material_count,const DSCamera *camera,uint8_t *rgba,unsigned w,unsigned h) {
     if(!src || !count || count>1000000 || !materials || !material_count || !camera || !rgba || !w || !h || w>2048 || h>2048)return 0;
     const double fields[]={camera->yaw,camera->pitch,camera->scale,camera->x,camera->y,camera->z,camera->pan_x,camera->pan_y};for(unsigned i=0;i<8;i++)if(!isfinite(fields[i]))return 0;

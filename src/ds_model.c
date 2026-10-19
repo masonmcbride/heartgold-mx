@@ -138,12 +138,13 @@ int ds_model_node(const DSModel *model,unsigned node,DSTransform *out) {
     size_t end=u32(model->bytes+4);if(end<72 || end>model->size || model->bytes[65]!=model->nodes)return 0;
     return node_transform(model->bytes+64,end-64,node,out);
 }
-static int scene(const DSModel *model,int selected_shape,int selected_material,DSSceneTriangle emit,void *user,DSModelStats *out,int inspection) {
+static int scene(const DSModel *model,int selected_shape,int selected_material,DSSceneTriangle emit,void *user,DSModelStats *out,int inspection,const DSJointPose *pose) {
     if(!model || !model->bytes || !out || model->size<72 || !model->nodes || model->nodes>32)return 0;
     const uint8_t *p=model->bytes;size_t sbc=u32(p+4),end=u32(p+8);
     if(p[65]!=model->nodes || sbc<72 || end<=sbc || end>model->size)return 0;
     LandTransform nodes[32],stack[32];unsigned valid[32]={0};
     for(unsigned i=0;i<model->nodes;i++)if(!node_transform(p+64,sbc-64,i,nodes+i))return 0;
+    if(pose)for(unsigned i=0;i<32;i++)if(pose->mask&(1u<<i)){if(i>=model->nodes)return 0;nodes[i]=pose->nodes[i];}
     SceneEmit state={ds_transform_identity(),emit,user,1,0};
     DSModelStats total={0};int visible=1;size_t pos=sbc;
     while(pos<end) {
@@ -186,9 +187,9 @@ static int scene(const DSModel *model,int selected_shape,int selected_material,D
     return 0;
 }
 
-int ds_model_scene(const DSModel *model,DSSceneTriangle emit,void *user,DSModelStats *out) { return scene(model,-1,-1,emit,user,out,0); }
+int ds_model_scene(const DSModel *model,DSSceneTriangle emit,void *user,DSModelStats *out) { return scene(model,-1,-1,emit,user,out,0,NULL); }
 int ds_model_scene_shape(const DSModel *model,unsigned shape,unsigned material,DSSceneTriangle emit,void *user,DSModelStats *out) {
-    if(!model || shape>=model->shapes || material>=model->materials)return 0;return scene(model,(int)shape,(int)material,emit,user,out,0);
+    if(!model || shape>=model->shapes || material>=model->materials)return 0;return scene(model,(int)shape,(int)material,emit,user,out,0,NULL);
 }
 
 /* Texture/palette bindings index material lists by names, not archive order. */
@@ -222,4 +223,6 @@ int ds_model_material(const DSModel *model,unsigned index,DSModelMaterial *out) 
     *out=v;return 1;
 }
 
-int ds_model_inspection_scene(const DSModel *m,DSSceneTriangle emit,void *user,DSModelStats *out) { return scene(m,-1,-1,emit,user,out,1); }
+int ds_model_inspection_scene(const DSModel *m,DSSceneTriangle emit,void *user,DSModelStats *out) { return scene(m,-1,-1,emit,user,out,1,NULL); }
+
+int ds_model_scene_pose(const DSModel *model,int shape,int material,const DSJointPose *pose,DSSceneTriangle emit,void *user,DSModelStats *out) { return scene(model,shape,material,emit,user,out,0,pose); }

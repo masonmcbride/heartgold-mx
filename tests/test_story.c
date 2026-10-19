@@ -1,8 +1,14 @@
 #include "field_script.h"
+#include "compat/story.h"
+#include "bag.h"
+#include "constants/items.h"
+#include "constants/std_script.h"
+#include "compat/resources.h"
 #include "game_font.h"
 #include "constants/flags.h"
 #include "constants/vars.h"
 #include "constants/sprites.h"
+#include "save_pokegear.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +23,10 @@ static int finish(HGFieldScript *script) {
     CHECK(script);for(unsigned i=0;i<20000;i++){int status=hg_field_script_tick(script);if(status==HG_SCRIPT_DONE)CHECK(hg_field_script_commit(script));if(status!=HG_SCRIPT_RUNNING)return status;}CHECK(0);return -1;
 }
 int main(void) {
+    const uint8_t *resource_bytes=NULL;size_t resource_size=0;
+    CHECK(!native_resource_member(NARC_msgdata_msg,-1,0,&resource_bytes,&resource_size));
+    CHECK(!native_resource_member(NARC_msgdata_msg,65535,0,&resource_bytes,&resource_size));
+    CHECK(!resource_bytes&&!resource_size);
     SetLCRNGSeed(0x12345678);HGStoryState *a=hg_story_new(),*b=hg_story_new();CHECK(a&&b);
     CHECK(GetLCRNGSeed()==0x12345678);CHECK(hg_story_revision(a)==1);
     CHECK(var(a,VAR_LOTO_NUMBER_LO)==0xe97e&&!var(a,VAR_LOTO_NUMBER_HI)); /* Preserve original unpatched high-half bug. */
@@ -43,6 +53,34 @@ int main(void) {
     CHECK(!hg_story_var_set(a,SPECIAL_VAR_BASE,1)&&!hg_story_flag_set(a,TEMP_FLAG_BASE+NUM_TEMP_FLAGS,1));
     CHECK(hg_story_revision(a)==revision);
     char error[160];
+    /* Contacts live in the same candidate as flags, party and bag. Preflight,
+     * failed continuations and stale commits must never publish them. */
+    CHECK(hg_story_phone_registered(a,PHONE_CONTACT_MOTHER));
+    CHECK(!hg_story_phone_registered(a,PHONE_CONTACT_PROF__ELM));
+    CHECK(!hg_story_phone_registered(NULL,0)&&!hg_story_phone_registered(a,NUM_PHONE_CONTACTS));
+    const uint8_t phone[]={H(146),H(PHONE_CONTACT_PROF__ELM),H(147),H(PHONE_CONTACT_PROF__ELM),H(VAR_TEMP_x4006),H(2)};
+    HGFieldScript *contact=hg_field_script_bytes(a,phone,sizeof(phone),0,542,error,sizeof(error));
+    CHECK(contact&&!error[0]&&!hg_story_phone_registered(a,PHONE_CONTACT_PROF__ELM));
+    CHECK(finish(contact)==HG_SCRIPT_DONE);hg_field_script_free(contact);
+    CHECK(hg_story_phone_registered(a,PHONE_CONTACT_PROF__ELM)&&var(a,VAR_TEMP_x4006)==1);
+    CHECK(!hg_story_phone_registered(b,PHONE_CONTACT_PROF__ELM));
+    HGStoryState *phone_copy=hg_story_clone(a);CHECK(phone_copy&&hg_story_phone_registered(phone_copy,PHONE_CONTACT_PROF__ELM));
+    CHECK(hg_story_enter_map(phone_copy,60,error,sizeof(error))&&hg_story_phone_registered(phone_copy,PHONE_CONTACT_PROF__ELM));
+    hg_story_free(phone_copy);
+    const uint8_t phone_fail[]={H(146),H(PHONE_CONTACT_BILL),H(1023),H(2)};
+    contact=hg_field_script_bytes(a,phone_fail,sizeof(phone_fail),0,542,error,sizeof(error));
+    CHECK(!contact&&!hg_story_phone_registered(a,PHONE_CONTACT_BILL));
+    const uint8_t phone_bad_var[]={H(146),H(0x9000),H(2)};
+    CHECK(!hg_field_script_bytes(a,phone_bad_var,sizeof(phone_bad_var),0,542,error,sizeof(error)));
+    const uint8_t phone_invalid[]={H(146),H(NUM_PHONE_CONTACTS),H(147),H(NUM_PHONE_CONTACTS),H(VAR_TEMP_x4006),H(2)};
+    contact=hg_field_script_bytes(a,phone_invalid,sizeof(phone_invalid),0,542,error,sizeof(error));
+    CHECK(contact&&finish(contact)==HG_SCRIPT_DONE&&!var(a,VAR_TEMP_x4006));hg_field_script_free(contact);
+    const uint8_t phone_bill[]={H(146),H(PHONE_CONTACT_BILL),H(2)};
+    contact=hg_field_script_bytes(a,phone_bill,sizeof(phone_bill),0,542,error,sizeof(error));CHECK(contact);
+    int contact_status;do{contact_status=hg_field_script_tick(contact);}while(contact_status==HG_SCRIPT_RUNNING);
+    CHECK(contact_status==HG_SCRIPT_DONE&&!hg_story_phone_registered(a,PHONE_CONTACT_BILL));
+    CHECK(hg_story_var_set(a,VAR_TEMP_x4006,0));
+    CHECK(!hg_field_script_commit(contact)&&!hg_story_phone_registered(a,PHONE_CONTACT_BILL));hg_field_script_free(contact);
     const uint8_t branch[]={H(41),H(VAR_TEMP_x4000),H(65535),H(39),H(VAR_TEMP_x4000),H(1),
         H(17),H(VAR_TEMP_x4000),H(0),H(28),1,W(6),H(41),H(VAR_TEMP_x4001),H(99),H(30),H(FLAG_MAPTEMP_001),H(2)};
     HGFieldScript *s=hg_field_script_bytes(a,branch,sizeof(branch),0,542,error,sizeof(error));CHECK(s&&!error[0]);
@@ -100,7 +138,7 @@ int main(void) {
     CHECK(var(a,VAR_SCENE_NEW_BARK_TOWN_OW)==1);hg_field_script_free(s);
     s=hg_field_script_new(a,60,2,error,sizeof(error));CHECK(s&&finish(s)==HG_SCRIPT_MESSAGE&&strstr(hg_field_script_message(s)->text,"adorable"));hg_field_script_free(s);
     CHECK(hg_story_flag_set(a,FLAG_GOT_STARTER,1));revision=hg_story_revision(a);
-    CHECK(!hg_field_script_new(a,63,2,error,sizeof(error))&&hg_story_revision(a)==revision&&flag(a,FLAG_GOT_STARTER));
+    s=hg_field_script_new(a,63,2,error,sizeof(error));CHECK(s&&hg_story_revision(a)==revision&&flag(a,FLAG_GOT_STARTER)&&!flag(a,FLAG_GOT_POKEGEAR));hg_field_script_free(s);
     CHECK(hg_story_enter_map(b,60,error,sizeof(error))&&flag(b,FLAG_HIDE_CAMERON));
     CHECK(var(b,VAR_OBJ_0)==SPRITE_HEROINE&&!var(b,VAR_TEMP_x4000));
     CHECK(hg_story_flag_set(b,FLAG_MAPTEMP_001,1)&&hg_story_var_set(b,VAR_TEMP_x4000,13));
@@ -124,6 +162,37 @@ int main(void) {
     const uint8_t unbound_name[]={H(45),12,H(2)},bad_slot[]={H(190),8,H(2)};
     CHECK(!hg_field_script_bytes(b,unbound_name,sizeof(unbound_name),0,542,error,sizeof(error)));
     CHECK(!hg_field_script_bytes(b,bad_slot,sizeof(bad_slot),0,542,error,sizeof(error)));
+    /* Original standard-bank routing is independent of the current map's
+     * script/message banks. Execute all eight ordinary scenery entries. */
+    const char *scenery[]={"picture books","books for Pokémon","chock-full","Pokémon magazines","trash can","vibrant","convenient","merchandise"};
+    for(unsigned n=0;n<8;n++) {
+        s=hg_field_script_new(b,n&1?61:65,std_picture_books+n,error,sizeof(error));
+        if(!s)fprintf(stderr,"Standard scenery %u: %s\n",n,error);CHECK(s&&finish(s)==HG_SCRIPT_MESSAGE);
+        CHECK(strstr(hg_field_script_message(s)->text,scenery[n]));
+        CHECK(hg_field_script_ack(s)&&finish(s)==HG_SCRIPT_DONE);hg_field_script_free(s);
+    }
+    /* No guessed fallthrough into the previous bank, and no root-context
+     * execution of the original child-only restart instruction. */
+    CHECK(!hg_field_script_new(b,60,std_town_map,error,sizeof(error)));
+    CHECK(!hg_field_script_new(b,60,2799,error,sizeof(error)));
+    const uint8_t root_restart[]={H(21),H(2)};
+    CHECK(!hg_field_script_bytes(b,root_restart,sizeof(root_restart),0,40,error,sizeof(error)));
+    const uint8_t no_return[]={H(20),H(std_picture_books),H(2)};
+    CHECK(!hg_field_script_bytes(b,no_return,sizeof(no_return),0,40,error,sizeof(error)));
+    /* Choice admission forks the live continuation, including private state;
+     * an unsupported Yes branch cannot publish or disable the valid No path. */
+    HGStoryState *menu_owner=hg_story_new();CHECK(menu_owner);
+    const uint8_t guarded_menu[]={H(748),H(VAR_SPECIAL_RESULT),H(17),H(VAR_SPECIAL_RESULT),H(0),H(28),1,W(12),H(146),H(PHONE_CONTACT_PROF__ELM),H(41),H(VAR_TEMP_x4000),H(9),H(2),H(146),H(PHONE_CONTACT_BILL),H(1023)};
+    s=hg_field_script_bytes(menu_owner,guarded_menu,sizeof(guarded_menu),0,40,error,sizeof(error));CHECK(s);
+    for(unsigned i=0;i<32&&!hg_field_script_menu_pending(s);i++)CHECK(hg_field_script_tick(s)==HG_SCRIPT_RUNNING);
+    CHECK(hg_field_script_menu_pending(s));revision=hg_story_revision(menu_owner);uint32_t menu_rng=GetLCRNGSeed();
+    CHECK(!hg_field_script_menu_choice_supported(s,0)&&hg_field_script_menu_choice_supported(s,1));
+    CHECK(hg_story_revision(menu_owner)==revision&&!var(menu_owner,VAR_TEMP_x4000)&&GetLCRNGSeed()==menu_rng);
+    CHECK(!hg_story_phone_registered(menu_owner,PHONE_CONTACT_PROF__ELM)&&!hg_story_phone_registered(menu_owner,PHONE_CONTACT_BILL));
+    CHECK(!hg_field_script_menu_choose(s,0)&&hg_field_script_menu_pending(s));
+    CHECK(hg_field_script_menu_choose(s,1)&&finish(s)==HG_SCRIPT_DONE&&var(menu_owner,VAR_TEMP_x4000)==9);
+    CHECK(hg_story_phone_registered(menu_owner,PHONE_CONTACT_PROF__ELM)&&!hg_story_phone_registered(menu_owner,PHONE_CONTACT_BILL));
+    hg_field_script_free(s);hg_story_free(menu_owner);
     /* Elm's real introductory research text exceeds the old 512-byte limit.
      * Preserve all of it through a live original context and name buffering;
      * this fixture does not claim the surrounding cutscene is implemented. */
@@ -141,6 +210,58 @@ int main(void) {
     }
     CHECK(consumed==strlen(long_text->text)&&pages>1&&pages<64);hg_font_free(font);
     revision=hg_story_revision(b);CHECK(hg_field_script_ack(s)&&finish(s)==HG_SCRIPT_DONE&&hg_story_revision(b)==revision+1);hg_field_script_free(s);
+    /* Original standard item child contexts share formatting/special variables,
+     * but keep the complete bag transaction private until the root ends. */
+    HGStoryState *gift_owner=hg_story_new();CHECK(gift_owner);FieldSystem gift_field={0};hg_story_bind_field(gift_owner,&gift_field);
+    Bag *gift_bag=hg_story_save_bag(gift_field.saveData);CHECK(!Bag_GetQuantity(gift_bag,ITEM_POTION,HEAP_ID_FIELD1));
+    const uint8_t gift[]={H(41),H(VAR_SPECIAL_x8004),H(ITEM_POTION),H(41),H(VAR_SPECIAL_x8005),H(5),H(20),H(std_obtain_item_verbose),H(42),H(VAR_TEMP_x4000),H(VAR_SPECIAL_RESULT),H(2)};
+    uint8_t rejected[sizeof(gift)];memcpy(rejected,gift,sizeof(gift));rejected[sizeof(gift)-2]=255;rejected[sizeof(gift)-1]=3;
+    revision=hg_story_revision(gift_owner);uint32_t gift_rng=GetLCRNGSeed();
+    CHECK(!hg_field_script_bytes(gift_owner,rejected,sizeof(rejected),0,40,error,sizeof(error)));
+    CHECK(hg_story_revision(gift_owner)==revision&&!Bag_GetQuantity(gift_bag,ITEM_POTION,HEAP_ID_FIELD1)&&GetLCRNGSeed()==gift_rng);
+    s=hg_field_script_bytes(gift_owner,gift,sizeof(gift),0,40,error,sizeof(error));CHECK(s);
+    int gift_status=HG_SCRIPT_RUNNING;for(unsigned i=0;i<128&&gift_status==HG_SCRIPT_RUNNING;i++)gift_status=hg_field_script_tick(s);
+    CHECK(gift_status==HG_SCRIPT_MESSAGE&&strstr(hg_field_script_message(s)->text,"Potions"));
+    CHECK(!Bag_GetQuantity(gift_bag,ITEM_POTION,HEAP_ID_FIELD1));hg_field_script_free(s);
+    CHECK(hg_story_revision(gift_owner)==revision&&GetLCRNGSeed()==gift_rng);
+    s=hg_field_script_bytes(gift_owner,gift,sizeof(gift),0,40,error,sizeof(error));CHECK(s);unsigned gift_messages=0;
+    for(unsigned i=0;i<256;i++) {
+        gift_status=hg_field_script_tick(s);CHECK(gift_status!=HG_SCRIPT_ERROR);
+        CHECK(!Bag_GetQuantity(gift_bag,ITEM_POTION,HEAP_ID_FIELD1));
+        if(gift_status==HG_SCRIPT_MESSAGE){gift_messages++;CHECK(!strchr(hg_field_script_message(s)->text,'{'));CHECK(hg_field_script_ack(s));}
+        if(gift_status==HG_SCRIPT_DONE)break;
+    }
+    CHECK(gift_status==HG_SCRIPT_DONE&&gift_messages==2&&hg_field_script_commit(s));
+    CHECK(Bag_GetQuantity(gift_bag,ITEM_POTION,HEAP_ID_FIELD1)==5&&var(gift_owner,VAR_TEMP_x4000)==POCKET_MEDICINE);
+    CHECK(hg_story_revision(gift_owner)==revision+1&&GetLCRNGSeed()==gift_rng);hg_field_script_free(s);hg_story_free(gift_owner);
+    const unsigned gift_items[]={ITEM_REPEL,ITEM_POTION,ITEM_POKE_BALL,ITEM_TM01,ITEM_ORAN_BERRY,ITEM_GRASS_MAIL,ITEM_X_ATTACK,ITEM_OLD_ROD};
+    for(unsigned pocket=0;pocket<8;pocket++) {
+        gift_owner=hg_story_new();CHECK(gift_owner);hg_story_bind_field(gift_owner,&gift_field);gift_bag=hg_story_save_bag(gift_field.saveData);
+        uint8_t one[sizeof(gift)];memcpy(one,gift,sizeof(gift));one[4]=(uint8_t)gift_items[pocket];one[5]=(uint8_t)(gift_items[pocket]>>8);one[10]=1;
+        s=hg_field_script_bytes(gift_owner,one,sizeof(one),0,40,error,sizeof(error));if(!s)fprintf(stderr,"Gift pocket %u: %s\n",pocket,error);CHECK(s);gift_messages=0;
+        for(unsigned i=0;i<256;i++) {
+            gift_status=hg_field_script_tick(s);CHECK(gift_status!=HG_SCRIPT_ERROR);
+            if(gift_status==HG_SCRIPT_MESSAGE){gift_messages++;CHECK(!strchr(hg_field_script_message(s)->text,'{'));CHECK(hg_field_script_ack(s));}
+            if(gift_status==HG_SCRIPT_DONE)break;
+        }
+        CHECK(gift_status==HG_SCRIPT_DONE&&gift_messages==2&&hg_field_script_commit(s));
+        CHECK(Bag_GetQuantity(gift_bag,gift_items[pocket],HEAP_ID_FIELD1)==1&&var(gift_owner,VAR_TEMP_x4000)==pocket);
+        hg_field_script_free(s);hg_story_free(gift_owner);
+    }
+    /* A second original standard routine becomes executable through the
+     * same resolver; keep its real two-message bag transaction semantics. */
+    gift_owner=hg_story_new();CHECK(gift_owner);hg_story_bind_field(gift_owner,&gift_field);gift_bag=hg_story_save_bag(gift_field.saveData);
+    uint8_t give[sizeof(gift)];memcpy(give,gift,sizeof(give));give[14]=(uint8_t)std_give_item_verbose;give[15]=(uint8_t)(std_give_item_verbose>>8);
+    s=hg_field_script_bytes(gift_owner,give,sizeof(give),0,40,error,sizeof(error));if(!s)fprintf(stderr,"Give item: %s\n",error);CHECK(s);gift_messages=0;
+    for(unsigned i=0;i<256;i++) {
+        gift_status=hg_field_script_tick(s);CHECK(gift_status!=HG_SCRIPT_ERROR);
+        CHECK(!Bag_GetQuantity(gift_bag,ITEM_POTION,HEAP_ID_FIELD1));
+        if(gift_status==HG_SCRIPT_MESSAGE){gift_messages++;CHECK(hg_field_script_ack(s));}
+        if(gift_status==HG_SCRIPT_DONE)break;
+    }
+    CHECK(gift_status==HG_SCRIPT_DONE&&gift_messages==2&&hg_field_script_commit(s));
+    CHECK(Bag_GetQuantity(gift_bag,ITEM_POTION,HEAP_ID_FIELD1)==5);
+    hg_field_script_free(s);hg_story_free(gift_owner);
     hg_story_free(a);hg_story_free(b);
     puts("Original story runtime: std_init, persistent flags/vars, RNG/temp isolation, branches/calls/arithmetic, frame wait, live messages, rollback and map reset passed");return 0;
 }

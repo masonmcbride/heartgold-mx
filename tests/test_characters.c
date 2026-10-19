@@ -20,6 +20,10 @@ int main(void) {
     }
     for(unsigned i=0;i<16;i++) { unsigned id=i<8?146+i:162+i-8;HGFieldView *view=hg_character_view_load(id,error,sizeof(error));CHECK(view);hg_field_view_free(view); }
     CHECK(!hg_character_view_load(266,error,sizeof(error)));CHECK(successes>=16 && successes+unsupported==266);
+    for(unsigned sprite=581;sprite<=588;sprite++)for(unsigned direction=0;direction<4;direction++) {
+        HGFieldView *follower=hg_character_sprite_load(sprite,direction,error,sizeof(error));if(!follower)fprintf(stderr,"Follower sprite %u direction %u: %s\n",sprite,direction,error);CHECK(follower);
+        DSCamera camera;hg_field_view_camera(follower,&camera,96,96);CHECK(hg_field_view_render(follower,&camera,front,96,96));hg_field_view_free(follower);
+    }
     const uint8_t *bytes;size_t size;DSModel model;DSModelStats stats;
     CHECK(native_resource_member(NARC_data_mmodel_mmodel,0,266,&bytes,&size));CHECK(ds_model_open(bytes,size,0,&model));
     CHECK(!ds_model_scene(&model,NULL,NULL,&stats));CHECK(ds_model_inspection_scene(&model,NULL,NULL,&stats) && stats.triangles==2);

@@ -3,8 +3,43 @@ Unprovided imports receive named failure traps, never successful stubs.
 """
 import hashlib,json,pathlib,re,struct,subprocess,sys
 root,out,cc=map(pathlib.Path,sys.argv[1:])
-sources=[root/'asm'/name for name in ('unk_0205CB48.s','unk_0205FD20.s','unk_02054648.s','unk_02062108.s','unk_0203DB6C.s','unk_data_020FCBD8.s','unk_data_020FDB44.s','unk_data_020FD978.s','overlay_01_022053EC.s','unk_0203BA5C.s')]
+sources=[root/'asm'/name for name in ('unk_0205CB48.s','unk_0205FD20.s','unk_02054648.s','unk_02062108.s','unk_0203DB6C.s','unk_data_020FCBD8.s','unk_data_020FDB44.s','unk_data_020FD978.s','overlay_01_022053EC.s','unk_0203BA5C.s','unk_02017FAC.s','unk_020658D4.s')]
 raw='\n'.join(p.read_text() for p in sources)
+# One exact effect update slice; do not claim compilation of its containing unit.
+effect_path=root/'asm/overlay_01_022001E4.s'
+effect_source=effect_path.read_text()
+effect_matches=list(re.finditer(r'\tthumb_func_start ov01_02200480\n.*?\tthumb_func_end ov01_02200480',effect_source,re.S))
+if len(effect_matches)!=1:raise ValueError('Original emote update definition changed')
+effect_slice=effect_matches[0][0]
+raw+='\n.text\n'+effect_slice+'\n'
+# Shared field interaction uses the original surf eligibility instructions.
+surf_path=root/'asm/overlay_01_021F1AFC.s'
+surf_matches=list(re.finditer(r'\tthumb_func_start Field_PlayerCanSurfOnTile\n.*?\tthumb_func_end Field_PlayerCanSurfOnTile',surf_path.read_text(),re.S))
+if len(surf_matches)!=1:raise ValueError('Original surf predicate changed')
+raw+='\n.text\n'+surf_matches[0][0]+'\n'
+rock_matches=list(re.finditer(r'\tthumb_func_start MetatileBehavior_IsRockClimbInDirection\n.*?\tthumb_func_end MetatileBehavior_IsRockClimbInDirection',surf_path.read_text(),re.S))
+if len(rock_matches)!=1:raise ValueError('Original rock-climb predicate changed')
+raw+='\n.text\n'+rock_matches[0][0]+'\n'
+
+# Original Apricorn availability/type → sprite selector and its original LUT.
+apricorn_path=root/'asm/unk_020632B0.s'
+apricorn_matches=list(re.finditer(r'\tthumb_func_start sub_020640A4\n.*?\tthumb_func_end sub_020640A4',apricorn_path.read_text(),re.S))
+if len(apricorn_matches)!=1:raise ValueError('Original Apricorn sprite selector changed')
+sprite_source=(root/'asm/overlay_01_sprite_data.s').read_text()
+tables=re.findall(r'ov01_02207274:\n((?:\t.word SPRITE_\w+\n)+)',sprite_source)
+if len(tables)!=1:raise ValueError('Original Apricorn sprite table changed')
+raw+='\n#include "constants/sprites.h"\n.text\n'+apricorn_matches[0][0]+'\n.rodata\n.public ov01_02207274\nov01_02207274:\n'+tables[0]+'\n'
+
+
+# Bounded original brightness controller closure. Other wipe/window fades remain
+# unprovided, and hardware brightness is captured by the native display boundary.
+fade_path=root/'asm/unk_0201010C.s'
+fade_source=fade_path.read_text();fade_slices=[]
+for name in ('FadeFunc_00','FadeFunc_01','sub_02010B14','sub_02010BB4','sub_02010BF4','sub_02010A6C'):
+ matches=re.findall(r'\tthumb_func_start '+name+r'\n.*?\tthumb_func_end '+name,fade_source,re.S)
+ if len(matches)!=1:raise ValueError(('Original brightness controller changed',name))
+ fade_slices.append((name,matches[0]));raw+='\n.text\n'+matches[0]+'\n'
+
 message_sources=[root/'files/msgdata/msg'/name for name in ('msg_0096_D31R0201.json','msg_0066_D23R0102.json')]
 for p in message_sources:
  header=out/'msgdata/msg'/p.with_suffix('.h').name;header.parent.mkdir(parents=True,exist_ok=True)
@@ -17,7 +52,7 @@ for line in text.splitlines():
  if not line or line.startswith(('#','.include','thumb_func_end')):continue
  if line.startswith('thumb_func_start'):
   lines += ['.global '+line.split()[1],'.thumb_func'];continue
- if line=='.rodata':line='.section .rodata'
+ if line=='.rodata':line='.section .rodata\n.balign 4' # Original units have independent word-aligned sections.
  if line.startswith('.public'):line=line.replace('.public','.global',1)
  m=re.match(r'(add|sub|mov|lsl|lsr|asr|mul|adc|orr|neg|eor|and|bic|mvn|sbc|ror)\s+(.*)',line)
  if m:
@@ -66,5 +101,15 @@ for name,value,index in symbols:
 header += ['static const struct { unsigned address;const char *name; } hg_field_guest_imports[] = {']
 header += [f'{{{a}u,"{n}"}},' for n,a in imports.items()];header+=['};']
 (out/'field_guest.inc').write_text('\n'.join(header)+'\n')
-(out/'field_guest_provenance.json').write_text(json.dumps({'sources':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in sources+message_sources},'image_sha256':hashlib.sha256(image).hexdigest(),'image_size':len(image),'code_size':code_size,'imports':imports},indent=2)+'\n')
+(out/'field_guest_provenance.json').write_text(json.dumps({'sources':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in sources+message_sources},'function_slices':[{'source':str(effect_path),'function':'ov01_02200480','source_sha256':hashlib.sha256(effect_path.read_bytes()).hexdigest(),'slice_sha256':hashlib.sha256(effect_slice.encode()).hexdigest()}],'interaction_slices':[{'source':str(surf_path),'function':name,'source_sha256':hashlib.sha256(surf_path.read_bytes()).hexdigest(),'slice_sha256':hashlib.sha256(body.encode()).hexdigest()} for name,body in [('Field_PlayerCanSurfOnTile',surf_matches[0][0]),('MetatileBehavior_IsRockClimbInDirection',rock_matches[0][0])]],'image_sha256':hashlib.sha256(image).hexdigest(),'image_size':len(image),'code_size':code_size,'imports':imports},indent=2)+'\n')
 print(f'Original field guest: {len(image)} bytes, {len(imports)} named import traps')
+
+# Record the selector and LUT independently of whole-assembly coverage.
+provenance_path=out/'field_guest_provenance.json'
+provenance=json.loads(provenance_path.read_text())
+provenance['apricorn_selector']={'source':str(apricorn_path),'function':'sub_020640A4','source_sha256':hashlib.sha256(apricorn_path.read_bytes()).hexdigest(),'slice_sha256':hashlib.sha256(apricorn_matches[0][0].encode()).hexdigest(),'table_source':'asm/overlay_01_sprite_data.s','table_sha256':hashlib.sha256(tables[0].encode()).hexdigest()}
+provenance_path.write_text(json.dumps(provenance,indent=2)+'\n')
+
+provenance=json.loads(provenance_path.read_text())
+provenance['brightness_controller']=[{'source':str(fade_path),'function':name,'source_sha256':hashlib.sha256(fade_path.read_bytes()).hexdigest(),'slice_sha256':hashlib.sha256(body.encode()).hexdigest()} for name,body in fade_slices]
+provenance_path.write_text(json.dumps(provenance,indent=2)+'\n')

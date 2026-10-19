@@ -162,13 +162,17 @@ def main():
     motion=json.loads(motion_path.read_text()) if motion_path.is_file() else {}
     story_path=build/'generated/script_kernel_provenance.json'
     story=json.loads(story_path.read_text()) if story_path.is_file() else {}
+    pokemon_path=build/'generated/pokemon_provenance.json'
+    pokemon=json.loads(pokemon_path.read_text()) if pokemon_path.is_file() else {}
+    follow_path=build/'generated/follow_provenance.json'
+    follow=json.loads(follow_path.read_text()) if follow_path.is_file() else {}
     included=sorted({p for provenance in (transition,motion,story) for p in provenance.get('whole_c_inputs',{}) if 'upstream/'+p not in compiled_game})
     result = {'schema': 1, 'scope': 'compiled translation units, native symbol presence, and explicit guest imports',
               'limitations': ['No execution instrumentation; test linkage is not function execution.',
                               'Static function origin is not inferred from final binary symbol names.',
                               'Source provider/direct-call hints are lexical and omit indirect calls and SDK subprojects.',
                               'An admitted provider may be conditional or intentionally reject unsupported inputs.',
-                              'Function layers identify translation-unit ownership; included original C and source slices are listed separately in original_transition_provenance, original_object_provenance and original_story_provenance.',
+                              'Function layers identify translation-unit ownership; included original C and source slices are listed separately in original_transition_provenance, original_object_provenance original_story_provenance original_pokemon_provenance and original_follow_provenance.',
                               'No minimum SDK set or complete-game boot closure is established.'],
               'project_revision': command(['git', '-C', str(project), 'rev-parse', 'HEAD']).strip(),
               'upstream_revision': command(['git', '-C', str(upstream), 'rev-parse', 'HEAD']).strip(),
@@ -176,12 +180,12 @@ def main():
               'objects': objects, 'translation_units': files, 'custom_compiled_c_objc_physical_lines': custom_lines,
               'compiled_game_units': compiled_game, 'functions': rows, 'guest_imports': imports,
               'source_entrypoint_cuts': roots,'original_transition_provenance':transition,'original_object_provenance':motion,
-              'original_story_provenance':story,
+              'original_story_provenance':story,'original_pokemon_provenance':pokemon,'original_follow_provenance':follow,
               'included_original_c_inputs':included}
     (out / 'inventory.json').write_text(json.dumps(result, indent=2) + '\n')
     lines = ['# Reuse audit: generated build evidence', '',
              f'{len(rows)} emitted text symbols in {len(objects)} translation units; {len(compiled_game)} original game C units.',
-             f'{len(included)} additional original C files included inside boundary units; {len(transition.get("functions",[]))+len(story.get("functions",[]))} original C function slices. These are not standalone whole-unit counts or execution coverage.',
+             f'{len(included)} additional original C files included inside boundary units; {len(transition.get("functions",[]))+len(story.get("functions",[]))+len(pokemon.get("functions",[]))+len(follow.get("functions",[]))} original C function slices. These are not standalone whole-unit counts or execution coverage.',
              f'{custom_lines} physical lines of compiled project C/Objective-C (headers, Python, tests and upstream excluded).',
              '', '## Boundary inventory', '',
              f'{len(imports)} field guest imports; {sum(r["symbol"] in admitted for r in imports)} have conditional named provider branches.',

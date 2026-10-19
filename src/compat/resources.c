@@ -1,33 +1,40 @@
 #include "ds_resources.h"
 #include "compat/resources.h"
+#include "message_bank_count.inc"
 /* Process-lifetime cache. All callers run on the main thread. */
 typedef struct { uint8_t *bytes; DSNarc narc; } Cache;
-static Cache cache[24];
+static Cache cache[32];
+static Cache message_cache[HG_MESSAGE_BANK_COUNT];
 int native_resource_member(int archive,int group,int member,const uint8_t **bytes,size_t *size) {
-    const char *name;int slot;
-    if(archive==NARC_itemtool_itemdata_item_icon) { slot=0;name="item_icon.narc"; }
-    else if(archive==NARC_msgdata_msg && group==221) { slot=1;name="msg_0221.narc"; }
-    else if(archive==NARC_msgdata_msg && group==222) { slot=2;name="msg_0222.narc"; }
-    else if(archive==NARC_msgdata_msg && group==251) { slot=3;name="msg_0251.narc"; }
-    else if(archive==NARC_graphic_font) { slot=4;name="font.narc"; }
-    else if(archive==NARC_native_bag) { slot=5;name="bag.narc"; }
-    else if(archive==NARC_fielddata_mapmatrix_map_matrix) { slot=6;name="map_matrix.narc"; }
-    else if(archive==NARC_fielddata_landdata_land_data) { slot=7;name="land_data.narc"; }
-    else if(archive==NARC_a_0_4_2) { slot=8;name="area_data.narc"; }
-    else if(archive==NARC_a_0_4_4) { slot=9;name="map_texture.narc"; }
-    else if(archive==NARC_a_0_4_0) { slot=10;name="prop_models.narc"; }
-    else if(archive==NARC_a_0_4_3) { slot=11;name="area_models.narc"; }
-    else if(archive==NARC_a_1_4_8) { slot=12;name="room_props.narc"; }
-    else if(archive==NARC_data_mmodel_mmodel) { slot=13;name="characters.narc"; }
-    else if(archive==NARC_fielddata_eventdata_zone_event) { slot=14;name="zone_event.narc"; }
-    else if(archive==NARC_msgdata_msg && group==542) { slot=15;name="msg_0542.narc"; }
-    else if(archive==NARC_msgdata_msg && group>=543&&group<=549) {
-        static const char *const names[]={"msg_0543.narc","msg_0544.narc","msg_0545.narc","msg_0546.narc","msg_0547.narc","msg_0548.narc","msg_0549.narc"};
-        slot=16+group-543;name=names[group-543];
+    const char *name;int slot;char message_name[32];Cache *c;
+    if(archive==NARC_msgdata_msg) {
+        if(group<0||group>=HG_MESSAGE_BANK_COUNT)return 0;
+        snprintf(message_name,sizeof(message_name),"msg_%04d.narc",group);name=message_name;c=&message_cache[group];
+    } else {
+        if(archive==NARC_itemtool_itemdata_item_icon) { slot=0;name="item_icon.narc"; }
+        else if(archive==NARC_graphic_font) { slot=4;name="font.narc"; }
+        else if(archive==NARC_native_bag) { slot=5;name="bag.narc"; }
+        else if(archive==NARC_fielddata_mapmatrix_map_matrix) { slot=6;name="map_matrix.narc"; }
+        else if(archive==NARC_fielddata_landdata_land_data) { slot=7;name="land_data.narc"; }
+        else if(archive==NARC_a_0_4_2) { slot=8;name="area_data.narc"; }
+        else if(archive==NARC_a_0_4_4) { slot=9;name="map_texture.narc"; }
+        else if(archive==NARC_a_0_4_0) { slot=10;name="prop_models.narc"; }
+        else if(archive==NARC_a_0_4_3) { slot=11;name="area_models.narc"; }
+        else if(archive==NARC_a_1_4_8) { slot=12;name="room_props.narc"; }
+        else if(archive==NARC_data_mmodel_mmodel) { slot=13;name="characters.narc"; }
+        else if(archive==NARC_fielddata_eventdata_zone_event) { slot=14;name="zone_event.narc"; }
+        else if(archive==NARC_fielddata_script_scr_seq) { slot=23;name="field_scripts.narc"; }
+        else if(archive==NARC_poketool_personal_personal) {slot=24;name="personal.narc";}
+        else if(archive==NARC_poketool_personal_growtbl) {slot=25;name="growth.narc";}
+        else if(archive==NARC_poketool_personal_wotbl) {slot=26;name="learnsets.narc";}
+        else if(archive==NARC_poketool_waza_waza_tbl) {slot=27;name="moves.narc";}
+        else if(archive==NARC_fielddata_tsurepoke_tp_param) {slot=28;name="follow_params.narc";}
+        else if(archive==NARC_a_1_0_6) {slot=29;name="prop_animations.narc";}
+        else if(archive==NARC_a_1_0_7) {slot=30;name="field_prop_animations.narc";}
+        else if(archive==NARC_a_1_0_8) {slot=31;name="room_prop_animations.narc";}
+        else return 0;
+        c=&cache[slot];
     }
-    else if(archive==NARC_fielddata_script_scr_seq) { slot=23;name="field_scripts.narc"; }
-    else return 0;
-    Cache *c=&cache[slot];
     if(!c->bytes) {
         char path[4096];if(snprintf(path,sizeof(path),"%s/%s",HG_PACKED_ROOT,name)>=(int)sizeof(path))return 0;
         FILE *f=fopen(path,"rb");if(!f)return 0;
@@ -44,7 +51,7 @@ struct NARC { const uint8_t *bytes;size_t size;DSNarc narc;const uint8_t *stream
 NARC *NARC_New(NarcId id,enum HeapID heap) {
     const uint8_t *unused;size_t size;
     if(!native_resource_member(id,0,0,&unused,&size))abort();
-    int slot=id==NARC_graphic_font?4:id==NARC_native_bag?5:-1;if(slot<0)abort();
+    int slot=id==NARC_graphic_font?4:id==NARC_native_bag?5:id==NARC_a_1_0_6?29:id==NARC_a_1_0_7?30:id==NARC_a_1_0_8?31:-1;if(slot<0)abort();
     NARC *n=Heap_Alloc(heap,sizeof(*n));memset(n,0,sizeof(*n));n->narc=cache[slot].narc;n->bytes=cache[slot].bytes;n->size=n->narc.size;return n;
 }
 void NARC_Delete(NARC *n) { free(n); }
@@ -81,3 +88,6 @@ int native_resource_file(const char *name,const uint8_t **out,size_t *size) {
     }
     *out=bytes;*size=length;return 1;
 }
+
+void NARC_ReadWholeMember(NARC *n,u32 member,void *out) { const uint8_t *p;size_t size;if(!ds_narc_member(&n->narc,member,&p,&size))abort();memcpy(out,p,size); }
+void *NARC_AllocAndReadWholeMember(NARC *n,u32 member,enum HeapID heap) { const uint8_t *p;size_t size;if(!ds_narc_member(&n->narc,member,&p,&size)||size>UINT32_MAX)abort();void *out=Heap_Alloc(heap,(u32)size);memcpy(out,p,size);return out; }

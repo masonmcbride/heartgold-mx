@@ -1,5 +1,6 @@
 #include "compat/motion.h"
 #include "compat/stats.h"
+#include "compat/follow.h"
 #include "motion_guest.h"
 #include "field_transition.h"
 #include "ds_thumb.h"
@@ -11,6 +12,8 @@ _Static_assert(sizeof(hg_field_guest_image)<=0x8000,"Guest image overlaps marsha
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#define FADE_WORK 0x0200b000u
+#define FADE_ENV 0x0200b100u
 #define STATIC_HEIGHT 0x02110000u
 #define DISPATCH_ADDRESS 0x02008200u
 #define HANDLE 0x03000000u
@@ -19,17 +22,21 @@ _Static_assert(sizeof(hg_field_guest_image)<=0x8000,"Guest image overlaps marsha
 #define MANAGER_HANDLE 0x03010000u
 #define OBJECT_BASE 0x03020000u
 #define LOADER_HANDLE 0x03000004u
+#define AI_ADDRESS 0x02008700u
 #define MOVEMENT_ADDRESS 0x02008600u
 #define SAVE_HANDLE 0x03030000u
 #define STATS_HANDLE 0x03030004u
+#define EFFECT_HANDLE 0x03040000u
+#define EFFECT_MODEL 0x03040004u
+#define EFFECT_ENV 0x02008800u
 #define PLAYER_SAVE_HANDLE 0x03030008u
 /* Only the original normal-field dispatch offsets are marshaled. No native
  * FieldSystem or object is cast to the DS serialized layout. */
 typedef struct { PlayerAvatar *avatar; LocalMapObject *object;
     MapObjectManager *manager; HGFieldResources *field; VecFx32 *vector; HGFieldTile selected; const uint8_t *backgrounds; unsigned background_count; int selected_valid; int static_environment;
-    uint32_t *facing_handle;
+    uint32_t *facing_handle;HGMotionEffect *effect;int effect_update;
     HGMotionSession *session;uint16_t input_keys;
-    FieldSystem *story_field;const uint8_t *coordinates;unsigned coordinate_count;
+    HGMotionFade *fade;FieldSystem *story_field;const uint8_t *coordinates;unsigned coordinate_count;
 } MotionBoundary;
 static int store(DSThumb *cpu,uint32_t address,uint32_t value,unsigned width) {
     if(address<0x02000000u+sizeof(hg_field_guest_image) ||
@@ -58,7 +65,52 @@ static int boundary(DSThumb *cpu, void *opaque) {
         if(status && !store(cpu,status,1,1))return -1;
         cpu->r[0]=(uint32_t)height;return 1;
     }
+    if(b->fade&&name) {
+        if(!strcmp(name,"Heap_Alloc")) {
+            if(cpu->r[1]!=sizeof(b->fade->environment))return -1;
+            cpu->r[0]=FADE_ENV;return 1;
+        }
+        if(!strcmp(name,"Heap_Free"))return cpu->r[0]==FADE_ENV?1:-1;
+        if(!strcmp(name,"SetMasterBrightness")) {
+            int value=(int32_t)cpu->r[1];if(cpu->r[0]!=0||value< -16||value>16)return -1;
+            b->fade->brightness=value;return 1;
+        }
+        if(!strcmp(name,"_s32_div_f")) {
+            int32_t a=(int32_t)cpu->r[0],d=(int32_t)cpu->r[1];if(!d||(a==INT32_MIN&&d==-1))return -1;
+            cpu->r[0]=(uint32_t)(a/d);cpu->r[1]=(uint32_t)(a%d);return 1;
+        }
+    }
     if(!name)return 0;
+    if(b->effect&&name) {
+        HGMotionEffect *effect=b->effect;
+        if(!strcmp(name,"ov01_02200540")) {
+            if(!b->object||cpu->r[0]!=HANDLE||cpu->r[1]!=0||cpu->r[2]!=1||effect->active)return -1;
+            memset(effect,0,sizeof(*effect));effect->active=1;
+            /* Scoped SDK allocation initializes the original update env. */
+            effect->state[10]=6*4096;effect->state[16]=EFFECT_MODEL;
+            VecFx32 v;MapObject_CopyPositionVector(b->object,&v);effect->position[0]=v.x;effect->position[1]=v.y;effect->position[2]=v.z;
+            cpu->r[0]=EFFECT_HANDLE;return 1;
+        }
+        if(!strcmp(name,"sub_02023EA4")) {
+            if(cpu->r[0]!=EFFECT_MODEL||cpu->r[1]>1||!effect->active)return -1;
+            effect->visible=(int)cpu->r[1];return 1;
+        }
+        if(!strcmp(name,"sub_02068DB8")||!strcmp(name,"sub_02068DA8")) {
+            if(cpu->r[0]!=EFFECT_HANDLE||!effect->active)return -1;
+            for(unsigned i=0;i<3;i++) {
+                if(!strcmp(name,"sub_02068DB8")){if(!store(cpu,cpu->r[1]+4*i,(uint32_t)effect->position[i],4))return -1;}
+                else {uint32_t value;if(!load_word(cpu,cpu->r[1]+4*i,&value))return -1;effect->position[i]=(int32_t)value;}
+            }
+            return 1;
+        }
+        if(!strcmp(name,"ov01_022003F4")) {
+            if(cpu->r[0]!=EFFECT_HANDLE||!effect->active)return -1;cpu->r[0]=effect->state[5]!=0;return 1;
+        }
+        if(!strcmp(name,"sub_02068B48")) {
+            if(cpu->r[0]!=EFFECT_HANDLE||!effect->active||!effect->state[5])return -1;
+            effect->active=effect->visible=0;return 1;
+        }
+    }
     if(b->story_field&&!strcmp(name,"FieldSystem_VarGet")&&cpu->r[0]==FIELD_ADDRESS) {
         unsigned var=cpu->r[1];if(var>=0x4170)return -1;
         cpu->r[0]=FieldSystem_VarGet(b->story_field,(u16)var);return 1;
@@ -112,6 +164,10 @@ static int boundary(DSThumb *cpu, void *opaque) {
     TILE_PREDICATE(MetatileBehavior_IsMud)
     TILE_PREDICATE(sub_0205BA54)
     TILE_PREDICATE(sub_0205B78C)
+    TILE_PREDICATE(sub_0205BA30)
+    TILE_PREDICATE(sub_0205BA24)
+    TILE_PREDICATE(MetatileBehavior_IsRockClimbNorthSouth)
+    TILE_PREDICATE(MetatileBehavior_IsRockClimbEastWest)
     TILE_PREDICATE(sub_0205B8F4)
     TILE_PREDICATE(sub_0205B918)
     TILE_PREDICATE(sub_0205B93C)
@@ -128,6 +184,12 @@ static int boundary(DSThumb *cpu, void *opaque) {
         }
         if(!strcmp(name,"MapObjectManager_GetObjects2")&&cpu->r[0]==MANAGER_HANDLE) {
             cpu->r[0]=objects==b->object?HANDLE:OBJECT_BASE;return 1;
+        }
+        if(!strcmp(name,"MapObjectManager_GetFirstActiveObjectWithMovement1")&&cpu->r[0]==MANAGER_HANDLE) {
+            LocalMapObject *found=MapObjectManager_GetFirstActiveObjectWithMovement1(b->manager);
+            if(!found){cpu->r[0]=0;return 1;}
+            for(unsigned i=0;i<count;i++)if(objects+i==found){cpu->r[0]=found==b->object?HANDLE:OBJECT_BASE+4*i;return 1;}
+            return -1;
         }
         if(!strcmp(name,"MapObjectManager_GetObjectCount")&&cpu->r[0]==MANAGER_HANDLE) {
             cpu->r[0]=count;return 1;
@@ -151,6 +213,11 @@ static int boundary(DSThumb *cpu, void *opaque) {
     }
     if(object && b->manager && !strcmp(name,"MapObject_GetManager")){cpu->r[0]=MANAGER_HANDLE;return 1;}
     if(object && !strcmp(name,"MapObject_GetFlagsBitsMask")){cpu->r[0]=MapObject_GetFlagsBitsMask(object,cpu->r[1]);return 1;}
+    if(object && !strcmp(name,"sub_0205F370")) {
+        if(object!=b->object||cpu->r[1]>16)return -1;
+        memcpy(ds_translate(&cpu->memory,AI_ADDRESS,16),sub_0205F370(object,cpu->r[1]),16);cpu->r[0]=AI_ADDRESS;return 1;
+    }
+    if(object && !strcmp(name,"sub_0205F394")){if(object!=b->object)return -1;cpu->r[0]=AI_ADDRESS;return 1;}
     if(object && !strcmp(name,"sub_0205F3C0")) {
         if(cpu->r[1]>16)return -1;
         memcpy(ds_translate(&cpu->memory,MOVEMENT_ADDRESS,16),sub_0205F3C0(object,(int)cpu->r[1]),16);
@@ -166,8 +233,15 @@ static int boundary(DSThumb *cpu, void *opaque) {
         sub_0205F484(object);return 1;
     }
     if(object && !strcmp(name,"MapObject_TestFlagsBits")){cpu->r[0]=MapObject_TestFlagsBits(object,cpu->r[1]);return 1;}
+    if(!strcmp(name,"FieldSystem_GetPlayerAvatar")&&b->avatar&&cpu->r[0]==FIELD_ADDRESS){cpu->r[0]=HANDLE;return 1;}
     if(cpu->r[0]!=HANDLE && !object)return -1;
-    if(b->avatar && !strcmp(name,"PlayerAvatar_GetMapObject")){cpu->r[0]=HANDLE;return 1;}
+    if(b->avatar && !strcmp(name,"PlayerAvatar_GetMapObject")){
+        LocalMapObject *player=PlayerAvatar_GetMapObject(b->avatar);
+        if(player==b->object){cpu->r[0]=HANDLE;return 1;}
+        if(!b->manager)return -1;
+        for(unsigned i=0;i<b->manager->objectCount;i++)if(b->manager->objects+i==player){cpu->r[0]=OBJECT_BASE+4*i;return 1;}
+        return -1;
+    }
     if(b->avatar && !strcmp(name,"PlayerAvatar_GetPlayerSaveData")){cpu->r[0]=PLAYER_SAVE_HANDLE;return 1;}
     if(b->avatar && !strcmp(name,"PlayerAvatar_SetUnk28Unk2C")) {
         PlayerAvatar_SetUnk28Unk2C(b->avatar,(int32_t)cpu->r[1],(int32_t)cpu->r[2]);return 1;
@@ -181,6 +255,10 @@ static int boundary(DSThumb *cpu, void *opaque) {
     GET_AVATAR(PlayerAvatar_GetXCoord)
     GET_AVATAR(PlayerAvatar_GetZCoord)
     GET_AVATAR(PlayerAvatar_GetState)
+    GET_AVATAR(PlayerAvatar_GetPreviousXCoord)
+    GET_AVATAR(PlayerAvatar_GetPreviousZCoord)
+    GET_AVATAR(PlayerAvatar_GetPlayerMoveState)
+    GET_AVATAR(PlayerAvatar_CheckFlag6)
     GET_AVATAR(PlayerAvatar_GetNextFacingDirection)
     GET_AVATAR(PlayerAvatar_GetUnk28)
     GET_AVATAR(PlayerAvatar_GetUnk2C)
@@ -195,6 +273,10 @@ static int boundary(DSThumb *cpu, void *opaque) {
     GET_OBJECT(MapObject_GetInitialZ)
     GET_OBJECT(MapObject_GetXRange)
     GET_OBJECT(MapObject_GetYRange)
+    GET_OBJECT(sub_02069E14)
+    GET_OBJECT(sub_02069EAC)
+    GET_OBJECT(sub_02069EC0)
+    GET_OBJECT(sub_02069ED4)
     GET_OBJECT(MapObject_CheckFlag28)
     GET_OBJECT(MapObject_GetSpriteID)
     GET_OBJECT(MapObject_CheckFlag19Disabled)
@@ -212,6 +294,14 @@ static int boundary(DSThumb *cpu, void *opaque) {
     GET_OBJECT(MapObject_CheckVisible)
     GET_OBJECT(MapObject_CheckIgnoreHeights)
     GET_OBJECT(MapObject_CheckFlag29)
+    if(object && !strcmp(name,"MapObject_SetPositionFromXYZAndDirection")) {
+        uint32_t facing;if(!load_word(cpu,cpu->r[13],&facing)||facing>3)return -1;
+        MapObject_SetPositionFromXYZAndDirection(object,(int32_t)cpu->r[1],(int32_t)cpu->r[2],(int32_t)cpu->r[3],facing);return 1;
+    }
+    if(object && !strcmp(name,"MapObject_SetPositionFromVectorAndDirection")) {
+        uint32_t x,y,z;if(!load_word(cpu,cpu->r[1],&x)||!load_word(cpu,cpu->r[1]+4,&y)||!load_word(cpu,cpu->r[1]+8,&z)||cpu->r[2]>3)return -1;
+        VecFx32 v={(int32_t)x,(int32_t)y,(int32_t)z};MapObject_SetPositionFromVectorAndDirection(object,&v,cpu->r[2]);return 1;
+    }
     if(object && !strcmp(name,"MapObject_SetPositionVector")) {
         uint32_t x,y,z;
         if(!load_word(cpu,cpu->r[1],&x)||!load_word(cpu,cpu->r[1]+4,&y)||!load_word(cpu,cpu->r[1]+8,&z))return -1;
@@ -237,6 +327,15 @@ static int boundary(DSThumb *cpu, void *opaque) {
     SET_OBJECT(MapObject_SetMovementCommand)
     SET_OBJECT(MapObject_SetMovementStep)
     SET_OBJECT(sub_0205F328)
+    SET_OBJECT(MapObject_ClearFlag18)
+    SET_OBJECT(sub_02069E28)
+    SET_OBJECT(sub_02069E50)
+    SET_OBJECT(sub_02069E84)
+    SET_OBJECT(sub_02069DC8)
+#define OBJECT_ACTION(n) if(!strcmp(name,#n)&&object){n(object);return 1;}
+    OBJECT_ACTION(MapObject_ClearSingleMovement)
+    OBJECT_ACTION(MapObject_SetSingleMovement)
+    OBJECT_ACTION(MapObject_ClearEndMovement)
     return -1;
 }
 static int run(MotionBoundary *b,uint32_t entry,uint32_t arg0,uint32_t arg1,uint32_t arg2,uint32_t arg3,uint32_t *result) {
@@ -246,6 +345,7 @@ static int run(MotionBoundary *b,uint32_t entry,uint32_t arg0,uint32_t arg1,uint
     cpu.code_start=0x02000000;cpu.code_size=HG_FIELD_GUEST_CODE_SIZE;
     cpu.return_address=0x02200001;cpu.r[14]=cpu.return_address;
     cpu.r[13]=0x0200f000;cpu.r[15]=entry;cpu.r[0]=arg0;cpu.r[1]=arg1;cpu.r[2]=arg2;cpu.r[3]=arg3;
+    if(b->object)memcpy(ram+AI_ADDRESS-0x02000000u,sub_0205F394(b->object),16);
     if(b->object)memcpy(ram+MOVEMENT_ADDRESS-0x02000000u,sub_0205F3E4(b->object),16);
     if(b->field) {
         if(b->manager)store(&cpu,FIELD_ADDRESS+0x3c,MANAGER_HANDLE,4);
@@ -274,6 +374,8 @@ static int run(MotionBoundary *b,uint32_t entry,uint32_t arg0,uint32_t arg1,uint
         cpu.r[0]=arg1;cpu.r[1]=arg2;cpu.r[2]=0x02008400;
         store(&cpu,0x02008404,(uint32_t)b->vector->y,4);
     }
+    if(b->effect_update)memcpy(ram+EFFECT_ENV-0x02000000u,b->effect->state,sizeof(b->effect->state));
+    if(b->fade){memcpy(ram+FADE_WORK-0x02000000u,b->fade->work,sizeof(b->fade->work));memcpy(ram+FADE_ENV-0x02000000u,b->fade->environment,sizeof(b->fade->environment));}
     cpu.boundary=boundary;cpu.boundary_user=b;
     DSThumbResult status=ds_thumb_run(&cpu,10000);
     int ok=status==DS_THUMB_RETURN && cpu.r[13]==0x0200f000;
@@ -283,13 +385,17 @@ static int run(MotionBoundary *b,uint32_t entry,uint32_t arg0,uint32_t arg1,uint
             if(cpu.r[15]==hg_field_guest_imports[i].address)name=hg_field_guest_imports[i].name;
         fprintf(stderr,"Motion guest failed: status=%d pc=%08x instruction=%04x provider=%s\n",
                 status,cpu.r[15],cpu.fault_instruction,name);
+        fprintf(stderr,"Guest fault address=%08x r0=%08x r1=%08x r2=%08x r4=%08x r6=%08x\n",cpu.fault_address,cpu.r[0],cpu.r[1],cpu.r[2],cpu.r[4],cpu.r[6]);
     }
+    if(ok&&b->fade){memcpy(b->fade->work,ram+FADE_WORK-0x02000000u,sizeof(b->fade->work));memcpy(b->fade->environment,ram+FADE_ENV-0x02000000u,sizeof(b->fade->environment));}
     if(ok&&b->vector) {
         uint32_t x,y,z;
         ok=load_word(&cpu,0x02008400,&x)&&load_word(&cpu,0x02008404,&y)&&load_word(&cpu,0x02008408,&z);
         if(ok)*b->vector=(VecFx32){(int32_t)x,(int32_t)y,(int32_t)z};
     }
+    if(ok&&b->effect_update)memcpy(b->effect->state,ram+EFFECT_ENV-0x02000000u,sizeof(b->effect->state));
     if(ok&&b->facing_handle)ok=load_word(&cpu,0x02008620,b->facing_handle);
+    if(ok&&b->object)memcpy(sub_0205F394(b->object),ram+AI_ADDRESS-0x02000000u,16);
     if(ok&&b->object)memcpy(sub_0205F3E4(b->object),ram+MOVEMENT_ADDRESS-0x02000000u,16);
     if(ok&&b->session)memcpy(b->session->follower,ram+FIELD_ADDRESS-0x02000000u+0xe4,32);
     if(ok&&result)*result=cpu.r[0];free(ram);return ok;
@@ -304,6 +410,18 @@ int hg_motion_direction(PlayerAvatar *avatar,uint16_t keys,int *direction) {
 int hg_motion_clear_held(LocalMapObject *object) {
     if(!object)return 0;LocalMapObject saved=*object;MotionBoundary b={.object=object};
     if(run(&b,HG_FIELD_GUEST_MapObject_ClearHeldMovement,HANDLE,0,0,0,NULL))return 1;
+    *object=saved;return 0;
+}
+int hg_motion_sync_previous(LocalMapObject *object) {
+    if(!object)return 0;LocalMapObject saved=*object;MotionBoundary b={.object=object};
+    if(run(&b,HG_FIELD_GUEST_sub_02060F78,HANDLE,0,0,0,NULL))return 1;
+    *object=saved;return 0;
+}
+int hg_motion_settle(HGFieldResources *field,LocalMapObject *object) {
+    if(!field||!object)return 0;LocalMapObject saved=*object;
+    MotionBoundary b={.object=object,.field=field,.static_environment=1};uint32_t result;
+    int ok=run(&b,HG_FIELD_GUEST_sub_02061070,HANDLE,0,0,0,&result);
+    if(ok&&(result==1||(result==0&&MapObject_CheckIgnoreHeights(&saved))))return 1;
     *object=saved;return 0;
 }
 int hg_motion_grid_step(LocalMapObject *object,unsigned direction) {
@@ -321,6 +439,17 @@ int hg_motion_tile(HGFieldResources *field,int x,int z,HGMotionTile *out) {
        !run(&b,HG_FIELD_GUEST_GetMetatileBehavior,FIELD_ADDRESS,(uint32_t)x,(uint32_t)z,0,&behavior))return 0;
     if(wall>1 || behavior>255)return 0;
     *out=(HGMotionTile){.wall=(int)wall,.behavior=(uint8_t)behavior};return 1;
+}
+int hg_motion_can_surf(PlayerAvatar *avatar,unsigned standing,unsigned facing,int *out) {
+    if(!avatar||!out||standing>255||facing>255)return 0;
+    MotionBoundary b={.avatar=avatar,.object=PlayerAvatar_GetMapObject(avatar)};uint32_t result;
+    if(!b.object||!run(&b,HG_FIELD_GUEST_Field_PlayerCanSurfOnTile,HANDLE,standing,facing,0,&result)||result>1)return 0;
+    *out=(int)result;return 1;
+}
+int hg_motion_rock_climb(unsigned facing,unsigned direction,int *out) {
+    if(facing>255||direction>3||!out)return 0;MotionBoundary b={0};uint32_t result;
+    if(!run(&b,HG_FIELD_GUEST_MetatileBehavior_IsRockClimbInDirection,facing,direction,0,0,&result)||result>1)return 0;
+    *out=(int)result;return 1;
 }
 int hg_motion_terrain_barrier(HGFieldResources *field,LocalMapObject *object,unsigned direction,int *blocked) {
     if(!field||!object||!blocked||direction>3)return 0;
@@ -364,7 +493,11 @@ int hg_motion_player_collision(HGFieldResources *field,PlayerAvatar *avatar,unsi
     if(!hg_field_resources_tile(field,MapObject_GetXCoord(object),MapObject_GetZCoord(object),&current) ||
        !hg_motion_grid_step(&candidate,direction) ||
        !hg_field_resources_tile(field,MapObject_GetXCoord(&candidate),MapObject_GetZCoord(&candidate),&target) ||
-       !hg_transition_supported(current.map_header) || target.map_header!=current.map_header)return 0;
+       !hg_transition_supported(current.map_header)||!hg_transition_supported(target.map_header))return 0;
+    /* The static-height boundary cannot resolve a tile without BDHC support.
+     * Reject it before guest dispatch rather than faulting during collision. */
+    VecFx32 position;MapObject_CopyPositionVector(object,&position);int32_t target_height;
+    if(hg_field_resources_height(field,MapObject_GetXCoord(&candidate),MapObject_GetZCoord(&candidate),0,position.y,&target_height)!=1)return 0;
     sub_0205F4FC(object,(uint8_t)current.attribute);
     MotionBoundary b={.avatar=avatar,.object=object,.manager=manager,.field=field,.static_environment=1};
     uint32_t result;int ok=run(&b,HG_FIELD_GUEST_sub_0205DA34,HANDLE,HANDLE,direction,0,&result);
@@ -414,25 +547,33 @@ int hg_motion_walk_begin(HGFieldResources *field,PlayerAvatar *avatar,uint16_t k
     *out=move;return 1;
 }
 int hg_motion_script_command(unsigned command) {
-    return command<=3||(command>=12&&command<=15)||(command>=32&&command<=35)||
-        (command>=56&&command<=59)||command==71||command==72||(command>=76&&command<=79);
+    /* Regular facing, walking, in-place, jumping and delay families all use
+     * the original command table and shared position/height services. */
+    return command<=66||command==69||command==70||command==71||command==72||command==75||(command>=76&&command<=79);
 }
-static int command_tick(HGFieldResources *field,LocalMapObject *object,int *complete,int scripted) {
+static int command_tick(HGFieldResources *field,LocalMapObject *object,int *complete,int scripted,HGMotionEffect *effect,int defer_reset) {
     if(!field||!object||!complete||!object->unkC8)return 0;
     HGFieldTile tile;
     if(!hg_field_resources_tile(field,MapObject_GetXCoord(object),MapObject_GetZCoord(object),&tile)||!hg_transition_supported(tile.map_header))return 0;
     unsigned command=MapObject_GetMovementCommand(object);
     if(!(scripted?hg_motion_script_command(command):((command>=12&&command<=15)||(command>=88&&command<=91)))||MapObject_GetMovementStep(object)>1)return 0;
-    LocalMapObject saved=*object;
-    MotionBoundary b={.object=object,.field=field,.static_environment=1};uint32_t result;
-    if(!run(&b,HG_FIELD_GUEST_sub_02062428,HANDLE,0,0,0,&result)||result>1){*object=saved;return 0;}
-    if(result && (saved.flags&0x10) && !run(&b,HG_FIELD_GUEST_MapObject_ClearHeldMovement,HANDLE,0,0,0,NULL)) {
-        *object=saved;return 0;
+    if(command==75&&!effect)return 0;
+    LocalMapObject saved=*object;HGMotionEffect saved_effect={0};if(effect)saved_effect=*effect;
+    MotionBoundary b={.object=object,.field=field,.static_environment=1,.effect=effect};uint32_t result;
+    if(effect&&effect->active) {
+        b.effect_update=1;
+        if(!run(&b,HG_FIELD_GUEST_ov01_02200480,EFFECT_HANDLE,EFFECT_ENV,0,0,NULL)){*object=saved;*effect=saved_effect;return 0;}
+        b.effect_update=0;
+    }
+    if(!run(&b,defer_reset?HG_FIELD_GUEST_sub_02062400:HG_FIELD_GUEST_sub_02062428,HANDLE,0,0,0,&result)||(!defer_reset&&result>1)){*object=saved;if(effect)*effect=saved_effect;return 0;}
+    if(defer_reset)result=MapObject_TestFlagsBits(object,0x20);
+    if(!defer_reset&&result && (saved.flags&0x10) && !run(&b,HG_FIELD_GUEST_MapObject_ClearHeldMovement,HANDLE,0,0,0,NULL)) {
+        *object=saved;if(effect)*effect=saved_effect;return 0;
     }
     *complete=(int)result;return 1;
 }
-int hg_motion_walk_tick(HGFieldResources *field,LocalMapObject *object,int *complete) { return command_tick(field,object,complete,0); }
-int hg_motion_script_tick(HGFieldResources *field,LocalMapObject *object,int *complete) { return command_tick(field,object,complete,1); }
+int hg_motion_walk_tick(HGFieldResources *field,LocalMapObject *object,int *complete) { return command_tick(field,object,complete,0,NULL,0); }
+int hg_motion_script_tick(HGFieldResources *field,LocalMapObject *object,int *complete) { return command_tick(field,object,complete,1,NULL,0); }
 
 int hg_motion_locomotion_begin(HGFieldResources *field,PlayerAvatar *avatar,uint16_t keys,HGMotionSession *session,HGMotionMove *out) {
     if(!field||!avatar||!session||!session->stats||!out||PlayerAvatar_GetState(avatar)!=0)return 0;
@@ -467,7 +608,7 @@ int hg_motion_locomotion_begin(HGFieldResources *field,PlayerAvatar *avatar,uint
 
 int hg_motion_background_event(PlayerAvatar *avatar,const uint8_t *backgrounds,unsigned count,unsigned *script) {
     if(!avatar||!backgrounds||!script||count>100)return 0;
-    /* This path admits visible background signs. Hidden items require original
+    /* This path admits ordinary/visible background events. Hidden items require original
      * saved flag state and are deliberately excluded by the caller. */
     for(unsigned i=0;i<count;i++)if((backgrounds[20*i+2]|(unsigned)backgrounds[20*i+3]<<8)==2)return 0;
     MotionBoundary b={.avatar=avatar,.backgrounds=backgrounds,.background_count=count};uint32_t result;
@@ -502,4 +643,62 @@ unsigned hg_field_guest_mom_spawn(void) {
     MotionBoundary boundary={0};uint32_t result;
     GF_ASSERT(run(&boundary,HG_FIELD_GUEST_GetMomSpawnId,0,0,0,0,&result)&&result<=65535);
     return result;
+}
+
+int hg_motion_script_effect_tick(HGFieldResources *field,LocalMapObject *object,HGMotionEffect *effect,int *complete) { return command_tick(field,object,complete,1,effect,0); }
+
+int hg_motion_location_compatible(unsigned location,int *out) {
+    if(location>65535||!out)return 0;MotionBoundary b={0};uint32_t result;
+    if(!run(&b,HG_FIELD_GUEST_LocationIsDiamondPearlCompatible,location,0,0,0,&result)||result>1)return 0;
+    *out=(int)result;return 1;
+}
+int hg_motion_map_location(unsigned type,unsigned offset,unsigned *out) {
+    if(type>=3||offset>65535||!out)return 0;MotionBoundary b={0};uint32_t result;
+    if(!run(&b,HG_FIELD_GUEST_sub_02017FE4,type,offset,0,0,&result)||result>65535)return 0;
+    *out=result;return 1;
+}
+
+int hg_motion_follow_tick(HGFieldResources *field,PlayerAvatar *avatar,LocalMapObject *follower,HGMotionSession *session,int init,unsigned movement) {
+    if(!field||!avatar||!follower||!session||(movement!=48&&movement!=55))return 0;
+    LocalMapObject saved=*follower;HGMotionSession before=*session;
+    MotionBoundary b={.field=field,.avatar=avatar,.object=follower,.manager=follower->manager,.session=session,.static_environment=1};
+    uint32_t entry=init==2?HG_FIELD_GUEST_sub_020659CC:init?HG_FIELD_GUEST_sub_020658D4:movement==48?HG_FIELD_GUEST_sub_02065900:HG_FIELD_GUEST_sub_02065938;
+    if(!run(&b,entry,HANDLE,0,0,0,NULL)){*follower=saved;*session=before;return 0;}return 1;
+}
+
+int hg_motion_follow_position(HGFieldResources *field,PlayerAvatar *avatar,LocalMapObject *follower,unsigned direction,unsigned facing) {
+ if(!field||!avatar||!follower||direction>3||facing>3)return 0;
+ MotionBoundary b={.field=field,.avatar=avatar,.object=PlayerAvatar_GetMapObject(avatar),.manager=follower->manager,.static_environment=1};
+ for(unsigned i=0;i<b.manager->objectCount;i++)if(b.manager->objects+i==follower)
+  return run(&b,HG_FIELD_GUEST_ov01_02205720,HANDLE,OBJECT_BASE+4*i,direction,facing,NULL);
+ return 0;
+}
+
+BOOL MapObject_IsMovementPaused(LocalMapObject *object) {
+ MotionBoundary b={.object=object};uint32_t result;GF_ASSERT(object&&run(&b,HG_FIELD_GUEST_MapObject_IsMovementPaused,HANDLE,0,0,0,&result)&&result<=1);return (BOOL)result;
+}
+
+int hg_motion_player_tick(HGFieldResources *field,LocalMapObject *object,int *complete) { return command_tick(field,object,complete,0,NULL,1); }
+
+int hg_motion_apricorn_sprite(unsigned kind,int available,unsigned *out) {
+    if(kind>=8||(available!=0&&available!=1)||!out)return 0;MotionBoundary b={0};uint32_t result;
+    if(!run(&b,HG_FIELD_GUEST_sub_020640A4,kind,(unsigned)available,0,0,&result))return 0;*out=result;return 1;
+}
+
+static int fade_run(HGMotionFade *fade,unsigned *result) {
+    MotionBoundary boundary={.fade=fade};return run(&boundary,fade->type?HG_FIELD_GUEST_FadeFunc_01:HG_FIELD_GUEST_FadeFunc_00,FADE_WORK,0,0,0,result);
+}
+int hg_motion_fade_begin(HGMotionFade *fade,unsigned type,unsigned color,unsigned steps,unsigned speed) {
+    if(!fade||fade->active||type>1||(color!=0&&color!=32767)||!steps||steps>3600||!speed||speed>60)return 0;
+    HGMotionFade next={.active=1,.type=type};
+    /* Original FadeWork: type, steps, frames/step, phase, LCD, allocation,
+     * task fields, heap, RGB555 color, direction and brightness selector. */
+    next.work[0]=(uint8_t)type;next.work[4]=(uint8_t)steps;next.work[5]=(uint8_t)(steps>>8);next.work[8]=(uint8_t)speed;
+    next.work[36]=(uint8_t)color;next.work[37]=(uint8_t)(color>>8);
+    unsigned result;if(!fade_run(&next,&result)||result)return 0;*fade=next;return 1;
+}
+int hg_motion_fade_tick(HGMotionFade *fade) {
+    if(!fade||!fade->active)return 1;HGMotionFade next=*fade;unsigned result;
+    if(!fade_run(&next,&result)||result>1)return 0;
+    if(result)next.active=0;*fade=next;return 1;
 }

@@ -8,7 +8,7 @@ typedef struct { fx32 m[9]; } MtxFx33;
 #define FX32_ONE 4096
 #define FX32_CONST(x) ((fx32)((x)*4096))
 typedef struct HGPropModel NNSG3dResMdl;
-typedef struct { NNSG3dResMdl *model; } NNSG3dRenderObj;
+typedef struct { NNSG3dResMdl *model;void *anmMat,*anmJnt,*anmVis; } NNSG3dRenderObj;
 typedef struct Field3dRenderObjManager Field3dRenderObjManager;
 typedef struct MapPropAnimationManager MapPropAnimationManager;
 typedef struct AreaDataManager_Sub8AC AreaDataManager_Sub8AC;

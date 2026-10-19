@@ -13,5 +13,9 @@ int hg_prop_trace_write(FILE *);
 typedef int (*HGPropDraw)(void *,unsigned,const uint8_t *,size_t,const DSTransform *,int material,int shape);
 AreaDataManager *hg_prop_area_new(const uint8_t *,size_t);
 void hg_prop_area_free(AreaDataManager *);
+int hg_prop_area_has_model(const AreaDataManager *,unsigned);
 void hg_prop_draw_begin(HGPropDraw,void *);
 int hg_prop_draw_end(unsigned *submissions);
+
+typedef struct HGFieldProps HGFieldProps;
+MapPropManager *hg_field_props_manager(HGFieldProps *);

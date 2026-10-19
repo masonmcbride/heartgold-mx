@@ -248,7 +248,28 @@ int main(void) {
         MapObject_SetMovementCommand(&object,command);MapObject_SetMovementStep(&object,0);int done=0;
         CHECK(hg_motion_script_tick(resources,&object,&done)&&done);CHECK(!!(object.flags&0x80)==(command==71));
     }
-    CHECK(!hg_motion_script_command(4)&&!hg_motion_script_command(255));
+    MapObject_SetMovementCommand(&object,75);MapObject_SetMovementStep(&object,0);
+    HGMotionEffect effect={0};int emote_done=0;unsigned emote_ticks=0;int saw_emote=0;
+    const int arc[]={6,10,12,12,10,6,0};
+    VecFx32 emote_position;MapObject_CopyPositionVector(&object,&emote_position);
+    while(!emote_done&&emote_ticks<50) {
+        CHECK(hg_motion_script_effect_tick(resources,&object,&effect,&emote_done));
+        if(emote_ticks>=1&&emote_ticks<=7)CHECK((int32_t)effect.state[7]==arc[emote_ticks-1]*4096);
+        saw_emote|=effect.visible;emote_ticks++;
+    }
+    CHECK(emote_done&&emote_ticks==38&&saw_emote&&!effect.active&&!effect.visible);
+    VecFx32 after_emote;MapObject_CopyPositionVector(&object,&after_emote);CHECK(!memcmp(&emote_position,&after_emote,sizeof(after_emote)));
+    const unsigned delays[]={1,2,4,8,15,16,32};
+    for(unsigned i=0;i<7;i++) {
+        MapObject_SetMovementCommand(&object,60+i);MapObject_SetMovementStep(&object,0);
+        LocalMapObject before=object;VecFx32 position;MapObject_CopyPositionVector(&object,&position);
+        unsigned ticks=0;int done=0;
+        while(!done&&ticks<40){CHECK(hg_motion_script_tick(resources,&object,&done));ticks++;}
+        CHECK(done&&ticks==delays[i]+1);
+        VecFx32 after;MapObject_CopyPositionVector(&object,&after);CHECK(!memcmp(&position,&after,sizeof(after)));
+        CHECK(MapObject_GetXCoord(&object)==MapObject_GetXCoord(&before)&&MapObject_GetZCoord(&object)==MapObject_GetZCoord(&before));
+    }
+    CHECK(hg_motion_script_command(4)&&!hg_motion_script_command(255));
     hg_field_resources_free(resources);
     PlayerAvatar_FreeToHeap(avatar);puts("Original avatar/object state executed");return 0;
 }
