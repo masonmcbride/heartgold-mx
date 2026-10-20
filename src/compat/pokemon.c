@@ -4,9 +4,9 @@
 _Static_assert(sizeof(Party)==0x5b0,"Original party record layout changed");
 _Static_assert(sizeof(BoxPokemon)==0x88&&sizeof(Pokemon)==0xec&&offsetof(Pokemon,party)==0x88,"Original Pokemon record layout changed");
 static void native_mon_read_range(void *out,int archive,int member,u32 offset,u32 length) {
-    const uint8_t *bytes;size_t size;
-    GF_ASSERT(native_resource_member(archive,0,member,&bytes,&size)&&offset<=size&&length<=size-offset);
-    memcpy(out,bytes+offset,length);
+    const uint8_t *bytes;
+    GF_ASSERT(native_resource_range(archive,0,member,offset,length,&bytes));
+    memcpy(out,bytes,length);
 }
 static void native_mon_read_whole(void *out,int archive,int member) {
     const uint8_t *bytes;size_t size;

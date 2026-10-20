@@ -1,3 +1,5 @@
+#include "ds_audio.h"
+#include "map_header.h"
 #include "compat/motion.h"
 #include "compat/stats.h"
 #include "compat/map_objects.h"
@@ -21,10 +23,10 @@ typedef struct {
 } ScriptMovement;
 typedef struct {
     LocalMapObject objects[64];PlayerAvatar avatar;PlayerSaveData player_save;MapObjectManager manager;
-    HGMotionFade fade;LocalFieldData *local_field;HGFieldResources *resources;HGFieldProps *props;HGStarter *starter;HGPropAnimations *prop_animations;Location location;int preview,props_changed;HGMotionSession follow;ScriptMovement movement[64];unsigned count,map,target;
+    DSAudio *audio;HGMotionFade fade;LocalFieldData *local_field;HGFieldResources *resources;HGFieldProps *props;HGStarter *starter;HGPropAnimations *prop_animations;Location location;int preview,props_changed;HGMotionSession follow;ScriptMovement movement[64];unsigned count,map,target;
 } ScriptScene;
 struct HGFieldPlayer {
-    int exploring;HGMotionFade fade;
+    DSAudio *audio;int exploring;HGMotionFade fade;
     FieldSystem field;MapObjectManager manager;LocalMapObject objects[64];
     HGFieldView *actor_sprites[63];HGFieldActorCounts actors;
     PlayerSaveData save;PlayerAvatar *avatar;HGFieldResources *resources;
@@ -148,7 +150,7 @@ static void movement_finished(LocalMapObject *object) { (void)object; }
 static unsigned scene_half(const uint8_t *p) { return p[0]|(unsigned)p[1]<<8; }
 static void *scene_clone(const void *source) {
     ScriptScene *scene=malloc(sizeof(*scene));if(!scene)return NULL;*scene=*(const ScriptScene *)source;
-    scene->starter=NULL;scene->props=NULL;scene->prop_animations=NULL;scene->local_field=NULL;
+    scene->audio=NULL;scene->starter=NULL;scene->props=NULL;scene->prop_animations=NULL;scene->local_field=NULL;
     if(((const ScriptScene *)source)->local_field) {
         scene->local_field=malloc(Save_LocalFieldData_sizeof());if(!scene->local_field){free(scene);return NULL;}
         memcpy(scene->local_field,((const ScriptScene *)source)->local_field,Save_LocalFieldData_sizeof());
@@ -158,16 +160,18 @@ static void *scene_clone(const void *source) {
         scene->props=hg_field_props_clone(((const ScriptScene *)source)->props);
         if(!scene->props){hg_prop_animations_free(scene->prop_animations);free(scene->local_field);free(scene);return NULL;}
     }
+    scene->audio=ds_audio_clone(((const ScriptScene *)source)->audio);
+    if(!scene->audio){hg_field_props_free(scene->props);hg_prop_animations_free(scene->prop_animations);free(scene->local_field);free(scene);return NULL;}
     scene->manager.objects=scene->objects;scene->manager.objectCount=scene->count;scene->avatar.mapObject=scene->objects;
     scene->player_save=*(((const ScriptScene *)source)->avatar.playerSaveData);scene->avatar.playerSaveData=&scene->player_save;
     for(unsigned i=0;i<scene->count;i++){scene->objects[i].manager=&scene->manager;sub_0205F47C(scene->objects+i,movement_finished);}
     return scene;
 }
 static void scene_destroy(void *opaque) {
-    ScriptScene *scene=opaque;if(scene){free(scene->local_field);hg_prop_animations_free(scene->prop_animations);hg_starter_free(scene->starter);hg_field_props_free(scene->props);}free(scene);
+    ScriptScene *scene=opaque;if(scene){ds_audio_free(scene->audio);free(scene->local_field);hg_prop_animations_free(scene->prop_animations);hg_starter_free(scene->starter);hg_field_props_free(scene->props);}free(scene);
 }
 static void scene_bind(void *opaque,FieldSystem *field,int preview) {
-    ScriptScene *scene=opaque;scene->preview=preview;field->native_fade=&scene->fade;field->native_local_field=scene->local_field;field->native_prop_animations=scene->prop_animations;scene->location.mapId=scene->map;field->location=&scene->location;scene->manager.fieldSystem=field;field->mapObjectManager=&scene->manager;field->playerAvatar=&scene->avatar;field->native_scene_resources=scene->resources;field->mapPropManager=hg_field_props_manager(scene->props);scene->follow.stats=hg_story_save_stats(field->saveData);field->native_follow_session=&scene->follow;
+    ScriptScene *scene=opaque;scene->preview=preview;field->native_audio=scene->audio;field->native_fade=&scene->fade;field->native_local_field=scene->local_field;field->native_prop_animations=scene->prop_animations;scene->location.mapId=scene->map;field->location=&scene->location;scene->manager.fieldSystem=field;field->mapObjectManager=&scene->manager;field->playerAvatar=&scene->avatar;field->native_scene_resources=scene->resources;field->mapPropManager=hg_field_props_manager(scene->props);scene->follow.stats=hg_story_save_stats(field->saveData);field->native_follow_session=&scene->follow;
 }
 static int scene_command(void *opaque,ScriptContext *context,unsigned op,BOOL *yielded) {
     ScriptScene *scene=opaque;
@@ -182,7 +186,7 @@ static int scene_command(void *opaque,ScriptContext *context,unsigned op,BOOL *y
         if(scene->fade.active||!scene_half(p)||scene_half(p)>3600||!scene_half(p+2)||scene_half(p+2)>60||scene_half(p+4)>1||(scene_half(p+6)!=0&&scene_half(p+6)!=32767))return 0;
     }
     if(op==167) {
-        if(scene->starter)return 0;
+        if(scene->starter||scene->fade.active)return 0;
         scene->starter=hg_starter_begin(context->fieldSystem,scene->preview);if(!scene->starter)return 0;
     }
     if(op==621) {
@@ -253,8 +257,9 @@ static LocalMapObject *add_follower(LocalMapObject *slot,MapObjectManager *manag
 }
 static int scene_tick(void *opaque) {
     ScriptScene *scene=opaque;
-    if(!hg_motion_fade_tick(&scene->fade)||!hg_prop_animations_tick(scene->prop_animations))return 0;
-    if(scene->starter&&hg_starter_busy(scene->starter)&&!hg_starter_tick(scene->starter))return 0;
+    if(!hg_prop_animations_tick(scene->prop_animations))return 0;
+    if(scene->starter&&hg_starter_busy(scene->starter)) { if(!hg_starter_tick(scene->starter))return 0; }
+    else if(!hg_motion_fade_tick(&scene->fade))return 0;
     if(scene->starter&&!hg_starter_busy(scene->starter)&&!MapObjectManager_GetFirstActiveObjectByID(&scene->manager,obj_partner_poke)) {
         if(scene->count>=64)return 0;
         scene->manager.objectCount=scene->count+1;
@@ -282,8 +287,8 @@ static int scene_tick(void *opaque) {
         }
         int complete;if(!hg_motion_script_effect_tick(scene->resources,object,&job->effect,&complete)){fprintf(stderr,"Movement tick failed map %u actor %u command %u step %u at %d,%d\n",scene->map,MapObject_GetID(object),job->command,MapObject_GetMovementStep(object),MapObject_GetXCoord(object),MapObject_GetZCoord(object));return 0;}
         HGFieldTile tile;VecFx32 v;MapObject_CopyPositionVector(object,&v);
-        if(!hg_field_resources_tile(scene->resources,MapObject_GetXCoord(object),MapObject_GetZCoord(object),&tile)||tile.map_header!=scene->map||
-           !hg_field_resources_tile(scene->resources,v.x/65536,v.z/65536,&tile)||tile.map_header!=scene->map)return 0;
+        if(!hg_field_resources_tile(scene->resources,MapObject_GetXCoord(object),MapObject_GetZCoord(object),&tile)||!hg_transition_supported(tile.map_header)||(!i&&tile.map_header!=scene->map)||
+           !hg_field_resources_tile(scene->resources,v.x/65536,v.z/65536,&tile)||!hg_transition_supported(tile.map_header)||(!i&&tile.map_header!=scene->map))return 0;
         if(complete)job->remaining--;
     }
     return 1;
@@ -330,7 +335,7 @@ static int prepare_resume(HGFieldPlayer *p,PreparedActors *actors,HGStoryState *
     *props=NULL;*view=NULL;unsigned entry;
     if(!hg_story_map_script(story,map,INIT_SCRIPT_ON_RESUME,&entry))return 0;
     if(entry==65535)return 1;
-    ScriptScene source={.manager=p->manager,.avatar=*p->avatar,.resources=resources,.count=actors->counts.active+1,.map=map,.target=64};
+    ScriptScene source={.audio=p->audio,.manager=p->manager,.avatar=*p->avatar,.resources=resources,.count=actors->counts.active+1,.map=map,.target=64};
     source.objects[0]=p->objects[0];hg_map_object_set_map(source.objects,map);place_object(source.objects,x,z,height,direction);
     memcpy(source.objects+1,actors->objects,actors->counts.active*sizeof(*actors->objects));
     HGScriptSceneServices services={.source=&source,.clone=scene_clone,.destroy=scene_destroy,.bind=scene_bind,.apply=scene_apply,
@@ -364,13 +369,15 @@ void hg_field_player_free(HGFieldPlayer *p) {
     for(unsigned i=0;i<p->actors.active;i++)release_live_sprite(p,i);
     for(unsigned i=0;i<63;i++)hg_field_view_free(p->script_sprites[i]);
     hg_field_props_free(p->props);hg_field_view_free(p->props_view);
-    hg_field_resources_free(p->resources);free(p->stats_start);free(p);
+    hg_field_resources_free(p->resources);ds_audio_free(p->audio);free(p->stats_start);free(p);
 }
 HGFieldPlayer *hg_field_player_new(void) { return hg_field_player_new_map(60); }
 static HGFieldPlayer *player_new_map(unsigned map,const HGFieldLocation *start,int exploring) {
     if(!hg_transition_supported(map))return NULL;
     HGFieldPlayer *p=calloc(1,sizeof(*p));if(!p)return NULL;
-    p->exploring=exploring;p->map=map;p->resources=hg_field_resources_new(map);if(!p->resources)goto fail;
+    p->audio=ds_audio_new();if(!p->audio)goto fail;
+    if(!ds_audio_play(p->audio,DS_AUDIO_BGM,MapHeader_GetDayMusicId(map)))goto fail;
+    p->field.native_audio=p->audio;p->exploring=exploring;p->map=map;p->resources=hg_field_resources_new(map);if(!p->resources)goto fail;
     p->story=hg_story_new();if(!p->story||(!exploring&&!hg_story_enter_map(p->story,map,p->script_error,sizeof(p->script_error))))goto fail;
     hg_story_bind_field(p->story,&p->field);
     p->session.stats=hg_story_save_stats(p->field.saveData);p->stats_start=malloc(GameStats_sizeof());
@@ -582,7 +589,7 @@ int hg_field_player_start_script(HGFieldPlayer *p,unsigned entry,int actor_id) {
     p->script_start=calloc(1,sizeof(*p->script_start));if(!p->script_start)return 0;
     ScriptScene *scene=p->script_start;scene->count=p->manager.objectCount;scene->manager=p->manager;scene->avatar=*p->avatar;
     scene->player_save=*PlayerAvatar_GetPlayerSaveData(p->avatar);scene->avatar.playerSaveData=&scene->player_save;
-    scene->fade=p->fade;scene->follow=p->session;scene->resources=p->resources;scene->props=p->props;scene->map=p->map;scene->target=p->script_actor<p->actors.active?p->script_actor+1:64;
+    scene->audio=p->audio;scene->fade=p->fade;scene->follow=p->session;scene->resources=p->resources;scene->props=p->props;scene->map=p->map;scene->target=p->script_actor<p->actors.active?p->script_actor+1:64;
     memcpy(scene->objects,p->objects,scene->count*sizeof(*scene->objects));
     HGScriptSceneServices services={.source=scene,.clone=scene_clone,.destroy=scene_destroy,.bind=scene_bind,.apply=scene_apply,.tick=scene_tick,.active=scene_active,.busy=scene_busy,.command=scene_command,.face_player=scene_face_player};
     p->script=hg_field_script_scene_new(p->story,p->map,entry,&services,p->script_error,sizeof(p->script_error));
@@ -623,6 +630,7 @@ int hg_field_player_interaction_tick(HGFieldPlayer *p,char *message,size_t capac
             hg_field_view_free(props_view);
             free_prepared(actors);snprintf(p->script_error,sizeof(p->script_error),"Cannot publish script state/population");status=HG_SCRIPT_ERROR;
         } else {
+            ds_audio_free(p->audio);p->audio=scene->audio;scene->audio=NULL;p->field.native_audio=p->audio;
             p->fade=scene->fade;*PlayerAvatar_GetPlayerSaveData(p->avatar)=scene->player_save;
             if(actors)install_actors(p,actors);
             if(scene->props_changed) {
@@ -753,7 +761,6 @@ static HGStarter *active_starter(const HGFieldPlayer *p) {
 int hg_field_player_starter_pending(const HGFieldPlayer *p) { return hg_starter_pending(active_starter(p)); }
 int hg_field_player_starter_option(HGFieldPlayer *p,unsigned index,HGStarterOption *out) { return hg_starter_option(active_starter(p),index,out); }
 int hg_field_player_choose_starter(HGFieldPlayer *p,unsigned index) { return hg_starter_choose(active_starter(p),index); }
-double hg_field_player_starter_fade(const HGFieldPlayer *p) { return hg_starter_fade(active_starter(p)); }
 
 int hg_field_player_menu_pending(const HGFieldPlayer *p) { return p&&hg_field_script_menu_pending(p->script); }
 int hg_field_player_menu_choose(HGFieldPlayer *p,unsigned choice) { return p&&hg_field_script_menu_choose(p->script,choice); }
@@ -779,3 +786,12 @@ int hg_field_player_brightness(const HGFieldPlayer *p) {
     if(!p)return 0;const ScriptScene *scene=p->script?hg_field_script_scene(p->script):NULL;
     return scene?scene->fade.brightness:p->fade.brightness;
 }
+
+int hg_field_player_phone_active(const HGFieldPlayer *p) { return p&&hg_field_script_phone_active(p->script); }
+const char *hg_field_player_phone_contact(const HGFieldPlayer *p) { return p?hg_field_script_phone_contact(p->script):""; }
+
+DSAudio *hg_field_player_audio(HGFieldPlayer *p) {
+    if(!p)return NULL;const ScriptScene *scene=hg_field_script_scene(p->script);
+    return scene?scene->audio:p->audio;
+}
+void hg_field_player_bind_runtime(HGFieldPlayer *p,FieldSystem *field){if(p&&field){hg_story_bind_field(p->story,field);field->playerAvatar=p->avatar;}}

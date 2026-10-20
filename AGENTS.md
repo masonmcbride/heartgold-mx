@@ -97,12 +97,13 @@ The active target is now the original bedroom starting position through the firs
 rival battle and Pokemon-catching tutorial, with the required original events,
 objects, menus, items and battles present. Do not bypass required services with
 story flags. Read `docs/opening-route.md` for the connected checkpoint and the
-current phone-application/battle dependencies. The connected route now
+current battle/encounter dependencies. The connected route now
 passes Route 29, Cherrygrove's tour/Running Shoes/Map Card and Route 30's Apricorn
 Box gift and Mr. Pokemon's complete introduction for all starters, including
 original fades, healing, Mystery Egg/Pokedex acquisition and Oak's phone number.
-Leaving his house rejects the unported panic-call application (opcode 430); see
-`docs/mr-pokemon.md`. Original field encounters/battles remain absent. The full target is incomplete.
+Elm's incoming call now completes through the shared application lifecycle. The
+return route reaches the rival's unsupported TrainerBattle command (opcode 213)
+and rejects without publishing partial progress; see `docs/elm-phone.md`. Original field encounters/battles remain absent. The full target is incomplete.
 
 The earlier New Bark → Elm introduction → starter → following checkpoint
 passes for all three

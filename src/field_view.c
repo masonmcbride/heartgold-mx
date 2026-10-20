@@ -193,7 +193,9 @@ void hg_field_view_free(HGFieldView *v) { if(v) { free(v->props);free(v->triangl
 void hg_field_view_camera(const HGFieldView *v,DSCamera *c,unsigned w,unsigned h) {
     if(!v || !c)return;double radius=0;
     for(unsigned i=0;i<3;i++)radius+=(v->max[i]-v->min[i])*(v->max[i]-v->min[i]);radius=sqrt(radius);
-    *c=(DSCamera){.yaw=0.7853981634,.pitch=0.85,.scale=(w<h?w:h)*0.85/(radius>0?radius:1),.x=(v->min[0]+v->max[0])/2,.y=(v->min[1]+v->max[1])/2,.z=(v->min[2]+v->max[2])/2};
+    /* A gentle 12-degree orbit gives rooms depth without hiding their layout.
+     * Inspection controls can still orbit from this shared entry/reset view. */
+    *c=(DSCamera){.yaw=0.2094395102,.pitch=0.85,.scale=(w<h?w:h)*0.85/(radius>0?radius:1),.x=(v->min[0]+v->max[0])/2,.y=(v->min[1]+v->max[1])/2,.z=(v->min[2]+v->max[2])/2};
 }
 int hg_field_view_render(const HGFieldView *v,const DSCamera *c,uint8_t *out,unsigned w,unsigned h) { return v && ds_raster_draw(v->triangles,v->count,v->materials,v->material_count,c,out,w,h); }
 size_t hg_field_view_triangles(const HGFieldView *v) { return v?v->count:0; }

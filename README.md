@@ -9,8 +9,35 @@ Pokegear gift and Elm's farewell, including the original rendered door animation
 and phone registration. Route 29 travel, Cherrygrove's tour, Running Shoes and
 Map Card, and Route 30's Apricorn Box gift now execute. Mr. Pokemon's introduction
 now completes with the Mystery Egg, healing, Pokedex and Oak's phone number.
-Leaving his house stops at Elm's unported incoming phone call; field encounters
-and battles remain absent. See [Mr. Pokemon's checkpoint](docs/mr-pokemon.md).
+Elm's original incoming call now completes through a native phone view and
+returns to the field. The return trip reaches the rival's unported trainer-battle
+command. Walking in grass now starts visible wild battles, with Fight/Run,
+original damage and EXP, level-up and return to the same field session. See [Mr. Pokemon's checkpoint](docs/mr-pokemon.md).
+The starter now uses the [shared original application lifecycle](docs/application-lifecycle.md)
+and the same original brightness controller as field scripts. Elm's scripted call now uses that lifecycle too; general Pokegear browsing,
+trainer battles and saving still need integration. See [Elm's phone call](docs/elm-phone.md).
+
+Field menus now inspect your live session: click **Bag (B)** or **Pokémon (P)**,
+or press B/P. The panel opens on the right and pauses walking. Use A/D for Bag
+pockets, W/S for items or Pokémon, and Esc to close. Menu directions move once
+per press; release before moving again. Item quantities/descriptions
+and Pokémon HP, status, EXP, stats and move PP reflect story gifts and battles.
+These are viewing panels; using items and rearranging the party are not yet wired.
+
+Mom’s first gifts now show acknowledgment boxes for the Bag, Trainer Card,
+Save and Options unlocks, alongside their original fanfares.
+
+The [battle runtime](docs/battle-runtime.md) now connects live land encounters
+to a visible battle on the left and controls on the right. Choose with W/S and
+confirm with Enter/Space. Original Pokémon artwork, HP, moves and PP are shown;
+finished battles publish party/EXP changes back to the suspended field session.
+Original trainer AI, blackout recovery, capture and Bag/party battle menus remain
+unported. The rival is not yet playable.
+
+The field viewer now plays original map music, script effects, item fanfares and
+Elm’s phone sounds through native audio output. See [audio implementation and checks](docs/audio.md)
+for ownership, playback evidence and remaining fidelity limits.
+
 For scenery browsing, check **Explore freely** in the viewer or launch
 `./build/heartgold_field_viewer --explore 76` (Goldenrod). This separate session
 suppresses story events and NPCs, uses existing walking/travel, and restores your
@@ -157,9 +184,9 @@ ctest --test-dir build-sanitize --output-on-failure
 
 ## Limits and next milestone
 
-Original gameplay preconditions and bugs remain: invalid pocket IDs may leave locals uninitialized, and the original empty-slot add helper does not validate an initial oversized quantity. The UI passes valid IDs/pockets and adds one at a time. Item use, persistence, full field gameplay, audio, battles, and original bag overlay behavior are absent.
+Original gameplay preconditions and bugs remain: invalid pocket IDs may leave locals uninitialized, and the original empty-slot add helper does not validate an initial oversized quantity. The UI passes valid IDs/pockets and adds one at a time. Item use, persistence, full field gameplay, battles, and original bag overlay behavior are absent.
 
-The native map browser now provides search, a scrollable map selector and Previous/Next controls: `./build/heartgold_field_viewer`. See [docs/textured-field-viewer.md](docs/textured-field-viewer.md) for controls, validation and limitations. Original prop placement/traversal now supplies houses, doors, signs and the windmill. Next: persistent field/object lifecycle and collision-height/movement integration. Bounded model meshes, the supported multi-node SBC transform slice, CPU wireframe/solid diagnostics and collision-table validation now work. Original message character-code/decryption paths and DS window/font drawing remain separate work. Rendering the original bag 3D model will require a separate audited geometry/texture path. The resource scene and original menu loop now give those additions a working graphics/input target. A playable application still needs full main-loop/overlay integration, save/filesystem compatibility, map scripts/movement, audio, battles, and further pointer/ABI auditing.
+The native map browser now provides search, a scrollable map selector and Previous/Next controls: `./build/heartgold_field_viewer`. See [docs/textured-field-viewer.md](docs/textured-field-viewer.md) for controls, validation and limitations. Original prop placement/traversal now supplies houses, doors, signs and the windmill. Next: persistent field/object lifecycle and collision-height/movement integration. Bounded model meshes, the supported multi-node SBC transform slice, CPU wireframe/solid diagnostics and collision-table validation now work. Original message character-code/decryption paths and DS window/font drawing remain separate work. Rendering the original bag 3D model will require a separate audited geometry/texture path. The resource scene and original menu loop now give those additions a working graphics/input target. A playable application still needs full main-loop/overlay integration, save/filesystem compatibility, map scripts/movement, complete audio integration, battles, and further pointer/ABI auditing.
 
 ## Repository hygiene
 

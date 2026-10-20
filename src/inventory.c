@@ -3,7 +3,7 @@
 #include "list_menu.h"
 #include "ds_graphics.h"
 #include "compat/resources.h"
-struct HGInventory { Bag *bag;BagCursor *cursor;ListMenu *menu;Window window;ListMenuItem entries[NUM_BAG_ITEMS];unsigned pocket,count; };
+struct HGInventory { Bag *bag;int owns_bag;BagCursor *cursor;ListMenu *menu;Window window;ListMenuItem entries[NUM_BAG_ITEMS];unsigned pocket,count; };
 static const unsigned capacities[]={NUM_BAG_ITEMS,NUM_BAG_MEDICINE,NUM_BAG_BALLS,NUM_BAG_TMS_HMS,NUM_BAG_BERRIES,NUM_BAG_MAIL,NUM_BAG_BATTLE_ITEMS,NUM_BAG_KEY_ITEMS};
 static const uint16_t defaults[]={ITEM_REPEL,ITEM_POTION,ITEM_POKE_BALL,ITEM_TM01,ITEM_CHERI_BERRY,ITEM_GRASS_MAIL,ITEM_X_ATTACK,ITEM_BICYCLE};
 static unsigned selection(const HGInventory *v) { u16 index=0;ListMenuGetCurrentItemArrayId(v->menu,&index);return index; }
@@ -28,25 +28,36 @@ static void rebuild(HGInventory *v,unsigned preferred,int restore) {
     v->menu=ListMenuInit(&t,(u16)scroll,(u16)row,HEAP_ID_DEFAULT);
 }
 HGInventory *hg_inventory_new(void) {
-    HGInventory *v=calloc(1,sizeof(*v));if(!v)abort();v->bag=Save_Bag_New(HEAP_ID_DEFAULT);v->cursor=BagCursor_New(HEAP_ID_DEFAULT);v->window=(Window){.width=32,.height=24};
+    HGInventory *v=calloc(1,sizeof(*v));if(!v)abort();v->owns_bag=1;v->bag=Save_Bag_New(HEAP_ID_DEFAULT);v->cursor=BagCursor_New(HEAP_ID_DEFAULT);v->window=(Window){.width=32,.height=24};
     static const uint16_t seeds[]={ITEM_REPEL,ITEM_SUPER_REPEL,ITEM_ESCAPE_ROPE,ITEM_POTION,ITEM_SUPER_POTION,ITEM_HYPER_POTION,ITEM_MAX_POTION,ITEM_FULL_RESTORE,ITEM_REVIVE,ITEM_MAX_REVIVE,ITEM_ANTIDOTE,ITEM_PARLYZ_HEAL,ITEM_AWAKENING,ITEM_BURN_HEAL,ITEM_ICE_HEAL,ITEM_FULL_HEAL,ITEM_ULTRA_BALL,ITEM_GREAT_BALL,ITEM_POKE_BALL,ITEM_TM02,ITEM_TM01,ITEM_CHERI_BERRY,ITEM_CHESTO_BERRY,ITEM_GRASS_MAIL,ITEM_X_ATTACK,ITEM_X_DEFENSE,ITEM_BICYCLE,ITEM_OLD_ROD};
     for(unsigned i=0;i<NELEMS(seeds);i++)if(!Bag_AddItem(v->bag,seeds[i],i%5+1,HEAP_ID_DEFAULT))abort();
     rebuild(v,0,0);return v;
 }
-void hg_inventory_free(HGInventory *v) { if(v) { DestroyListMenu(v->menu,NULL,NULL);Heap_Free(v->cursor);Heap_Free(v->bag);free(v); } }
+HGInventory *hg_inventory_new_bag(Bag *bag) {
+    if(!bag)return NULL;
+    HGInventory *v=calloc(1,sizeof(*v));if(!v)return NULL;
+    v->bag=bag;v->cursor=BagCursor_New(HEAP_ID_DEFAULT);v->window=(Window){.width=32,.height=24};
+    rebuild(v,0,0);return v;
+}
+void hg_inventory_free(HGInventory *v) { if(v) { DestroyListMenu(v->menu,NULL,NULL);Heap_Free(v->cursor);if(v->owns_bag)Heap_Free(v->bag);free(v); } }
 int hg_inventory_pocket(const HGInventory *v) { return (int)v->pocket; }
 const char *hg_inventory_pocket_name(unsigned p) { static const char *names[]={"Items","Medicine","Balls","TMs & HMs","Berries","Mail","Battle items","Key items"};return p<8?names[p]:""; }
 unsigned hg_inventory_count(const HGInventory *v) { return v->count; }
 unsigned hg_inventory_selected(const HGInventory *v) { return selection(v); }
 unsigned hg_inventory_scroll(const HGInventory *v) { u16 scroll;ListMenuGetScrollAndRow(v->menu,&scroll,NULL);return scroll; }
-int hg_inventory_item(const HGInventory *v,unsigned row,HGItem *out) {
-    memset(out,0,sizeof(*out));if(row>=v->count)return 0;
-    out->id=(u16)v->entries[row].value;out->quantity=Bag_GetQuantity(v->bag,out->id,HEAP_ID_DEFAULT);
+int hg_item_details(uint16_t id,HGItem *out) {
+    if(!out||id>ITEM_MAX)return 0;memset(out,0,sizeof(*out));out->id=id;
     String *name=native_string_new(),*desc=native_string_new();
-    GetItemNameIntoString(name,out->id,HEAP_ID_DEFAULT);GetItemDescIntoString(desc,out->id,HEAP_ID_DEFAULT);
+    GetItemNameIntoString(name,id,HEAP_ID_DEFAULT);GetItemDescIntoString(desc,id,HEAP_ID_DEFAULT);
     snprintf(out->name,sizeof(out->name),"%s",native_string_utf8(name));snprintf(out->description,sizeof(out->description),"%s",native_string_utf8(desc));
     native_string_free(name);native_string_free(desc);return 1;
 }
+int hg_inventory_item(const HGInventory *v,unsigned row,HGItem *out) {
+    if(!out)return 0;memset(out,0,sizeof(*out));if(row>=v->count)return 0;
+    u16 id=(u16)v->entries[row].value;if(!hg_item_details(id,out))return 0;
+    out->quantity=Bag_GetQuantity(v->bag,id,HEAP_ID_DEFAULT);return 1;
+}
+
 int hg_inventory_action(HGInventory *v,enum HGAction action) {
     if(action==HG_PREVIOUS_POCKET || action==HG_NEXT_POCKET) {
         u16 scroll,row;ListMenuGetScrollAndRow(v->menu,&scroll,&row);

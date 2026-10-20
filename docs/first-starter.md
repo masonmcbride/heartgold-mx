@@ -1,6 +1,6 @@
 # First-starter milestone
 
-The active target and current expanded route are in [the opening route](opening-route.md). The connected scenario now begins at the original bedroom position, includes Mom's introduction and both friend/Marill scenes, and returns to Mom for the Pokegear. It currently stops at the required west-exit door-animation service. The sections below retain the starter subsystem evidence.
+The active target and current expanded route are in [the opening route](opening-route.md). The connected scenario now reaches the completed Mr. Pokemon introduction; Elm's incoming call completes; the rival battle remains unported. The starter now uses the [shared application lifecycle](application-lifecycle.md), including the original application launcher and common brightness controller. The sections below retain the earlier starter subsystem evidence.
 
 The connected acceptance route now passes for **Chikorita, Cyndaquil and Totodile**: start at the original bedroom location, complete the initial house/town scenes, enter Elm’s lab, complete the original introduction, select a starter, keep its original name, complete the post-choice conversation, receive five Potions, leave with it following, walk back and re-enter with the same party and bag.
 

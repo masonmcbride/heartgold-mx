@@ -50,7 +50,7 @@ size_t hg_font_page_end(HGFont *f,const char *text,unsigned max_width,unsigned l
 }
 static void write_color(uint8_t *dst,uint32_t c) { dst[0]=(uint8_t)(c>>16);dst[1]=(uint8_t)(c>>8);dst[2]=(uint8_t)c;dst[3]=255; }
 void hg_font_draw(HGFont *f,const char *text,uint8_t *out,unsigned w,unsigned h,int x,int y,unsigned max_width,uint32_t fg,uint32_t shadow) {
-    if(!w || !h || w>256 || h>192 || x<0 || y<0 || (unsigned)x>=w || (unsigned)y>=h || !max_width)return;
+    if(!w || !h || w>4096 || h>4096 || x<0 || y<0 || (unsigned)x>=w || (unsigned)y>=h || !max_width)return;
     unsigned start=(unsigned)x,dx=start,dy=(unsigned)y;
     while(*text && dy<h) {
         u16 id=next_glyph(&text);if(id==CHAR_LF) { dx=start;dy+=16;continue; }
@@ -60,7 +60,7 @@ void hg_font_draw(HGFont *f,const char *text,uint8_t *out,unsigned w,unsigned h,
         for(unsigned py=0;py<glyph.height && py<16;py++)for(unsigned px=0;px<glyph.width && px<16;px++) {
             unsigned index=((py/8)*2+px/8)*32+(py%8)*4+(px%8)/2;
             unsigned color=(glyph.data[index]>>((px%2)*4))&15;
-            if(color && dx+px<w && dy+py<h && dx-start+px<max_width)write_color(out+((dy+py)*w+dx+px)*4,color==1?fg:shadow);
+            if(color && dx+px<w && dy+py<h && dx-start+px<max_width)write_color(out+((size_t)(dy+py)*w+dx+px)*4,color==1?fg:shadow);
         }
         dx+=glyph.width;
     }

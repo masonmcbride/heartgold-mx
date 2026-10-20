@@ -57,3 +57,6 @@ int hg_field_script_menu_choose(HGFieldScript *,unsigned);
 int hg_story_phone_registered(const HGStoryState *,unsigned contact);
 
 int hg_story_apricorn_tree(const HGStoryState *,unsigned index,unsigned *kind,int *available);
+
+int hg_field_script_phone_active(const HGFieldScript *);
+const char *hg_field_script_phone_contact(const HGFieldScript *);

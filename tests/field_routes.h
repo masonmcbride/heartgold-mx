@@ -6,15 +6,24 @@
 #include "map_matrix.h"
 #include "motion_guest.h"
 #include "compat/field_control.h"
+/* Story/travel scenarios use the real Run command; the dedicated field-battle
+ * scenario verifies fighting and EXP. No healing or outcome flags are injected. */
+static void hg_test_battle_input(HGFieldApp *app){
+    int state=hg_field_app_battle_state(app);HGBattleMonView mon;
+    if(state==HG_BATTLE_COMMAND&&hg_field_app_battle_mon(app,0,&mon))CHECK(hg_field_app_battle_choose(app,1));
+    else if(state==HG_BATTLE_MOVES){for(unsigned i=0;i<4;i++)if(hg_field_app_battle_choose(app,i))return;CHECK(0);}
+    else hg_field_app_interact(app);
+}
 /* Drain real automatic scripts through application ticks and acknowledgments.
  * Two idle frames also exercise the next header check after completion. */
-static unsigned hg_test_settle_choice(HGFieldApp *app,unsigned choice) {
+static unsigned hg_test_settle_observe(HGFieldApp *app,unsigned choice,void (*observe)(HGFieldApp *,void *),void *context) {
     unsigned idle=0,pages=0;hg_field_app_clear_input(app);
     for(unsigned ticks=0;ticks<8192;ticks++) {
         hg_field_app_step(app);
-        if(strstr(hg_field_app_dialogue(app),"isn’t available yet"))fprintf(stderr,"Automatic event failed: %s\n",hg_field_app_error(app));
-        CHECK(!strstr(hg_field_app_dialogue(app),"isn’t available yet"));
-        if(hg_field_app_dialogue(app)[0]){pages++;hg_field_app_interact(app);}
+        if(strstr(hg_field_app_dialogue(app),"isn’t available yet")||strstr(hg_field_app_dialogue(app),"Battle stopped"))fprintf(stderr,"Automatic event failed: %s\n",hg_field_app_error(app));
+        CHECK(!strstr(hg_field_app_dialogue(app),"isn’t available yet"));CHECK(!strstr(hg_field_app_dialogue(app),"Battle stopped"));
+        if(hg_field_app_battle_active(app)){hg_test_battle_input(app);idle=0;continue;}
+        if(hg_field_app_dialogue(app)[0]){if(observe)observe(app,context);pages++;hg_field_app_interact(app);}
         else if(hg_field_app_menu_pending(app)) {
             CHECK(hg_field_app_menu_choice_supported(app,choice));
             if(!choice)hg_field_app_input(app,0x40);
@@ -24,6 +33,7 @@ static unsigned hg_test_settle_choice(HGFieldApp *app,unsigned choice) {
     }
     CHECK(0);return 0;
 }
+static unsigned hg_test_settle_choice(HGFieldApp *app,unsigned choice) { return hg_test_settle_observe(app,choice,NULL,NULL); }
 static unsigned hg_test_settle(HGFieldApp *app) { return hg_test_settle_choice(app,1); }
 /* Reusable scenario routing: discover with original collision/targeting, then
  * play every step through actual application input. Only the current 32x32
@@ -103,14 +113,16 @@ static void hg_test_route_impl(HGFieldApp *app,int goalx,int goalz,int target_sc
         hg_field_app_input(app,(uint16_t)keys[route[--length]]);hg_field_app_step(app);hg_field_app_clear_input(app);
         for(unsigned tick=1;tick<8;tick++)hg_field_app_step(app);CHECK(hg_field_app_map(app)==map);
         if(hg_field_app_interaction_busy(app)) {
+            int battle_interruption=hg_field_app_battle_active(app);int battle_x,battle_z;hg_field_app_player(app,&battle_x,&battle_z);
             unsigned ticks=0;
             while(hg_field_app_interaction_busy(app)&&ticks++<2048) {
-                if(strstr(hg_field_app_dialogue(app),"isn’t available yet"))fprintf(stderr,"Route interaction failed: %s\n",hg_field_app_error(app));
-                CHECK(!strstr(hg_field_app_dialogue(app),"isn’t available yet"));
-                if(hg_field_app_dialogue(app)[0])hg_field_app_interact(app);
+                if(strstr(hg_field_app_dialogue(app),"isn’t available yet")||strstr(hg_field_app_dialogue(app),"Battle stopped"))fprintf(stderr,"Route interaction failed: %s\n",hg_field_app_error(app));
+                CHECK(!strstr(hg_field_app_dialogue(app),"isn’t available yet"));CHECK(!strstr(hg_field_app_dialogue(app),"Battle stopped"));
+                if(hg_field_app_battle_active(app))hg_test_battle_input(app);else if(hg_field_app_dialogue(app)[0])hg_field_app_interact(app);
                 hg_field_app_step(app);
             }
             CHECK(ticks<2048);
+            int after_battle_x,after_battle_z;if(battle_interruption&&hg_field_app_map(app)==map&&hg_field_app_player(app,&after_battle_x,&after_battle_z)&&after_battle_x==battle_x&&after_battle_z==battle_z)continue;
             hg_transition_free(transitions);PlayerAvatar_FreeToHeap(avatar);hg_field_resources_free(terrain);hg_field_player_free(reference);
             free(previous);free(direction);free(queue);free(route);
             hg_test_route_impl(app,goalx,goalz,target_script,replans+1);return;

@@ -25,6 +25,7 @@ typedef struct PlayerAvatar PlayerAvatar;
 typedef struct FieldSystem FieldSystem;
 typedef struct BagView BagView;
 void *Heap_Alloc(enum HeapID, u32);
+void *Heap_AllocAtEnd(enum HeapID, u32);
 void Heap_Free(void *);
 void Heap_FreeExplicit(enum HeapID, void *);
 void MI_CpuClear8(void *, u32);

@@ -60,3 +60,6 @@ struct SavePokegear;struct SavePokegear *hg_story_save_pokegear(SaveData *);
 
 SysInfo *hg_story_save_sys_info(SaveData *);
 u16 *hg_story_save_blackout_spawn(SaveData *);
+u32 hg_story_rng_get(const HGStoryState *);
+void hg_story_rng_set(HGStoryState *,u32);
+void hg_story_touch(HGStoryState *);

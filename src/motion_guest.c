@@ -1,3 +1,4 @@
+#include "ds_audio.h"
 #include "compat/motion.h"
 #include "compat/stats.h"
 #include "compat/follow.h"
@@ -116,8 +117,9 @@ static int boundary(DSThumb *cpu, void *opaque) {
         cpu->r[0]=FieldSystem_VarGet(b->story_field,(u16)var);return 1;
     }
     if(b->field&&b->object&&!strcmp(name,"PlaySE")&&(cpu->r[0]==SEQ_SE_DP_DANSA||cpu->r[0]==SEQ_SE_DP_SUTYA2)) {
-        /* Presentation boundary: accepted original jump cues; audio backend
-         * remains absent, like the selection cue in field dialogue. */
+        MapObjectManager *manager=MapObject_GetManager(b->object);
+        FieldSystem *field=manager?manager->fieldSystem:NULL;
+        if(field&&field->native_audio&&!ds_audio_play(field->native_audio,DS_AUDIO_EFFECT,cpu->r[0]))return -1;
         return 1;
     }
     if(b->session && b->session->stats && !strcmp(name,"Save_GameStats_Get") && cpu->r[0]==SAVE_HANDLE) {

@@ -11,6 +11,7 @@ void hg_ui_test_approach(HGFieldApp *,unsigned);
 @property HGFieldApp *application;
 @property HGFieldApp *suspendedStory;
 @property BOOL exploring;
+@property BOOL audioEnabled;
 @property HGFieldView *characterScene;
 @property DSCamera camera;
 @property(strong) NSBitmapImageRep *bitmap;
@@ -53,6 +54,7 @@ void hg_ui_test_approach(HGFieldApp *,unsigned);
 - (BOOL)loadMap:(unsigned)map error:(char *)error {
     self.movementKeys=0;hg_field_view_free(self.characterScene);self.characterScene=NULL;
     HGFieldApp *next=self.exploring?hg_field_app_new_explore(map,error,256):map==64?hg_field_app_new_game(error,256):hg_field_app_new(map,error,256);hg_field_app_free(self.application);self.application=next;self.field=hg_field_app_view(next);
+    if(next&&self.audioEnabled&&!hg_field_app_audio_enable(next,1,error,256))return NO;
     if(next)[self resetCamera];
     if(![self render]) { snprintf(error,256,"Rasterization failed");hg_field_app_free(self.application);self.application=NULL;self.field=NULL;[self render];return NO; }
     return next!=NULL;
@@ -63,13 +65,14 @@ void hg_ui_test_approach(HGFieldApp *,unsigned);
     unsigned map=self.application?hg_field_app_map(self.application):64;
     self.movementKeys=0;hg_field_app_clear_input(self.application);
     if(enabled) {
-        self.suspendedStory=self.application;self.application=NULL;self.exploring=YES;
+        hg_field_app_audio_enable(self.application,0,NULL,0);self.suspendedStory=self.application;self.application=NULL;self.exploring=YES;
         if([self loadMap:map error:error])return YES;
         success=NO;self.application=self.suspendedStory;self.suspendedStory=NULL;self.exploring=NO;
     } else {
         hg_field_app_free(self.application);self.application=self.suspendedStory;self.suspendedStory=NULL;self.exploring=NO;
         if(!self.application)return [self loadMap:map error:error];
     }
+    if(self.audioEnabled&&!hg_field_app_audio_enable(self.application,1,error,256))return NO;
     hg_field_app_resume(self.application);self.field=hg_field_app_view(self.application);[self resetCamera];
     if(![self render]){snprintf(error,256,"Rasterization failed after restoring story");return NO;}return success;
 }
@@ -101,6 +104,9 @@ void hg_ui_test_approach(HGFieldApp *,unsigned);
     if(!self.field)return;
     DSCamera c=self.camera;NSString *key=event.charactersIgnoringModifiers.lowercaseString;BOOL changed=YES;
     if(hg_field_app_player(self.application,NULL,NULL)) {
+        if([key isEqualToString:@"b"]||[key isEqualToString:@"p"]||event.keyCode==53){
+            if(!event.isARepeat){self.movementKeys=0;hg_field_app_inspect(self.application,event.keyCode==53?0:[key isEqualToString:@"b"]?1:2);[self render];}return;
+        }
         if(event.keyCode==36 || event.keyCode==49) {
             if(!event.isARepeat){self.movementKeys=0;hg_field_app_interact(self.application);}return;
         }
@@ -172,11 +178,14 @@ static NSString *mapTitle(unsigned map) {
 @property(strong) NSMutableDictionary<NSNumber *,NSString *> *results;
 @property unsigned selectedMap;
 @property BOOL smoke;
+@property BOOL audioSmoke;
 @property BOOL exploreAtLaunch;
 @property unsigned initialMap;
 @property BOOL synchronizingSelection;
 @end
 @implementation FieldApp
+- (void)showBag:(id)sender { (void)sender;self.canvas.movementKeys=0;hg_field_app_inspect(self.canvas.application,1);[self.canvas render];[self.window makeFirstResponder:self.canvas]; }
+- (void)showPokemon:(id)sender { (void)sender;self.canvas.movementKeys=0;hg_field_app_inspect(self.canvas.application,2);[self.canvas render];[self.window makeFirstResponder:self.canvas]; }
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)app { (void)app;return YES; }
 - (NSString *)titleFor:(unsigned)model {
     if(!self.characters)return mapTitle(model);
@@ -221,7 +230,7 @@ static NSString *mapTitle(unsigned map) {
     NSInteger row=self.table.selectedRow;
     self.status.stringValue=ok?[NSString stringWithFormat:@"%u · %@ — %zu triangles · %lu entries in list",map,[self titleFor:map],hg_field_view_triangles(self.canvas.field),(unsigned long)self.rows.count]:[NSString stringWithFormat:@"%u · %@ — %@",map,[self titleFor:map],reason];
     if(ok&&!self.characters&&hg_field_app_is_exploring(self.canvas.application))self.status.stringValue=[self.status.stringValue stringByAppendingString:hg_field_app_player(self.canvas.application,NULL,NULL)?@" · Exploration · WASD / Shift run · Story and NPCs off":@" · Exploration · View only; walking unavailable"];
-    else if(ok && !self.characters && hg_field_app_player(self.canvas.application,NULL,NULL))self.status.stringValue=[self.status.stringValue stringByAppendingString:@" · WASD walk · Shift run · Doors/stairs travel"];
+    else if(ok && !self.characters && hg_field_app_player(self.canvas.application,NULL,NULL))self.status.stringValue=[self.status.stringValue stringByAppendingString:@" · WASD walk · Shift run · B Bag · P Pokémon"];
     else if(ok&&!self.characters)self.status.stringValue=[self.status.stringValue stringByAppendingString:@" · Inspection only; field gameplay unavailable"];
     self.status.toolTip=self.status.stringValue;
     self.window.title=[NSString stringWithFormat:@"HeartGold MX — %@%@",[self titleFor:map],ok?@"":@" (not supported yet)"];
@@ -257,6 +266,8 @@ static NSString *mapTitle(unsigned map) {
     NSView *root=[[NSView alloc] initWithFrame:NSMakeRect(0,0,1080,650)];self.canvas.autoresizingMask=NSViewWidthSizable|NSViewHeightSizable;self.canvas.toolTip=@"WASD walk · Shift + WASD run · Enter/Space read town/lab signs · Drag/arrows orbit · Scroll ± zoom · Shift-drag pan · R reset";[root addSubview:self.canvas];
     self.category=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(10,612,248,28) pullsDown:NO];[self.category addItemsWithTitles:@[@"Maps",@"Characters · sprite meshes"]];self.category.target=self;self.category.action=@selector(changeCategory:);self.category.autoresizingMask=NSViewMinYMargin;[root addSubview:self.category];
     self.exploration=[NSButton checkboxWithTitle:@"Explore freely" target:self action:@selector(changeExploration:)];self.exploration.frame=NSMakeRect(280,612,180,28);self.exploration.autoresizingMask=NSViewMinYMargin;self.exploration.toolTip=@"Browse scenery without story events or NPCs. Untick to resume your previous session.";[root addSubview:self.exploration];
+    NSButton *bag=[NSButton buttonWithTitle:@"Bag (B)" target:self action:@selector(showBag:)];bag.frame=NSMakeRect(470,612,110,28);bag.autoresizingMask=NSViewMinYMargin;[root addSubview:bag];
+    NSButton *pokemon=[NSButton buttonWithTitle:@"Pokémon (P)" target:self action:@selector(showPokemon:)];pokemon.frame=NSMakeRect(590,612,140,28);pokemon.autoresizingMask=NSViewMinYMargin;[root addSubview:pokemon];
     self.search=[[NSSearchField alloc] initWithFrame:NSMakeRect(10,578,248,28)];self.search.placeholderString=@"Search name or enter an ID";self.search.delegate=self;self.search.autoresizingMask=NSViewMinYMargin;[root addSubview:self.search];
     NSScrollView *scroll=[[NSScrollView alloc] initWithFrame:NSMakeRect(10,48,248,520)];scroll.hasVerticalScroller=YES;scroll.autoresizingMask=NSViewHeightSizable;
     self.table=[[NSTableView alloc] initWithFrame:scroll.bounds];NSTableColumn *column=[[NSTableColumn alloc] initWithIdentifier:@"map"];column.width=240;[self.table addTableColumn:column];self.table.headerView=nil;self.table.rowHeight=28;self.table.dataSource=self;self.table.delegate=self;self.table.allowsEmptySelection=YES;scroll.documentView=self.table;[root addSubview:scroll];
@@ -271,7 +282,9 @@ static NSString *mapTitle(unsigned map) {
     }
     [self filterMaps];
     [self.window center];[self.window makeKeyAndOrderFront:nil];[self.window makeFirstResponder:self.canvas];[NSApp activateIgnoringOtherApps:YES];
+    if(!self.smoke||self.audioSmoke){char error[256];self.canvas.audioEnabled=YES;if(!hg_field_app_audio_enable(self.canvas.application,1,error,sizeof(error)))self.status.stringValue=[NSString stringWithUTF8String:error];}
     if(self.smoke)dispatch_after(dispatch_time(DISPATCH_TIME_NOW,300*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
+        if(self.audioSmoke){uint64_t frames=hg_field_app_audio_frames(self.canvas.application);fprintf(stderr,"Field native audio consumed %llu PCM frames\n",(unsigned long long)frames);if(!frames)field_fail(__LINE__);}
         if(hg_field_app_ticks(self.canvas.application)<3)field_fail(__LINE__);
         NSData *before=[NSData dataWithBytes:self.canvas.bitmap.bitmapData length:WIDTH*HEIGHT*4];
         NSEvent *key=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"" charactersIgnoringModifiers:@"" isARepeat:NO keyCode:124];
@@ -364,6 +377,18 @@ static NSString *mapTitle(unsigned map) {
         [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/new-bark-dialogue.png" atomically:YES];
         [self.canvas keyDown:confirm];hg_field_app_step(self.canvas.application);
         if(hg_field_app_dialogue(self.canvas.application)[0])field_fail(__LINE__);
+        [self showBag:nil];if(hg_field_app_inspect_kind(self.canvas.application)!=1)field_fail(__LINE__);
+        char menuText[4096];hg_field_app_inspect_text(self.canvas.application,menuText,sizeof(menuText));if(!strstr(menuText,"BAG"))field_fail(__LINE__);
+        NSEvent *pocketKey=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"d" charactersIgnoringModifiers:@"d" isARepeat:NO keyCode:2];
+        [self.canvas keyDown:pocketKey];for(unsigned hold=0;hold<120;hold++){hg_field_app_input(self.canvas.application,self.canvas.movementKeys);hg_field_app_step(self.canvas.application);}
+        hg_field_app_inspect_text(self.canvas.application,menuText,sizeof(menuText));if(!strstr(menuText,"Medicine"))field_fail(__LINE__);
+        self.canvas.movementKeys=0;hg_field_app_input(self.canvas.application,0);
+        [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/field-bag-panel.png" atomically:YES];
+        NSEvent *partyKey=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"p" charactersIgnoringModifiers:@"p" isARepeat:NO keyCode:35];
+        [self.canvas keyDown:partyKey];if(hg_field_app_inspect_kind(self.canvas.application)!=2)field_fail(__LINE__);
+        hg_field_app_inspect_text(self.canvas.application,menuText,sizeof(menuText));if(!strstr(menuText,"No Pokemon yet"))field_fail(__LINE__);
+        NSEvent *closeKey=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"" charactersIgnoringModifiers:@"" isARepeat:NO keyCode:53];
+        [self.canvas keyDown:closeKey];if(hg_field_app_inspect_kind(self.canvas.application))field_fail(__LINE__);
         if(!hg_field_app_player(self.canvas.application,&px,&pz))field_fail(__LINE__);
         [self.canvas keyDown:walk];[self.canvas keyUp:release];
         if(hg_field_app_advance(self.canvas.application,UINT64_C(1000000000)))field_fail(__LINE__);
@@ -479,9 +504,9 @@ int main(int argc,const char **argv) {
             char *end;unsigned long map=strtoul(argv[2],&end,10);
             if(!argv[2][0]||*end||map>=hg_field_map_count())return 2;exploreMap=(unsigned)map;
         }
-        if(!explore&&argc!=1 && (argc!=2 || strcmp(argv[1],"--smoke"))) { fprintf(stderr,"Usage: heartgold_field_viewer [--explore ID | --smoke | --render-only path.png | --render-map ID path.png | --render-character ID path.png]\n");return 2; }
+        if(!explore&&argc!=1 && (argc!=2 || (strcmp(argv[1],"--smoke")&&strcmp(argv[1],"--audio-smoke")))) { fprintf(stderr,"Usage: heartgold_field_viewer [--explore ID | --smoke | --audio-smoke | --render-only path.png | --render-map ID path.png | --render-character ID path.png]\n");return 2; }
         NSApplication *app=[NSApplication sharedApplication];[app setActivationPolicy:NSApplicationActivationPolicyRegular];
         NSMenu *main=[NSMenu new],*menu=[NSMenu new];NSMenuItem *root=[NSMenuItem new];[main addItem:root];root.submenu=menu;[menu addItemWithTitle:@"Quit HeartGold MX Field" action:@selector(terminate:) keyEquivalent:@"q"];app.mainMenu=main;
-        FieldApp *delegate=[FieldApp new];delegate.smoke=argc==2;delegate.exploreAtLaunch=explore;delegate.initialMap=exploreMap;app.delegate=delegate;[app run];
+        FieldApp *delegate=[FieldApp new];delegate.smoke=argc==2;delegate.audioSmoke=argc==2&&!strcmp(argv[1],"--audio-smoke");delegate.exploreAtLaunch=explore;delegate.initialMap=exploreMap;app.delegate=delegate;[app run];
     }return 0;
 }

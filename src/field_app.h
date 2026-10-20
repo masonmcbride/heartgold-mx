@@ -1,5 +1,6 @@
 #pragma once
 #include "field_view.h"
+#include "battle_runtime.h"
 #include "field_script.h"
 /* Native scene application, driven by the original OverlayManager. Its
  * callbacks are host scene callbacks, not the original FieldMap overlay. */
@@ -55,3 +56,21 @@ int hg_field_app_is_exploring(const HGFieldApp *);
 
 /* Current original master-brightness level, including the live script scene. */
 int hg_field_app_brightness(const HGFieldApp *);
+
+int hg_field_app_phone_active(const HGFieldApp *);
+
+/* Output is opt-in; headless simulation and script previews remain silent. */
+int hg_field_app_audio_enable(HGFieldApp *,int enabled,char *error,size_t size);
+
+uint64_t hg_field_app_audio_frames(HGFieldApp *);
+
+int hg_field_app_battle_active(const HGFieldApp *);
+int hg_field_app_battle_state(const HGFieldApp *);
+
+int hg_field_app_battle_mon(const HGFieldApp *,unsigned,HGBattleMonView *);
+int hg_field_app_battle_choose(HGFieldApp *,unsigned);
+
+/* Read-only live field panels: 0 close, 1 Bag, 2 Pokemon. Repeating toggles. */
+int hg_field_app_inspect(HGFieldApp *,int kind);
+int hg_field_app_inspect_kind(const HGFieldApp *);
+void hg_field_app_inspect_text(HGFieldApp *,char *,size_t);

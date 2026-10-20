@@ -13,9 +13,12 @@ typedef struct MapPropManager MapPropManager;
 typedef struct MapPropAnimationManager MapPropAnimationManager;
 struct FieldSystem {
     TaskManager *taskman;
+    struct DSAudio *native_audio;
+    BOOL unkD2_7; /* Original script phone-ring latch, host-owned. */
     PlayerAvatar *playerAvatar;
     OverlayManager *application;
     unsigned long long ticks;
+    u16 reverseTurnFrameSteps;u8 lastFacingDirection;
     MapEvents *mapEvents;
     MapObjectManager *mapObjectManager;
     Location *location;

@@ -7,12 +7,12 @@ root,out=map(pathlib.Path,sys.argv[1:])
 groups={
  'src/script_manager.c':('GetVarPointer','FieldSystem_VarGet','FieldSystem_VarSet','FieldSystem_VarGetObjectEventGraphicsId','FieldSystem_FlagCheck','FieldSystem_FlagSet','FieldSystem_FlagClear','ClearTempFieldEventData','GetMapLoadScriptId','GetMapSceneScriptId'),
  'include/scrcmd.h':('ScriptGetVar','ScriptGetVarPointer'),
- 'src/scrcmd_c.c':('ScrCmd_Nop','ScrCmd_End','RunPauseTimer','ScrCmd_Wait','Compare','ScrCmd_CompareLocalToLocal','ScrCmd_CompareLocalToValue','ScrCmd_CompareVarToValue','ScrCmd_CompareVarToVar','ScrCmd_GoTo','ScrCmd_Call','ScrCmd_Return','ScrCmd_GoToIf','ScrCmd_CallIf','ScrCmd_SetFlag','ScrCmd_ClearFlag','ScrCmd_CheckFlag','ScrCmd_AddVar','ScrCmd_SubVar','ScrCmd_SetVar','ScrCmd_CopyVar','ScrCmd_SetOrCopyVar','ScrCmd_GetFriendSprite','IsAllMovementFinished','ScrCmd_WaitMovement','ScrCmd_CallStd','ScrNative_WaitStd','ScrCmd_RestartCurrentScript','ScrCmd_SetStarterChoice','ScrCmd_GetMenuChoice','sub_020477C0','ScrCmd_GetPlayerGender','ScrCmd_RegisterGearNumber','ScrCmd_CheckRegisteredPhoneNumber','ScrCmd_RegisterPokegearCard','ScrCmd_804','ScrCmd_HealParty','ScrCmd_573'),
+ 'src/scrcmd_c.c':('ScrCmd_Nop','ScrCmd_End','RunPauseTimer','ScrCmd_Wait','Compare','ScrCmd_CompareLocalToLocal','ScrCmd_CompareLocalToValue','ScrCmd_CompareVarToValue','ScrCmd_CompareVarToVar','ScrCmd_GoTo','ScrCmd_Call','ScrCmd_Return','ScrCmd_GoToIf','ScrCmd_CallIf','ScrCmd_SetFlag','ScrCmd_ClearFlag','ScrCmd_CheckFlag','ScrCmd_AddVar','ScrCmd_SubVar','ScrCmd_SetVar','ScrCmd_CopyVar','ScrCmd_SetOrCopyVar','ScrCmd_GetFriendSprite','IsAllMovementFinished','ScrCmd_WaitMovement','ScrCmd_CallStd','ScrNative_WaitStd','ScrCmd_RestartCurrentScript','ScrCmd_SetStarterChoice','ScrCmd_GetStarterChoice','ScrCmd_GetMenuChoice','sub_020477C0','ScrCmd_GetPlayerGender','ScrCmd_RegisterGearNumber','ScrCmd_CheckRegisteredPhoneNumber','ScrCmd_RegisterPokegearCard','ScrCmd_804','ScrCmd_HealParty','ScrCmd_573','ScrCmd_SetPhoneCall','ScrCmd_RunPhoneCall','ScrNative_WaitApplication_DestroyTaskData','ScrCmd_RestoreOverworld'),
  'src/scrcmd_strbuf.c':('ScrCmd_BufferPlayersName','ScrCmd_BufferMonSpeciesName','ScrCmd_BufferItemName','ScrCmd_BufferItemNamePlural','ScrCmd_BufferPocketName','ScrCmd_BufferPartyMonSpeciesNameIndef'),
- 'src/sys_vars.c':('SetScriptVar','Save_VarsFlags_SetLotoId','Save_VarsFlags_RollLotoId','Save_VarsFlags_SetStarter','Save_VarsFlags_SetFishingCompetitionLengthRecord'),
+ 'src/sys_vars.c':('SetScriptVar','GetScriptVar','Save_VarsFlags_SetLotoId','Save_VarsFlags_RollLotoId','Save_VarsFlags_SetStarter','Save_VarsFlags_GetStarter','Save_VarsFlags_SetFishingCompetitionLengthRecord','Save_VarsFlags_IsInRocketTakeover'),
  'src/scrcmd_sound.c':('ScrCmd_PlayBGM','ScrCmd_StopBGM','ScrCmd_ResetBGM','ScrCmd_TempBGM','ScrCmd_FadeOutBGM','ScrCmd_FadeInBGM','ScrNative_GetFadeTimer','ScrCmd_PlaySE','ScrCmd_StopSE','ScrCmd_WaitSE','ScrNative_SEPlaying','ScrCmd_PlayFanfare','ScrCmd_WaitFanfare','ScrNative_WaitFanfare'),
  'src/scrcmd_lottery.c':('ScrCmd_LotoIDSet',),
- 'src/sys_flags.c':('SetScriptFlag','SetFlag960'),
+ 'src/sys_flags.c':('SetScriptFlag','CheckScriptFlag','SetFlag960','CheckGameClearFlag'),
  'src/scrcmd_items.c':('ScrCmd_HasSpaceForItem','ScrCmd_HasItem','ScrCmd_GiveItem','ScrCmd_GetItemPocket'),
  'src/scrcmd_party.c':('ScrCmd_GetPartyCount','ScrCmd_GetPartyMonSpecies'),
  'src/scrcmd_17.c':('ScrCmd_CheckBadge','ScrCmd_GivePokedex','ScrCmd_CheckPokedex'),
@@ -22,7 +22,7 @@ scene_groups={'include/scrcmd.h':('ScriptGetVar','ScriptGetVarPointer'),
 scene_groups['src/scrcmd_c.c']+=('ScrCmd_FadeScreen','ScrCmd_WaitFade','sub_02043458','ScrCmd_SetSpawn')
 scene_groups['src/scrcmd_17.c']=('ScrCmd_GiveRunningShoes',)
 scene_groups['src/map_object.c']=('MapObject_Delete',)
-starter_groups={'src/choose_starter.c':('LaunchStarterChoiceScene','CreateStarter'),'src/update_dex_received.c':('UpdatePokedexWithReceivedSpecies',)}
+starter_groups={'src/launch_application.c':('ChooseStarter_LaunchApp',),'src/choose_starter.c':('LaunchStarterChoiceScene','CreateStarter'),'src/update_dex_received.c':('UpdatePokedexWithReceivedSpecies',)}
 lines=['/* Unchanged original function slices; not whole-source coverage. */'];records=[];declarations=[]
 scene_lines=[];scene_declarations=[];starter_lines=[];starter_declarations=[]
 for relative in dict.fromkeys((*groups,*scene_groups,*starter_groups)):

@@ -1,5 +1,12 @@
+#include "ds_audio_output.h"
+#include "map_header.h"
+#include "constants/sndseq.h"
 #include "field_app.h"
 #include "field_player.h"
+#include "battle_view.h"
+#include "field_menu.h"
+#include "compat/pokemon.h"
+#include "field_data.h"
 #include "game_font.h"
 #include "ds_frame_clock.h"
 #include "ds_brightness.h"
@@ -11,10 +18,14 @@ struct HGFieldApp {
     HGFieldView *view,*player_sprite,*zone_view;
     HGFieldPlayer *player;HGFont *font;
     char dialogue[HG_SCRIPT_TEXT_CAPACITY],dialogue_page[512];size_t dialogue_cursor;int interact_pending;
-    uint16_t held_keys,pending_keys;unsigned move_delay,walk_serial,frame;
+    uint16_t held_keys,pending_keys,input_keys;unsigned move_delay,walk_serial,frame;
     unsigned long long revision;
     double visual[3],from[3];
     unsigned map,choice_index;int choice_active;
+    DSAudioOutput *audio_output;unsigned audio_map;int audio_started;
+    HGBattle *battle;HGBattleView *battle_view;HGEncounterState encounters;
+    int battle_state;unsigned battle_choice;
+    HGFieldMenu *field_menu;
     int stop;
     char error[256];
 };
@@ -32,13 +43,49 @@ static void interaction_unavailable(HGFieldApp *app) {
     snprintf(app->dialogue,sizeof(app->dialogue),"This interaction needs a game feature\nthat isn’t available yet.");
     app->dialogue_cursor=0;next_dialogue_page(app);app->revision++;
 }
+static void begin_wild_battle(HGFieldApp *app){
+    if(app->exploring||app->battle||!app->player||app->dialogue[0]||hg_field_player_interaction_busy(app->player))return;
+    int x,z;uint16_t attribute;if(!hg_field_player_position(app->player,&x,&z,NULL)||!hg_field_attribute(app->map,x,z,&attribute))return;
+    FieldSystem field={0};hg_field_player_bind_runtime(app->player,&field);HGStoryState *story=hg_field_player_story(app->player);
+    app->encounters.rng=hg_story_rng_get(story);Party opponent;
+    int found=hg_encounter_step(&app->encounters,&field,app->map,attribute&255,1,&opponent,app->error,sizeof(app->error));
+    hg_story_rng_set(story,app->encounters.rng);
+    if(found<0){snprintf(app->dialogue,sizeof(app->dialogue),"Encounter stopped: %s",app->error);app->dialogue_cursor=0;next_dialogue_page(app);app->revision++;return;}
+    if(!found)return;
+    HGBattleSetup setup={.party=hg_story_save_party(field.saveData),.opponent=&opponent,.profile=hg_story_save_profile(field.saveData),.bag=hg_story_save_bag(field.saveData),.options=hg_story_save_options(field.saveData),.pokedex=hg_story_save_dex(field.saveData),.stats=hg_story_save_stats(field.saveData),.seed=app->encounters.rng,.audio=hg_field_player_audio(app->player)};
+    app->battle=hg_battle_new_setup(&setup,app->error,sizeof(app->error));if(!app->battle)return;
+    app->battle_view=hg_battle_view_new();if(!app->battle_view){hg_battle_free(app->battle);app->battle=NULL;snprintf(app->error,sizeof(app->error),"Cannot create battle presentation");return;}
+    app->battle_state=HG_BATTLE_RUNNING;app->battle_choice=0;app->held_keys=app->pending_keys=0;app->interact_pending=0;app->revision++;
+    if(setup.audio&&!ds_audio_play(setup.audio,DS_AUDIO_BGM,SEQ_GS_VS_NORAPOKE))snprintf(app->error,sizeof(app->error),"%s",ds_audio_error(setup.audio));
+}
+static void battle_frame(HGFieldApp *app){
+    int old=app->battle_state;
+    if(app->battle_state==HG_BATTLE_COMMAND||app->battle_state==HG_BATTLE_MOVES){
+        unsigned count=app->battle_state==HG_BATTLE_COMMAND?2:4;
+        if(app->pending_keys&(0x40|0x20))app->battle_choice=(app->battle_choice+count-1)%count;
+        else if(app->pending_keys&(0x80|0x10))app->battle_choice=(app->battle_choice+1)%count;
+    }
+    if(app->battle_state==HG_BATTLE_MOVES){for(unsigned i=0;i<4&&!hg_battle_move_allowed(app->battle,app->battle_choice);i++)app->battle_choice=(app->battle_choice+1)%4;}
+    if(app->interact_pending){unsigned choice=app->battle_state==HG_BATTLE_COMMAND?(app->battle_choice?4:1):app->battle_state==HG_BATTLE_MOVES?app->battle_choice+1:1;hg_battle_input(app->battle,choice);}
+    app->held_keys=app->pending_keys=0;app->interact_pending=0;
+    app->battle_state=hg_battle_tick(app->battle);if(app->battle_state!=old)app->battle_choice=0;app->revision++;
+    if(app->battle_state==HG_BATTLE_FINISHED||app->battle_state==HG_BATTLE_FAILED){
+        FieldSystem field={0};hg_field_player_bind_runtime(app->player,&field);
+        if(app->battle_state==HG_BATTLE_FAILED)snprintf(app->error,sizeof(app->error),"%s",hg_battle_error(app->battle));
+        else if(!hg_battle_commit(app->battle,hg_story_save_party(field.saveData),hg_story_save_profile(field.saveData),hg_story_save_bag(field.saveData),hg_story_save_dex(field.saveData),hg_story_save_stats(field.saveData)))snprintf(app->error,sizeof(app->error),"Battle result could not be published");
+        else hg_story_touch(hg_field_player_story(app->player));
+        hg_battle_free(app->battle);hg_battle_view_free(app->battle_view);app->battle=NULL;app->battle_view=NULL;
+        app->encounters.inhibit_steps=0;app->audio_started=0;app->move_delay=8;
+        if(app->error[0]){snprintf(app->dialogue,sizeof(app->dialogue),"Battle stopped: %s",app->error);app->dialogue_cursor=0;next_dialogue_page(app);}
+    }
+}
 static int scene_init(OverlayManager *manager,int *state) {
     (void)state;HGFieldApp *app=OverlayManager_GetArgs(manager);
     app->view=hg_field_view_load(app->map,app->error,sizeof(app->error));if(app->view && hg_transition_supported(app->map)) {
         app->player=app->exploring?hg_field_player_new_explore(app->map):app->new_game?hg_field_player_new_game():hg_field_player_new_map(app->map);app->player_sprite=hg_player_sprite_load(app->error,sizeof(app->error));
         if(!app->player||!app->player_sprite){
             if(!app->error[0])snprintf(app->error,sizeof(app->error),"Field gameplay is unavailable for map %u",app->map);
-            hg_field_player_free(app->player);app->player=NULL;hg_field_view_free(app->player_sprite);app->player_sprite=NULL;
+            hg_field_menu_free(app->field_menu);app->field_menu=NULL;hg_field_player_free(app->player);app->player=NULL;hg_field_view_free(app->player_sprite);app->player_sprite=NULL;
             if(app->new_game){hg_field_view_free(app->view);app->view=NULL;}
         }
     }
@@ -53,6 +100,9 @@ static int scene_init(OverlayManager *manager,int *state) {
 }
 static int scene_exec(OverlayManager *manager,int *state) {
     (void)state;HGFieldApp *app=OverlayManager_GetArgs(manager);if(app->stop)return TRUE;
+    uint64_t audio_epoch=ds_audio_epoch();
+    if(app->battle){battle_frame(app);goto audio_step;}
+    if(hg_field_menu_kind(app->field_menu)){if(app->pending_keys){hg_field_menu_input(app->field_menu,app->pending_keys);app->revision++;}app->held_keys=app->pending_keys=0;app->interact_pending=0;goto audio_step;}
     if(app->move_delay)app->move_delay--;
     if(app->player&&!app->dialogue[0]&&!hg_field_player_interaction_busy(app->player)&&!hg_field_player_walking(app->player)) {
         int started=hg_field_player_frame_begin(app->player);
@@ -113,6 +163,7 @@ static int scene_exec(OverlayManager *manager,int *state) {
             int started=hg_field_player_coordinate_begin(app->player);
             if(started)app->held_keys=app->pending_keys=0;
             if(started<0)interaction_unavailable(app);
+            if(!started)begin_wild_battle(app);
         }
         hg_field_player_position(app->player,NULL,NULL,app->visual);app->revision++;
     }
@@ -120,6 +171,11 @@ static int scene_exec(OverlayManager *manager,int *state) {
     if(app->interact_pending && !hg_field_player_walking(app->player)) {
         app->interact_pending=0;app->held_keys=app->pending_keys=0;
         if(app->dialogue[0]) {
+            /* Original render_text.c:TextPrinter_Continue plays this cue on
+             * accepted advance input, including the last page. */
+            DSAudio *audio=hg_field_player_audio(app->player);
+            if(!ds_audio_play(audio,DS_AUDIO_EFFECT,SEQ_SE_DP_SELECT))
+                snprintf(app->error,sizeof(app->error),"%s",ds_audio_error(audio));
             if(app->dialogue[app->dialogue_cursor])next_dialogue_page(app);
             else {app->dialogue[0]=app->dialogue_page[0]=0;hg_field_player_interaction_ack(app->player);}
             app->revision++;
@@ -148,10 +204,20 @@ static int scene_exec(OverlayManager *manager,int *state) {
         }
         if(frame!=app->frame){app->frame=frame;hg_player_sprite_frame(app->player_sprite,frame);app->revision++;}
     }
+audio_step:;
+    DSAudio *audio=hg_field_player_audio(app->player);
+    if(audio) {
+        if(!app->battle&&(!app->audio_started||app->audio_map!=app->map)) {
+            if(!ds_audio_play(audio,DS_AUDIO_BGM,MapHeader_GetDayMusicId(app->map)))snprintf(app->error,sizeof(app->error),"%s",ds_audio_error(audio));
+            app->audio_map=app->map;app->audio_started=1;
+        }
+        if(ds_audio_last_epoch(audio)<=audio_epoch&&!ds_audio_tick(audio))snprintf(app->error,sizeof(app->error),"%s",ds_audio_error(audio));
+        ds_audio_output_push(app->audio_output,ds_audio_pcm(audio),DS_AUDIO_FRAMES);
+    }
     return FALSE;
 }
 static int scene_exit(OverlayManager *manager,int *state) {
-    (void)state;HGFieldApp *app=OverlayManager_GetArgs(manager);hg_field_view_free(app->zone_view);app->zone_view=NULL;hg_field_view_free(app->view);app->view=NULL;hg_field_player_free(app->player);app->player=NULL;hg_field_view_free(app->player_sprite);app->player_sprite=NULL;hg_font_free(app->font);app->font=NULL;return TRUE;
+    (void)state;HGFieldApp *app=OverlayManager_GetArgs(manager);hg_battle_free(app->battle);hg_battle_view_free(app->battle_view);app->battle=NULL;app->battle_view=NULL;ds_audio_output_free(app->audio_output);app->audio_output=NULL;hg_field_view_free(app->zone_view);app->zone_view=NULL;hg_field_view_free(app->view);app->view=NULL;hg_field_menu_free(app->field_menu);app->field_menu=NULL;hg_field_player_free(app->player);app->player=NULL;hg_field_view_free(app->player_sprite);app->player_sprite=NULL;hg_font_free(app->font);app->font=NULL;return TRUE;
 }
 static BOOL run_scene_application(TaskManager *task) {
     HGFieldApp *app=TaskManager_GetEnvironment(task);u32 *state=TaskManager_GetStatePtr(task);
@@ -183,6 +249,7 @@ void hg_field_app_step(HGFieldApp *app) { if(app)hg_field_tasks_tick(&app->runti
 unsigned long long hg_field_app_ticks(const HGFieldApp *app) { return app?app->runtime.ticks:0; }
 const HGFieldView *hg_field_app_view(const HGFieldApp *app) { return app?app->view:NULL; }
 int hg_field_app_render(HGFieldApp *app,const DSCamera *camera,uint8_t *pixels,unsigned width,unsigned height) {
+    if(app&&app->battle)return hg_battle_view_render(app->battle_view,app->battle,app->battle_state,app->battle_choice,pixels,width,height);
     if(!app || !camera || !pixels)return 0;
     int ok;
     if(app->player) {
@@ -208,9 +275,20 @@ int hg_field_app_render(HGFieldApp *app,const DSCamera *camera,uint8_t *pixels,u
                 memcpy(pixels+4*((size_t)(top+y)*width+(unsigned)(left+x)),glyph+4*(y*16+x),4);
         }
     }
+    if(ok&&app->player&&hg_field_player_phone_active(app->player)) {
+        for(size_t i=0;i<(size_t)width*height;i++){pixels[4*i]=24;pixels[4*i+1]=48;pixels[4*i+2]=72;pixels[4*i+3]=255;}
+        if(app->font&&width>=256&&height>=80) {
+            uint8_t header[256*64*4];for(unsigned i=0;i<256*64;i++){header[4*i]=48;header[4*i+1]=88;header[4*i+2]=112;header[4*i+3]=255;}
+            hg_font_draw(app->font,"Pokégear · Phone",header,256,64,10,8,236,0xf7f9ec,0x182c40);
+            hg_font_draw(app->font,hg_field_player_phone_contact(app->player),header,256,64,10,32,236,0xf7f9ec,0x182c40);
+            unsigned scale=width>=512&&height>=160?2:1,left=(width-256*scale)/2;
+            for(unsigned y=0;y<64*scale;y++)for(unsigned x=0;x<256*scale;x++)memcpy(pixels+4*((size_t)(y+8)*width+left+x),header+4*((y/scale)*256+x/scale),4);
+        }
+    }
     if(ok&&app->player) {
-        double fade=hg_field_player_starter_fade(app->player);
-        if(fade>0)for(size_t i=0;i<(size_t)width*height;i++)for(unsigned c=0;c<3;c++)pixels[4*i+c]=(uint8_t)(pixels[4*i+c]*(1-fade));
+        /* Field brightness belongs to the scene. An application draws its
+         * modal surface above it while original field tasks wait. */
+        if(hg_field_player_starter_pending(app->player))ok=ds_brightness_apply(pixels,(size_t)width*height,hg_field_player_brightness(app->player));
         if((hg_field_player_starter_pending(app->player)||hg_field_player_menu_pending(app->player))&&app->font&&width>=256&&height>=112) {
             uint8_t panel[256*112*4];for(unsigned i=0;i<256*112;i++){panel[4*i]=247;panel[4*i+1]=249;panel[4*i+2]=236;panel[4*i+3]=255;}
             hg_font_draw(app->font,hg_field_player_menu_pending(app->player)?"Choose an answer":"Choose your first Pokémon",panel,256,112,8,6,240,0x202830,0xc0c8c0);
@@ -242,7 +320,8 @@ int hg_field_app_render(HGFieldApp *app,const DSCamera *camera,uint8_t *pixels,u
         for(unsigned y=0;y<64*scale;y++)for(unsigned x=0;x<256*scale;x++)
             memcpy(pixels+4*((top+y)*width+left+x),panel+4*((y/scale)*256+x/scale),4);
     }
-    if(ok&&app->player)ok=ds_brightness_apply(pixels,(size_t)width*height,hg_field_player_brightness(app->player));
+    if(ok&&app->player&&!hg_field_player_phone_active(app->player)&&!hg_field_player_starter_pending(app->player))ok=ds_brightness_apply(pixels,(size_t)width*height,hg_field_player_brightness(app->player));
+    if(ok&&hg_field_menu_kind(app->field_menu))ok=hg_field_menu_render(app->field_menu,pixels,width,height);
     return ok;
 }
 
@@ -251,10 +330,12 @@ void hg_field_app_input(HGFieldApp *app,uint16_t keys) {
     if(!(app->held_keys&0xf0))app->move_delay=0;
     /* Only directional edges queue an action; a short Shift press alone must
      * not start a move or turn a later walk into an unintended run. */
-    uint16_t pressed=(keys&~app->held_keys)&0xf0;
-    if(pressed)app->pending_keys|=pressed|(keys&2);app->held_keys=keys;
+    /* Menu consumption clears held_keys, but a physical key stays down until
+     * input reports its release. Do not turn each simulation tick into a press. */
+    uint16_t pressed=(keys&~app->input_keys)&0xf0;
+    if(pressed)app->pending_keys|=pressed|(keys&2);app->held_keys=keys;app->input_keys=keys;
 }
-void hg_field_app_clear_input(HGFieldApp *app) { if(app)app->held_keys=app->pending_keys=0; }
+void hg_field_app_clear_input(HGFieldApp *app) { if(app)app->input_keys=app->held_keys=app->pending_keys=0; }
 int hg_field_app_player(const HGFieldApp *app,int *x,int *z) { return app&&hg_field_player_position(app->player,x,z,NULL); }
 void hg_field_app_camera(const HGFieldApp *app,DSCamera *camera,unsigned w,unsigned h) {
     if(!app)return;
@@ -269,9 +350,9 @@ int hg_field_app_presentation(const HGFieldApp *app,double world[3],unsigned *fr
 }
 
 void hg_field_app_interact(HGFieldApp *app) { if(app&&app->player){app->held_keys=app->pending_keys=0;app->interact_pending=1;} }
-const char *hg_field_app_dialogue(const HGFieldApp *app) { return app?app->dialogue:""; }
+const char *hg_field_app_dialogue(const HGFieldApp *app) { return app&&app->battle&&app->battle_state==HG_BATTLE_MESSAGE?hg_battle_message(app->battle):app?app->dialogue:""; }
 const char *hg_field_app_dialogue_page(const HGFieldApp *app) { return app?app->dialogue_page:""; }
-int hg_field_app_interaction_busy(const HGFieldApp *app) { return app&&(app->dialogue[0]||hg_field_player_interaction_busy(app->player)); }
+int hg_field_app_interaction_busy(const HGFieldApp *app) { return app&&(hg_field_menu_kind(app->field_menu)||app->battle||app->dialogue[0]||hg_field_player_interaction_busy(app->player)); }
 
 unsigned hg_field_app_advance(HGFieldApp *app,uint64_t monotonic_ns) {
     if(!app)return 0;unsigned count=ds_frame_clock_advance(&app->frame_clock,monotonic_ns);
@@ -297,3 +378,37 @@ HGFieldApp *hg_field_app_new_explore(unsigned map,char *error,size_t size) { ret
 int hg_field_app_is_exploring(const HGFieldApp *app) { return app&&app->exploring; }
 
 int hg_field_app_brightness(const HGFieldApp *app) { return app?hg_field_player_brightness(app->player):0; }
+
+int hg_field_app_phone_active(const HGFieldApp *app) { return app&&hg_field_player_phone_active(app->player); }
+
+int hg_field_app_audio_enable(HGFieldApp *app,int enabled,char *error,size_t size) {
+    if(!app)return 0;
+    if(!enabled){ds_audio_output_free(app->audio_output);app->audio_output=NULL;return 1;}
+    if(!app->audio_output)app->audio_output=ds_audio_output_new(error,size);
+    return app->audio_output!=NULL;
+}
+
+uint64_t hg_field_app_audio_frames(HGFieldApp *app){return app?ds_audio_output_frames(app->audio_output):0;}
+
+int hg_field_app_battle_active(const HGFieldApp *app){return app&&app->battle!=NULL;}
+int hg_field_app_battle_state(const HGFieldApp *app){return app&&app->battle?app->battle_state:HG_BATTLE_FINISHED;}
+
+int hg_field_app_battle_mon(const HGFieldApp *app,unsigned side,HGBattleMonView *mon){return app&&app->battle&&hg_battle_mon(app->battle,side,mon);}
+int hg_field_app_battle_choose(HGFieldApp *app,unsigned choice){
+    if(!app||!app->battle)return 0;
+    if(app->battle_state==HG_BATTLE_COMMAND){if(choice>=2)return 0;}
+    else if(app->battle_state==HG_BATTLE_MOVES){if(choice>=4||!hg_battle_move_allowed(app->battle,choice))return 0;}
+    else return 0;
+    app->battle_choice=choice;app->interact_pending=1;app->held_keys=app->pending_keys=0;return 1;
+}
+
+int hg_field_app_inspect(HGFieldApp *app,int kind){
+    if(!app||kind<0||kind>2)return 0;
+    if(hg_field_menu_kind(app->field_menu)==kind)kind=0;
+    if(!kind){hg_field_menu_open(app->field_menu,0);hg_field_app_clear_input(app);app->revision++;return 1;}
+    if(!app->player||app->exploring||app->battle||app->dialogue[0]||hg_field_player_interaction_busy(app->player)||hg_field_player_walking(app->player))return 0;
+    if(!app->field_menu){FieldSystem field={0};hg_field_player_bind_runtime(app->player,&field);app->field_menu=hg_field_menu_new(hg_story_save_bag(field.saveData),hg_story_save_party(field.saveData));}
+    if(!app->field_menu)return 0;hg_field_menu_open(app->field_menu,kind);hg_field_app_clear_input(app);app->revision++;return hg_field_menu_kind(app->field_menu)==kind;
+}
+int hg_field_app_inspect_kind(const HGFieldApp *app){return app?hg_field_menu_kind(app->field_menu):0;}
+void hg_field_app_inspect_text(HGFieldApp *app,char *out,size_t size){hg_field_menu_text(app?app->field_menu:NULL,out,size);}

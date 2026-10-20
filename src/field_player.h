@@ -60,7 +60,6 @@ int hg_field_player_frame_begin(HGFieldPlayer *);
 int hg_field_player_starter_pending(const HGFieldPlayer *);
 int hg_field_player_starter_option(HGFieldPlayer *,unsigned,HGStarterOption *);
 int hg_field_player_choose_starter(HGFieldPlayer *,unsigned);
-double hg_field_player_starter_fade(const HGFieldPlayer *);
 
 int hg_field_player_menu_pending(const HGFieldPlayer *);
 int hg_field_player_menu_choose(HGFieldPlayer *,unsigned);
@@ -76,3 +75,10 @@ int hg_field_player_running_shoes(const HGFieldPlayer *);
 HGFieldPlayer *hg_field_player_new_explore(unsigned map);
 
 int hg_field_player_brightness(const HGFieldPlayer *);
+
+int hg_field_player_phone_active(const HGFieldPlayer *);
+const char *hg_field_player_phone_contact(const HGFieldPlayer *);
+
+struct DSAudio *hg_field_player_audio(HGFieldPlayer *);
+struct FieldSystem;
+void hg_field_player_bind_runtime(HGFieldPlayer *,struct FieldSystem *);

@@ -1,5 +1,8 @@
 # Mr. Pokemon checkpoint
 
+This checkpoint is extended by [Elm's phone call](elm-phone.md): the panic call
+now completes, and the next rejection is the rival's TrainerBattle command.
+
 The original bedroom route now completes Mr. Pokemon's introduction for all
 three starters. The original script gives the Mystery Egg, fades out, heals the
 party, fades in, gives and enables the Pokedex, enables Mystery Gift, registers
@@ -67,6 +70,7 @@ smoke check also passes. The connected house scenario is driven through the
 actual C application/renderer; the native-window smoke is not a complete manual
 bedroom-to-house run.
 
-Audio remains muted and its original durations are not established. Pokedex
+Original music, scripted effects and fanfares now play through the shared
+[native audio renderer](audio.md); hardware timing/fidelity is not established. Pokedex
 menu browsing, phone UI, encounters, battles and original startup remain absent.
 Upstream remains unmodified; all generated assets and evidence stay ignored.

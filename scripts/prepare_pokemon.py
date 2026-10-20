@@ -3,22 +3,24 @@ import csv,hashlib,json,pathlib,re,struct,subprocess,sys
 from narc_tools import pack
 root,out,cc=map(pathlib.Path,sys.argv[1:])
 roots={
- 'src/pokemon.c':['CreateMon','GetMonData','SetMonData','ZeroMonData','MonDecryptSegment','CalcMonChecksum','sub_020720FC','MonIsShiny'],
+ 'src/pokemon.c':['CreateMon','GetMonData','SetMonData','ZeroMonData','MonDecryptSegment','CalcMonChecksum','sub_020720FC','MonIsShiny','AddMonData','AllocMonZeroed','AllocAndLoadMonPersonal_HandleAlternateForm','GetFlavorPreferenceFromPID','GetMonBaseExperienceAtCurrentLevel','Pokemon_GetPercentToNextLevel','Pokemon_TryLevelUp','CopyPokemonToPokemon','Mon_GetBoxMon','MonSetMoveInSlot','MonTryLearnMoveOnLevelUp','MonApplyFriendshipMod','Mon_UpdateGiratinaForm','Party_GetMaxLevel','Party_GivePokerusAtRandom','Party_MaskMonsWithPokerus','Party_SpreadPokerus','SetTrMonCapsule','CreateMonWithNature','CreateMonWithGenderNatureLetter','WildMonSetRandomHeldItem'],
+ 'src/pokemon_mood.c':['ApplyMonMoodModifier','ApplyItemEffectOnMonMood'],
  'src/script_pokemon_util.c':['GetIdxOfFirstPartyMonWithMove'],
  'src/trainer_memo.c':['BoxMonSetTrainerMemo'],
- 'src/pokedex.c':['Save_Pokedex_Init','Pokedex_SetMonCaughtFlag','Pokedex_CheckMonCaughtFlag','Pokedex_Enable','Pokedex_IsEnabled'],
+ 'src/pokedex.c':['Save_Pokedex_Init','Pokedex_SetMonCaughtFlag','Pokedex_CheckMonCaughtFlag','Pokedex_Enable','Pokedex_IsEnabled','Pokedex_SetMonSeenFlag'],
+ 'src/pokedex_util.c':['Pokedex_IsNatDexEnabled'],
  'src/unk_02091278.c':['LanguageToDexFlag'],
- 'src/player_data.c':['PlayerProfile_SetVersion','PlayerProfile_SetMoney','PlayerProfile_GetMoney','PlayerProfile_Init','PlayerProfile_GetTrainerGender','PlayerProfile_TestBadgeFlag','PlayerProfile_GetNamePtr','PlayerProfile_GetTrainerID','PlayerProfile_GetPlayerName_NewString'],
+ 'src/player_data.c':['PlayerProfile_CountBadges','PlayerProfile_SetVersion','PlayerProfile_SetMoney','PlayerProfile_GetMoney','PlayerProfile_Init','PlayerProfile_GetTrainerGender','PlayerProfile_TestBadgeFlag','PlayerProfile_GetNamePtr','PlayerProfile_GetTrainerID','PlayerProfile_GetPlayerName_NewString','PlayerProfile_AddMoney','PlayerProfile_SubMoney'],
  'src/use_item_on_mon.c':['HealParty'],
  'src/sav_system_info.c':['Save_SysInfo_SetMysteryGiftActive','Save_SysInfo_GetMysteryGiftActive'],
- 'src/options.c':['Options_Init'],
+ 'src/options.c':['Options_Init','Options_GetBattleScene','Options_GetBattleStyle','Options_GetTextFrameDelay'],
  'src/party.c':['Party_InitWithMaxSize','Party_AddMon','Party_GetMonByIndex'],
  'src/pm_string.c':['String_New','String_Delete','String_Copy','CopyStringToU16Array','CopyU16ArrayToString'],
- 'src/string_util.c':['StringNotEqual','StringFillEOS'],
+ 'src/string_util.c':['StringNotEqual','StringNotEqualN','StringFillEOS'],
  'src/mail.c':['Mail_New','Mail_Copy'],
  'src/mail_message.c':['MailMsg_Init'],
  'src/seal_case.c':['CopyCapsule'],
- 'src/move.c':['GetMoveAttr','GetMoveMaxPP'],
+ 'src/move.c':['GetMoveAttr','GetMoveMaxPP','LoadMoveTbl'],
 }
 pattern=r'^(?:(?:static|inline) )*[A-Za-z_][^\n;{}]*\b(\w+)\([^;{}]*\) \{\n.*?^\}'
 functions={};sources={}
@@ -40,6 +42,7 @@ header=(root/'include/pokemon.h').read_text()
 pokedex_header=(root/'include/pokedex.h').read_text()
 record_lines=[m[0] for m in re.finditer(r'^#define (?:ROUND_UP|CEILDIV|NUM_DEX_FLAG_WORDS).*$',pokedex_header,re.M)]
 record_lines.append(re.search(r'typedef struct Pokedex \{.*?\} Pokedex;',pokedex_header,re.S)[0])
+record_lines.append(re.search(r'typedef enum MonMoodModifier \{.*?\} MonMoodModifier;', (root/'include/pokemon_mood.h').read_text(),re.S)[0])
 record_lines.append('typedef struct GameStats GameStats;')
 record_lines.append(re.search(r'^struct GameStats \{.*?^\};',(root/'src/game_stats.c').read_text(),re.M|re.S)[0])
 sys_info=(root/'include/sav_system_info.h').read_text()
@@ -61,6 +64,11 @@ party=sources['src/party.c'];lines.append(party[party.index('#define PARTY_ASSER
 strings=sources['src/pm_string.c'];lines.append(strings[strings.index('#define STRING_MAGIC'):strings.index('String *String_New')])
 struct_string=re.search(r'typedef struct String \{.*?\} String;', (root/'include/pm_string.h').read_text(),re.S)[0]
 (out/'pokemon_string_type.inc').write_text(struct_string+'\n')
+# Carry referenced original constant tables with an expanded function closure.
+references=set(re.findall(r'\b\w+\b',''.join(functions[n][1][0] for n in selected)))
+for source in sources.values():
+ for table in re.finditer(r'^static const [^;{}\n]+?\b(\w+)\s*(?:\[[^;{}]*?\])?\s*=\s*\{.*?^\};',source,re.M|re.S):
+  if table[1] in references and not any(table[0] in line for line in lines):lines.append(table[0])
 decls=[];records=[]
 for name in sorted(selected):
  path,m=functions[name];line=sources[path][:m.start()].count('\n')+1

@@ -3,9 +3,9 @@
 #include "message_bank_count.inc"
 /* Process-lifetime cache. All callers run on the main thread. */
 typedef struct { uint8_t *bytes; DSNarc narc; } Cache;
-static Cache cache[32];
+static Cache cache[44];
 static Cache message_cache[HG_MESSAGE_BANK_COUNT];
-int native_resource_member(int archive,int group,int member,const uint8_t **bytes,size_t *size) {
+static Cache *resource_archive(int archive,int group) {
     const char *name;int slot;char message_name[32];Cache *c;
     if(archive==NARC_msgdata_msg) {
         if(group<0||group>=HG_MESSAGE_BANK_COUNT)return 0;
@@ -32,6 +32,18 @@ int native_resource_member(int archive,int group,int member,const uint8_t **byte
         else if(archive==NARC_a_1_0_6) {slot=29;name="prop_animations.narc";}
         else if(archive==NARC_a_1_0_7) {slot=30;name="field_prop_animations.narc";}
         else if(archive==NARC_a_1_0_8) {slot=31;name="room_prop_animations.narc";}
+        else if(archive==NARC_a_0_0_0) {slot=32;name="battle_move_script.narc";}
+        else if(archive==NARC_a_0_0_1) {slot=33;name="battle_subscript.narc";}
+        else if(archive==NARC_a_0_3_0) {slot=34;name="battle_effect_script.narc";}
+        else if(archive==NARC_application_zukanlist_zkn_data_zukan_data) {slot=35;name="dex_measures.narc";}
+        else if(archive==NARC_application_zukanlist_zkn_data_zukan_data_gira) {slot=36;name="dex_measures_gira.narc";}
+        else if(archive==NARC_poketool_trainer_trdata) {slot=37;name="trainer_data.narc";}
+        else if(archive==NARC_poketool_trainer_trpoke) {slot=38;name="trainer_parties.narc";}
+        else if(archive==NARC_application_custom_ball_edit_gs_cb_data) {slot=39;name="trainer_capsules.narc";}
+        else if(archive==NARC_poketool_trmsg_trtbl) {slot=40;name="trainer_message_table.narc";}
+        else if(archive==NARC_poketool_trmsg_trtblofs) {slot=41;name="trainer_message_offsets.narc";}
+        else if(archive==NARC_fielddata_encountdata_g_enc_data) {slot=42;name="wild_encounters.narc";}
+        else if(archive==HG_RESOURCE_BATTLE_PNG) {slot=43;name="battle_sprites_png.narc";}
         else return 0;
         c=&cache[slot];
     }
@@ -44,15 +56,26 @@ int native_resource_member(int archive,int group,int member,const uint8_t **byte
         int ok=fread(p,1,(size_t)length,f)==(size_t)length;fclose(f);
         if(!ok || !ds_narc_open(&c->narc,p,(size_t)length)) { free(p);return 0; }c->bytes=p;
     }
-    return member>=0 && ds_narc_member(&c->narc,(size_t)member,bytes,size);
+    return c;
+}
+int native_resource_member(int archive,int group,int member,const uint8_t **bytes,size_t *size) {
+    Cache *c=resource_archive(archive,group);
+    return c && member>=0 && ds_narc_member(&c->narc,(size_t)member,bytes,size);
+}
+int native_resource_range(int archive,int group,int member,size_t offset,size_t length,const uint8_t **bytes) {
+    Cache *c=resource_archive(archive,group);const uint8_t *start;size_t member_size;
+    if(!c || member<0 || !ds_narc_member(&c->narc,(size_t)member,&start,&member_size))return 0;
+    /* Original filesystem range reads may cross member boundaries (LoadMoveTbl).
+     * Bound these reads by the validated archive image, preserving its padding. */
+    size_t available=c->narc.image_size-(size_t)(start-c->narc.image);
+    if(offset>available || length>available-offset)return 0;
+    *bytes=start+offset;return 1;
 }
 
 struct NARC { const uint8_t *bytes;size_t size;DSNarc narc;const uint8_t *stream;size_t stream_size,position; };
 NARC *NARC_New(NarcId id,enum HeapID heap) {
-    const uint8_t *unused;size_t size;
-    if(!native_resource_member(id,0,0,&unused,&size))abort();
-    int slot=id==NARC_graphic_font?4:id==NARC_native_bag?5:id==NARC_a_1_0_6?29:id==NARC_a_1_0_7?30:id==NARC_a_1_0_8?31:-1;if(slot<0)abort();
-    NARC *n=Heap_Alloc(heap,sizeof(*n));memset(n,0,sizeof(*n));n->narc=cache[slot].narc;n->bytes=cache[slot].bytes;n->size=n->narc.size;return n;
+    Cache *c=resource_archive(id,0);if(!c)abort();
+    NARC *n=Heap_Alloc(heap,sizeof(*n));memset(n,0,sizeof(*n));n->narc=c->narc;n->bytes=c->bytes;n->size=n->narc.size;return n;
 }
 void NARC_Delete(NARC *n) { free(n); }
 void NARC_ReadFromMember(NARC *n,u32 member,u32 offset,u32 length,void *out) {
@@ -91,3 +114,10 @@ int native_resource_file(const char *name,const uint8_t **out,size_t *size) {
 
 void NARC_ReadWholeMember(NARC *n,u32 member,void *out) { const uint8_t *p;size_t size;if(!ds_narc_member(&n->narc,member,&p,&size))abort();memcpy(out,p,size); }
 void *NARC_AllocAndReadWholeMember(NARC *n,u32 member,enum HeapID heap) { const uint8_t *p;size_t size;if(!ds_narc_member(&n->narc,member,&p,&size)||size>UINT32_MAX)abort();void *out=Heap_Alloc(heap,(u32)size);memcpy(out,p,size);return out; }
+
+void *GfGfxLoader_LoadFromOpenNarc(NARC *n,s32 member,BOOL compressed,enum HeapID heap,BOOL atEnd) {
+    const uint8_t *bytes;size_t size;
+    if(compressed || member<0 || !ds_narc_member(&n->narc,(size_t)member,&bytes,&size))abort();
+    void *out=atEnd?Heap_AllocAtEnd(heap,size):Heap_Alloc(heap,size);
+    if(!out)abort();memcpy(out,bytes,size);return out;
+}

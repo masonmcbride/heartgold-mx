@@ -1,6 +1,7 @@
 #include "compat/pokemon.h"
 #include <stdio.h>
 #include "motion_guest.h"
+#include "compat/resources.h"
 #include "map_header.h"
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"%s:%d: %s\n",__FILE__,__LINE__,#x);exit(1);}}while(0)
 static BOOL compatible(void *owner,unsigned location) { (void)owner;int result;CHECK(hg_motion_location_compatible(location,&result));return result; }
@@ -8,6 +9,16 @@ static int map_location(void *owner,unsigned type,unsigned index) { (void)owner;
 static void date(void *owner,HGMonDate *out) { (void)owner;*out=(HGMonDate){26,10,17,6}; }
 int main(void) {
     HGPokemonServices previous=hg_pokemon_services_exchange((HGPokemonServices){.location_compatible=compatible,.map_location=map_location,.date=date});
+    MoveTbl table[NUM_MOVES+1];LoadMoveTbl(table);
+    for(unsigned i=0;i<=NUM_MOVES;i++) {
+        MoveTbl entry;LoadMoveEntry(i,&entry);CHECK(!memcmp(&table[i],&entry,sizeof(entry)));
+    }
+    const uint8_t *range;size_t member_size;
+    CHECK(native_resource_member(NARC_poketool_waza_waza_tbl,0,0,&range,&member_size));
+    CHECK(member_size==sizeof(MoveTbl));
+    CHECK(!native_resource_range(NARC_poketool_waza_waza_tbl,0,0,SIZE_MAX,1,&range));
+    CHECK(!native_resource_range(NARC_poketool_waza_waza_tbl,0,0,0,SIZE_MAX,&range));
+    CHECK(!native_resource_range(NARC_poketool_waza_waza_tbl,0,-1,0,1,&range));
     PlayerProfile profile;PlayerProfile_Init(&profile);profile.id=0x12345678;profile.gender=1;
     const u16 name[]={0x12b,0xffff};memcpy(profile.name,name,sizeof(name));
     const unsigned species[]={152,155,158},hp[]={20,19,20},moves[]={33,33,10};

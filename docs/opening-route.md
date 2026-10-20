@@ -6,12 +6,15 @@ items and battles present. This target is **not complete**. The current connecte
 route now completes Elm's farewell, crosses Route 29, completes Cherrygrove's
 guided tour and map-card gift, receives the Apricorn Box on Route 30 and reaches
 Mr. Pokemon's house. Its complete introduction now gives the Mystery Egg, heals
-the party and enables the Pokedex. Leaving the house rejects the unported
-incoming phone-call application (opcode 430) without recording the call.
+the party and enables the Pokedex. Elm's incoming call now completes through the shared application lifecycle. The
+return trip reaches the rival's unported TrainerBattle command (opcode 213),
+which rejects without publishing partial progress.
 
-This is connected script/movement execution. The original field encounter loop
-is still absent: crossing grass here does not establish working wild encounters
-or battles. The complete opening target remains unfinished.
+Walking in grass now admits original land encounter checks and generation, then
+a visible wild battle with Fight/Run, damage, EXP and field return. See
+[battle runtime](battle-runtime.md) for the executed scenario and limits. Trainer
+AI, blackout recovery and capture remain missing; the complete opening target
+remains unfinished.
 
 ## Connected execution
 
@@ -52,12 +55,21 @@ fades, party healing, Mystery Egg/Pokedex acquisition, Mystery Gift enablement,
 Oak's phone registration/departure and the original rival setup. The blackout
 destination is retained; blackout execution is not connected. All three starter
 scenarios reach this checkpoint without planted progression flags. Leaving the
-house rejects Elm's incoming call before its completion flag publishes, retaining
-the acquired records. See [Mr. Pokemon](mr-pokemon.md),
+house runs Elm's original panic call and returns through the original fade/field
+restore sequence. The return trip reaches Cherrygrove's rival trigger; private
+preflight rejects the battle command and rolls back the triggering step. See
+[Elm's call](elm-phone.md). See [Mr. Pokemon](mr-pokemon.md),
 [the Route 29/Cherrygrove checkpoint](route29-cherrygrove.md) and
 [prop animation](prop-animation.md) for boundaries and evidence.
 
 ## Shared lifecycle and ownership
+
+The starter picker now uses the original application launcher and the same
+TaskManager/OverlayManager frame driver as other admitted applications. Its
+separate application-status substitute and fade timer are removed; scene fades
+and starter fades execute the same original brightness controller. See
+[shared application lifecycle](application-lifecycle.md). Elm's scripted phone call now uses the same application runtime. General
+General Pokegear browsing, trainer battles and saving remain unported.
 
 * Transition and load hooks run against private story state before incoming
   objects are prepared. Resume hooks use a private scene after object/resource
@@ -97,10 +109,10 @@ nickname-specific UI exception. Mom's answers both work; nickname Yes remains
 disabled because its naming application fails admission. A synthetic unsupported
 branch also checks that probing/rejecting an answer cannot publish state or RNG.
 
-Original BGM and sound-command handlers now execute against a **muted** native
-request boundary. BGM fades retain their frame countdown and original polling
-callback. Muted SE/fanfare requests have no playback handles and complete
-immediately. There is no audible output or claim of original sound duration.
+Original BGM and sound-command handlers now execute against the shared native
+SDAT renderer and macOS output. Effect/fanfare waits follow actual playback;
+fanfares pause map music and preserve the original follow-up wait. Private scene
+snapshots keep preflight silent. See [audio evidence and limits](audio.md).
 Ordinary walking, walking-in-place, jump and delay families share the existing
 original command table and guest services; unsupported imports still reject.
 
@@ -119,6 +131,27 @@ Rejected/cancelled crossings restore the source owner and discard destination
 updates. Scenario routing now queries the complete original header footprint
 instead of assuming every map fits in one 32x32 chunk.
 
+## Mom’s gift presentation
+
+Mom’s first conversation now shows four native acknowledgment boxes: “You
+received the Bag!”, “You received your Trainer Card!”, “Save button unlocked!”
+and “Options button unlocked!”. Each is triggered by the original flag’s first
+unset-to-set transition. An immediately following original fanfare starts with
+the notification, and acknowledgment uses the same pager as ordinary dialogue.
+A grant without a fanfare still displays its notification before the next
+original command. Already-owned unlocks do not produce duplicate receipts.
+
+The boxes belong to the private script candidate: preflight stays invisible,
+cancellation publishes no gift, and snapshot/revision ownership is unchanged.
+These are native notifications added for this port, not messages in the original
+Mom script. Original menu-button graphics and full menu applications remain
+unported. Ordinary items and Pokégear retain their original receipt messages.
+The Pokégear receipt is original message 8 in bank 545.
+
+`test_unlock` checks all four notices, fanfare and no-fanfare grants, input waits,
+preflight/cancellation isolation and duplicate grants. The connected opening
+scenario checks all four rendered receipt pages for each of the three starters.
+
 ## Original Pokegear record
 
 The complete unchanged `save_pokegear.c` now compiles through a typed save-array
@@ -130,25 +163,26 @@ The full record belongs to each private candidate, including menu probes and
 map transitions. Tests verify registration, independent sessions, travel, failed
 preflight, invalid operands, stale publication and menu-branch isolation. The
 connected route now registers Elm through the completed original farewell.
-These are in-memory records; phone calls, the Pokegear UI and disk saving remain
-unported.
+These are in-memory records. Elm's scripted call executes; general Pokegear UI,
+other call controllers and disk saving remain unported.
 
 ## Presentation acceptance
 
 Completing an event is not visual/audio acceptance. The opening route still
 requires broader original prop animations, the original reaction-effect graphic
 and palette (the current exclamation is a gold font placeholder), original menu
-presentation and audible sound with original durations. These remain explicit
-requirements of the opening target alongside gameplay; muted requests and font
-placeholders do not satisfy them.
+presentation and audio fidelity against original hardware. These remain explicit
+requirements alongside gameplay; native playback now works, while font placeholders
+do not satisfy visual acceptance.
 
 ## Remaining route dependencies
 
-The next required service is the original Pokegear phone-call application and
-its return to field scripts. The phone event currently rejects opcode 430.
-Encounters and original battle/field return follow; Pokedex browsing and full
+Wild encounters and battle/field return now execute; original trainer AI and
+blackout recovery are the next battle dependencies.
+The rival event currently rejects TrainerBattle opcode 213. General Pokegear
+browsing and other call controllers remain unported; Pokedex browsing and full
 menu presentation are also incomplete. Apricorn harvesting/animation and daily RTC updates remain unported;
-owning the Box does not establish working harvesting. Saving, audible sound and
+owning the Box does not establish working harvesting. Saving, full audio integration and
 original startup are still separate missing systems.
 
 Build-local evidence is written with
@@ -158,8 +192,7 @@ screenshots belong in Git.
 
 ## Verification
 
-All 35 CTests pass in normal and ASan/UBSan builds (6.39 and 23.38 seconds
-at this checkpoint). The full three-starter connected scenario is an integration
+All 36 CTests pass in normal and ASan/UBSan builds at this checkpoint. The full three-starter connected scenario is an integration
 check; focused tree/state tests remain the short iteration path. The full connected opening
 scenario is driven headlessly for all three starters. The native-window smoke
 test also passes: actual AppKit keyboard/rendering, automatic Mom introduction,

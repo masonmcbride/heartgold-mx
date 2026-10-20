@@ -1,5 +1,7 @@
+#include "ds_audio.h"
 #include "compat/story.h"
 #include "compat/pokemon.h"
+#include "compat/phone.h"
 #include "bag.h"
 #include "save_pokegear.h"
 #include "compat/apricorn.h"
@@ -32,21 +34,27 @@ struct HGFieldScript {
     HGScriptSceneServices services;void *scene;MessageFormat format,*format_ptr;u8 movement_count;
     int menu_pending,menu_checked;unsigned menu_choices;u32 *menu_result;
     HGFieldScript *parent,*child;u8 waiters,context_count;ScriptContext *contexts[3];
+    HGPhone *phone;void *application_data;DSAudio *local_audio;unsigned unlock_notice;
     char error[160];
 };
 static HGFieldScript *root_script(HGFieldScript *s) { while(s->parent)s=s->parent;return s; }
 static HGFieldScript *active_script;
-static unsigned native_bgm_current(void) { GF_ASSERT(active_script);return active_script->candidate.music.sequence; }
-static void native_bgm_play(unsigned sequence) { GF_ASSERT(active_script);active_script->candidate.music.sequence=sequence;active_script->candidate.music.requests++; }
-static void native_bgm_stop(unsigned sequence,unsigned unused) { (void)sequence;(void)unused;native_bgm_play(0); }
-static void native_bgm_fade(unsigned target,unsigned ticks) { GF_ASSERT(active_script);(void)target;active_script->candidate.music.fade_ticks=ticks;active_script->candidate.music.requests++; }
-static void native_bgm_fade_in(unsigned volume,unsigned ticks,unsigned unused) { (void)volume;(void)unused;native_bgm_fade(0,ticks); }
+static void fail(HGFieldScript *,const char *,unsigned,size_t);
+static DSAudio *script_audio(void) { GF_ASSERT(active_script);return active_script->field.native_audio; }
+static void sound_play(unsigned kind,unsigned id) {
+    if(!ds_audio_play(script_audio(),kind,id))fail(active_script,ds_audio_error(script_audio()),73,0);
+}
+static unsigned native_bgm_current(void) { GF_ASSERT(active_script);return ds_audio_bgm(script_audio()); }
+static void native_bgm_play(unsigned sequence) { sound_play(DS_AUDIO_BGM,sequence);active_script->candidate.music.sequence=sequence;active_script->candidate.music.requests++; }
+static void native_bgm_stop(unsigned sequence,unsigned unused) { (void)unused;ds_audio_stop(script_audio(),DS_AUDIO_BGM,sequence);active_script->candidate.music.sequence=0;active_script->candidate.music.requests++; }
+static void native_bgm_fade(unsigned target,unsigned ticks) { ds_audio_fade(script_audio(),target,ticks);active_script->candidate.music.fade_ticks=ticks;active_script->candidate.music.requests++; }
+static void native_bgm_fade_in(unsigned volume,unsigned ticks,unsigned unused) { (void)unused;native_bgm_fade(volume,ticks); }
 static unsigned native_bgm_timer(void) { GF_ASSERT(active_script);return active_script->candidate.music.fade_ticks; }
-static void native_se_play(unsigned sequence) { GF_ASSERT(active_script);active_script->sound=sequence;active_script->candidate.music.requests++; }
-static void native_se_stop(unsigned sequence,unsigned unused) { (void)sequence;(void)unused;GF_ASSERT(active_script);active_script->candidate.music.requests++; }
-static unsigned native_se_playing(unsigned sequence) { (void)sequence;return 0; /* Muted requests have no playback handle. */ }
-static void native_fanfare_play(unsigned sequence) { (void)sequence;GF_ASSERT(active_script);active_script->candidate.music.requests++; }
-static unsigned native_fanfare_playing(void) { return 0; }
+static void native_se_play(unsigned sequence) { sound_play(DS_AUDIO_EFFECT,sequence);active_script->sound=sequence;active_script->candidate.music.requests++; }
+static void native_se_stop(unsigned sequence,unsigned unused) { (void)unused;ds_audio_stop(script_audio(),DS_AUDIO_EFFECT,sequence);active_script->candidate.music.requests++; }
+static unsigned native_se_playing(unsigned sequence) { return ds_audio_playing(script_audio(),DS_AUDIO_EFFECT,sequence); }
+static void native_fanfare_play(unsigned sequence) { sound_play(DS_AUDIO_FANFARE,sequence);active_script->candidate.music.requests++; }
+static unsigned native_fanfare_playing(void) { return ds_audio_playing(script_audio(),DS_AUDIO_FANFARE,0); }
 #define PlaySE native_se_play
 #define StopSE native_se_stop
 #define IsSEPlaying native_se_playing
@@ -62,6 +70,7 @@ static unsigned native_map_bgm(FieldSystem *field,unsigned map) { (void)field;re
 #define GF_SndGetFadeTimer native_bgm_timer
 #define FieldBGM_GetForMapHeader native_map_bgm
 static void *native_attribute(FieldSystem *field,enum ScriptEnvField attr) {
+    if(attr==SCRIPTENV_RUNNING_APP_DATA)return &((HGFieldScript *)(void *)field)->application_data;
     HGFieldScript *script=root_script((HGFieldScript *)(void *)field);
     if(attr==SCRIPTENV_FIELD_07)return &script->waiters;
     if(attr==SCRIPTENV_ACTIVE_SCRIPT_CONTEXT_COUNT)return &script->context_count;
@@ -133,6 +142,20 @@ static int native_menu_finished(FieldSystem *field) { return ((HGFieldScript *)(
 #define BufferBoxMonSpeciesName native_buffer_species
 #define BufferBoxMonSpeciesNameWithArticle native_buffer_species_article
 #define BufferPlayersName native_buffer_player
+static HGPhone *phone_manager(FieldSystem *);
+static void phone_ring(HGPhone *phone) { GF_ASSERT(phone); }
+static void phone_params(HGPhone *phone,unsigned caller,unsigned unused,unsigned unused2,unsigned kind,unsigned script) { GF_ASSERT(unused==255&&!unused2);hg_phone_set(phone,caller,kind,script); }
+static void *phone_launch(FieldSystem *field) { HGFieldScript *s=(HGFieldScript *)(void *)field;return hg_phone_launch(s->phone); }
+static void native_restore_field(FieldSystem *field) {
+    /* The native application replaces presentation while retaining the real
+     * field scene. Closing it exposes that scene; validate its owners here. */
+    GF_ASSERT(!field->application&&field->native_scene_resources&&field->mapObjectManager&&field->playerAvatar);
+}
+#define FieldSystem_GetGearPhoneRingManager phone_manager
+#define GearPhoneRingManager_StartRinging phone_ring
+#define GearPhoneRingManager_SetCallerParams phone_params
+#define PokegearPhone_LaunchApp phone_launch
+#define CallTask_RestoreOverworld(task) native_restore_field(ctx->fieldSystem)
 #include "script_kernel_decls.inc"
 #include "script_kernel.inc"
 
@@ -202,8 +225,14 @@ static int valid_operands(HGFieldScript *s,unsigned op,const uint8_t *p) {
     if(op==82&&!s->field.location)return 0;
     if(op==84&&half(p+2)>3600)return 0;
     if(op==85&&half(p)>3600)return 0;
+    if(op==430) {
+        for(unsigned i=0;i<3;i++)if(!value_valid(half(p+2*i)))return 0;
+        if(s->phone||!hg_phone_admit(FieldSystem_VarGet(&s->field,half(p)),FieldSystem_VarGet(&s->field,half(p+2)),FieldSystem_VarGet(&s->field,half(p+4))))return 0;
+    }
+    if(op==431&&(!hg_phone_ready(s->phone)||s->application_data))return 0;
+    if(op==150&&(!s->scene||s->field.application))return 0;
     if(op==281&&!variable(half(p)))return 0;
-    if(op==290&&!variable(half(p)))return 0;
+    if((op==290||op==206)&&!variable(half(p)))return 0;
     if(op==280&&(!value_valid(half(p))||FieldSystem_VarGet(&s->field,half(p))<SPAWN_NEW_BARK||FieldSystem_VarGet(&s->field,half(p))>SPAWN_ROCK_TUNNEL))return 0;
     if((op==98||op==99||op==100||op==101)&&!value_valid(half(p)))return 0;
     if((op==98||op==99||op==100||op==101)&&!s->scene)return 0;
@@ -288,6 +317,19 @@ static int expand_message(HGFieldScript *s,const uint8_t *text,size_t length,cha
     }
     out[written]=0;return written!=0;
 }
+static int phone_message(void *owner,unsigned bank,unsigned message) {
+    HGFieldScript *s=owner;const uint8_t *text;size_t length;
+    native_buffer_player(&root_script(s)->format,0,hg_story_save_profile(s->field.saveData));
+    if(!native_resource_member(NARC_msgdata_msg,bank,message,&text,&length)||length<2||text[length-1]||!expand_message(s,text,length,s->message.text,sizeof(s->message.text)))return 0;
+    s->waiting=1;s->acknowledged=0;return 1;
+}
+static int phone_waiting(void *owner) { return ((HGFieldScript *)owner)->waiting; }
+static int phone_acknowledged(void *owner) { HGFieldScript *s=owner;int acknowledged=s->acknowledged;s->acknowledged=0;return acknowledged; }
+static HGPhone *phone_manager(FieldSystem *field) {
+    HGFieldScript *s=(HGFieldScript *)(void *)field;
+    if(!s->phone)s->phone=hg_phone_new(field,(HGPhoneServices){s,phone_message,phone_waiting,phone_acknowledged});
+    GF_ASSERT(s->phone);return s->phone;
+}
 static BOOL presentation(ScriptContext *ctx,unsigned op) {
     HGFieldScript *s=(HGFieldScript *)(void *)ctx->fieldSystem;
     if(op==104) {
@@ -327,15 +369,40 @@ static BOOL presentation(ScriptContext *ctx,unsigned op) {
     }
     return FALSE;
 }
+/* Native presentation for original menu unlocks. Ordinary items already have
+ * original receipt messages; do not synthesize a second receipt for them. */
+static const struct { unsigned flag;const char *text; } unlock_notices[]={
+    {FLAG_GOT_BAG,"You received the Bag!"},
+    {FLAG_GOT_TRAINER_CARD,"You received your\nTrainer Card!"},
+    {FLAG_GOT_SAVE_BUTTON,"Save button unlocked!"},
+    {FLAG_GOT_OPTIONS_BUTTON,"Options button unlocked!"},
+};
+static void present_unlock(HGFieldScript *s) {
+    GF_ASSERT(s->unlock_notice&&s->unlock_notice<=NELEMS(unlock_notices)&&!s->waiting);
+    memset(&s->message,0,sizeof(s->message));
+    snprintf(s->message.text,sizeof(s->message.text),"%s",unlock_notices[s->unlock_notice-1].text);
+    s->unlock_notice=0;s->waiting=1;s->acknowledged=0;s->yielded=1;
+}
 static BOOL dispatch(ScriptContext *ctx) {
     HGFieldScript *s=(HGFieldScript *)(void *)ctx->fieldSystem;unsigned op=half(ctx->script_ptr-2);
+    if(s->unlock_notice&&op!=78) {
+        /* Preserve the next original command until the receipt is acknowledged.
+         * An immediately following fanfare starts first, alongside the box. */
+        ctx->script_ptr-=2;present_unlock(s);return TRUE;
+    }
+    unsigned notice=0;
+    if(op==30)for(unsigned i=0;i<NELEMS(unlock_notices);i++)
+        if(half(ctx->script_ptr)==unlock_notices[i].flag&&!FieldSystem_FlagCheck(&s->field,(u16)unlock_notices[i].flag))notice=i+1;
     s->yielded=op==20&&half(ctx->script_ptr)==std_signpost?presentation(ctx,op):original_commands[op]?original_commands[op](ctx):presentation(ctx,op);
+    if(!s->failed&&notice)s->unlock_notice=notice;
+    if(!s->failed&&op==78&&s->unlock_notice)present_unlock(s);
     return TRUE; /* One bounded dispatch; native owner batches false results. */
 }
 static ScrCmdFunc dispatch_table[1024];
 static void initialize(HGFieldScript *s) {
     /* Original InitScriptContext does not reset comparisonResult. Replay must
      * start with fresh native allocation state, not the preview's last result. */
+    if(s->phone){hg_phone_free(s->phone);s->phone=NULL;}free(s->application_data);s->application_data=NULL;
     memset(&s->context,0,sizeof(s->context));
     InitScriptContext(&s->context,dispatch_table,NELEMS(dispatch_table));s->context.fieldSystem=&s->field;
     SetupBytecodeScript(&s->context,s->code+s->start);s->candidate=*s->owner;
@@ -343,12 +410,18 @@ static void initialize(HGFieldScript *s) {
     if(!s->parent){s->waiters=0;s->context_count=1;memset(s->contexts,0,sizeof(s->contexts));s->contexts[0]=&s->context;}
     memset(s->special,0,sizeof(s->special));memset(&s->message,0,sizeof(s->message));
     memset(&s->format,0,sizeof(s->format));s->format_ptr=&s->format;s->movement_count=0;
+    s->field.native_audio=NULL;
     if(s->services.clone) {
         if(s->scene)s->services.destroy(s->scene);s->scene=s->services.clone(s->services.source);
         if(!s->scene){fail(s,"Cannot prepare script scene",0,0);return;}
         s->services.bind(s->scene,&s->field,s->preview);
     }
-    s->menu_pending=0;s->menu_result=NULL;s->face=s->sound=s->total=0;s->waiting=s->acknowledged=s->yielded=s->done=s->failed=0;s->error[0]=0;
+    if(!s->field.native_audio) {
+        ds_audio_free(s->local_audio);s->local_audio=ds_audio_clone(s->parent?s->parent->field.native_audio:NULL);
+        s->field.native_audio=s->local_audio;
+        if(!s->local_audio){fail(s,"Cannot initialize original audio",0,0);return;}
+    }
+    s->unlock_notice=0;s->menu_pending=0;s->menu_result=NULL;s->face=s->sound=s->total=0;s->waiting=s->acknowledged=s->yielded=s->done=s->failed=0;s->error[0]=0;
 }
 typedef struct { u8 temporary[8];u32 rng;HGFieldScript *active; } ScriptGlobals;
 static void enter_globals(HGFieldScript *s,ScriptGlobals *saved) {
@@ -371,13 +444,24 @@ int hg_field_script_tick(HGFieldScript *s) {
             if(root_script(s)->waiters&(1u<<s->context.id)){fail(s,"Standard script ended without returning",20,0);return HG_SCRIPT_ERROR;}
             if(!hg_story_commit(&s->candidate,&s->child->candidate,s->child->revision)){fail(s,"Cannot publish child script",20,0);return HG_SCRIPT_ERROR;}
             HGFieldScript *root=root_script(s);root->contexts[s->child->context.id]=NULL;root->context_count--;
+            if(s->child->scene) {
+                if(s->scene)s->services.destroy(s->scene);s->scene=s->child->scene;s->child->scene=NULL;
+                s->services.bind(s->scene,&s->field,s->preview);
+            }
+            if(s->child->local_audio){ds_audio_free(s->local_audio);s->local_audio=s->child->local_audio;s->child->local_audio=NULL;s->field.native_audio=s->local_audio;}
             hg_field_script_free(s->child);s->child=NULL;return HG_SCRIPT_RUNNING;
         }
         return status;
     }
+    if(!ds_audio_tick(s->field.native_audio)){fail(s,ds_audio_error(s->field.native_audio),73,0);return HG_SCRIPT_ERROR;}
     if(s->waiting)return HG_SCRIPT_MESSAGE;
     if(s->menu_pending)return HG_SCRIPT_RUNNING;
     if(s->candidate.music.fade_ticks)s->candidate.music.fade_ticks--;
+    if(s->phone&&s->field.application) {
+        ScriptGlobals saved;enter_globals(s,&saved);hg_field_tasks_tick(&s->field);leave_globals(s,&saved);
+        if(hg_phone_failed(s->phone)){fail(s,"Unsupported phone message",431,0);return HG_SCRIPT_ERROR;}
+        if(s->waiting)return HG_SCRIPT_MESSAGE;
+    }
     if(s->scene) {
         ScriptGlobals saved;enter_globals(s,&saved);int ok=s->services.tick(s->scene);leave_globals(s,&saved);
         if(!ok){fail(s,"Scene task/movement failed",94,0);return HG_SCRIPT_ERROR;}
@@ -424,6 +508,7 @@ int hg_field_script_tick(HGFieldScript *s) {
         leave_globals(s,&saved);
         if(s->failed)return HG_SCRIPT_ERROR;
         if(s->context.mode==SCRIPT_MODE_STOPPED) {
+            if(s->field.application){fail(s,"Unjoined application",431,0);return HG_SCRIPT_ERROR;}
             if(s->scene&&(s->services.active(s->scene)||(s->services.busy&&s->services.busy(s->scene)))){fail(s,"Unjoined scene task/movement",94,0);return HG_SCRIPT_ERROR;}
             s->done=1;return HG_SCRIPT_DONE;
         }
@@ -444,8 +529,8 @@ int hg_field_script_commit(HGFieldScript *s) {
 }
 const HGScriptMessage *hg_field_script_message(const HGFieldScript *s) { return s&&s->child?hg_field_script_message(s->child):s&&s->waiting&&!s->failed?&s->message:NULL; }
 const char *hg_field_script_error(const HGFieldScript *s) { return s?s->error:"Missing script"; }
-void hg_field_script_free(HGFieldScript *s) { if(s){hg_field_script_free(s->child);if(s->scene)s->services.destroy(s->scene);free(s->code);free(s);} }
-const void *hg_field_script_scene(const HGFieldScript *s) { return s?s->scene:NULL; }
+void hg_field_script_free(HGFieldScript *s) { if(s){hg_field_script_free(s->child);hg_phone_free(s->phone);ds_audio_free(s->local_audio);free(s->application_data);if(s->scene)s->services.destroy(s->scene);free(s->code);free(s);} }
+const void *hg_field_script_scene(const HGFieldScript *s) { return s&&s->child&&s->child->scene?hg_field_script_scene(s->child):s?s->scene:NULL; }
 static HGFieldScript *script_bytes(HGStoryState *owner,const uint8_t *bytes,size_t size,size_t floor,size_t start,unsigned bank,const HGScriptSceneServices *services,char *error,size_t capacity) {
     if(error&&capacity)error[0]=0;
     if(!owner||!bytes||size>1024*1024||start>=size)return NULL;
@@ -536,7 +621,7 @@ int hg_story_phone_registered(const HGStoryState *state,unsigned contact) {
 int hg_story_population_changed(const HGStoryState *a,const HGStoryState *b) {
     if(!a||!b)return 1;
     return memcmp(a->data.trees,b->data.trees,sizeof(a->data.trees))||memcmp(a->data.vars.flags,b->data.vars.flags,sizeof(a->data.vars.flags))||
-        memcmp(a->data.vars.vars+VAR_OBJ_GFX_BASE-VAR_BASE,b->data.vars.vars+VAR_OBJ_GFX_BASE-VAR_BASE,NUM_OBJ_GFX_VARS*sizeof(u16));
+        memcmp(a->data.vars.vars+(VAR_OBJ_GFX_BASE-VAR_BASE),b->data.vars.vars+(VAR_OBJ_GFX_BASE-VAR_BASE),NUM_OBJ_GFX_VARS*sizeof(u16));
 }
 unsigned long long hg_story_revision(const HGStoryState *state) { return state?state->revision:0; }
 void hg_story_bind_field(HGStoryState *state,FieldSystem *field) { if(field)field->saveData=state?(SaveData *)(void *)&state->data:NULL; }
@@ -615,8 +700,9 @@ static const u8 *fork_pointer(const HGFieldScript *source,HGFieldScript *copy,co
  * at the actual choice point, preserving the acquired Pokemon and prior input,
  * instead of replaying a guessed default starter from the script's beginning. */
 static HGFieldScript *fork_script(const HGFieldScript *source,HGFieldScript *parent) {
+    if(source->phone||source->field.application||source->application_data)return NULL;
     HGFieldScript *copy=malloc(sizeof(*copy));if(!copy)return NULL;*copy=*source;
-    copy->parent=parent;copy->child=NULL;copy->scene=NULL;copy->code=NULL;copy->committed=0;copy->preview=1;
+    copy->local_audio=NULL;copy->parent=parent;copy->child=NULL;copy->scene=NULL;copy->code=NULL;copy->committed=0;copy->preview=1;
     if(parent)copy->owner=&parent->candidate;
     copy->code=malloc(2*copy->size+16);if(!copy->code){hg_field_script_free(copy);return NULL;}
     memcpy(copy->code,source->code,2*copy->size+16);
@@ -629,6 +715,7 @@ static HGFieldScript *fork_script(const HGFieldScript *source,HGFieldScript *par
         if(!copy->scene){hg_field_script_free(copy);return NULL;}
         copy->services.bind(copy->scene,&copy->field,1);
     } else if(parent)copy->field.location=parent->field.location;
+    if(source->local_audio){copy->local_audio=ds_audio_clone(source->local_audio);if(!copy->local_audio){hg_field_script_free(copy);return NULL;}copy->field.native_audio=copy->local_audio;}
     if(source->menu_result) {
         uintptr_t at=(uintptr_t)source->menu_result,base=(uintptr_t)source->context.data;
         if(at<base||at+sizeof(u32)>base+sizeof(source->context.data)||at%_Alignof(u32)){hg_field_script_free(copy);return NULL;}
@@ -666,10 +753,18 @@ static ScriptContext *native_create_context(FieldSystem *field,u16 id) {
  const uint8_t *bytes=resource.bytes;size_t size=resource.size,start=resource.start;
  HGFieldScript *child=calloc(1,sizeof(*child));GF_ASSERT(child);child->code=calloc(1,2*size+16);GF_ASSERT(child->code);memcpy(child->code,bytes,size);
  child->owner=&parent->candidate;child->revision=parent->candidate.revision;child->parent=parent;child->bytes=bytes;child->size=size;child->floor=resource.floor;child->start=start;child->message_bank=resource.messages;child->preview=parent->preview;
- initialize(child);child->field.location=parent->field.location;parent->child=child;return &child->context;
+ if(parent->scene){child->services=parent->services;child->services.source=parent->scene;}
+ initialize(child);if(!child->scene)child->field.location=parent->field.location;parent->child=child;return &child->context;
 }
 
 int hg_story_apricorn_tree(const HGStoryState *state,unsigned index,unsigned *kind,int *available) {
     if(!state||index>=NUM_APRICORN_TREE||!kind||!available)return 0;
     *kind=ApricornTrees_TryGetApricorn(state->data.trees,(int)index);*available=sub_0202AE38(state->data.trees,(int)index)!=0;return 1;
 }
+
+int hg_field_script_phone_active(const HGFieldScript *s) { if(s&&s->child)return hg_field_script_phone_active(s->child);return s&&s->phone&&s->field.application; }
+
+const char *hg_field_script_phone_contact(const HGFieldScript *s) { if(s&&s->child)return hg_field_script_phone_contact(s->child);return s?hg_phone_contact(s->phone):""; }
+u32 hg_story_rng_get(const HGStoryState *state){return state?state->data.rng:0;}
+void hg_story_rng_set(HGStoryState *state,u32 rng){if(state&&state->data.rng!=rng){state->data.rng=rng;state->revision++;}}
+void hg_story_touch(HGStoryState *state){if(state)state->revision++;}

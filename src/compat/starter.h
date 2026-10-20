@@ -10,4 +10,3 @@ int hg_starter_busy(const HGStarter *);
 int hg_starter_pending(const HGStarter *);
 int hg_starter_option(HGStarter *,unsigned,HGStarterOption *);
 int hg_starter_choose(HGStarter *,unsigned);
-double hg_starter_fade(const HGStarter *);

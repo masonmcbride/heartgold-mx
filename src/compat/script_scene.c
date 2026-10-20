@@ -1,6 +1,7 @@
 #include "compat/motion.h"
 #include "compat/story.h"
 #include "field_data.h"
+#include "field_transition.h"
 #include "choose_starter.h"
 #include "compat/follow.h"
 #include "compat/map_objects.h"
@@ -103,7 +104,7 @@ int hg_script_scene_command(ScriptContext *context,unsigned op,BOOL *yielded) {
         LocalMapObject *object=MapObjectManager_GetFirstActiveObjectByID(field->mapObjectManager,v[0]);
         HGFieldTile tile;int32_t height;
         if(!object||v[1]>32767||v[2]>32767||v[3]>32767||v[4]>3||!field->native_scene_resources||
-           !hg_field_resources_tile(field->native_scene_resources,v[1],v[3],&tile)||tile.map_header!=MapObject_GetMapID(object)||
+           !hg_field_resources_tile(field->native_scene_resources,v[1],v[3],&tile)||(!hg_transition_supported(tile.map_header)||(object==PlayerAvatar_GetMapObject(field->playerAvatar)&&tile.map_header!=MapObject_GetMapID(object)))||
            hg_field_resources_height(field->native_scene_resources,v[1],v[3],0,(int32_t)v[2]*32768,&height)!=1)return 0;
     }
 

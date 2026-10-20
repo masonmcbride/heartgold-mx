@@ -23,6 +23,19 @@ static void acceptance_frame(HGFieldApp *app,unsigned species,const char *stage)
     char path[4096];CHECK(snprintf(path,sizeof(path),"%s/starter-%u-%s.ppm",folder,species,stage)>0);FILE *f=fopen(path,"wb");CHECK(f);CHECK(fprintf(f,"P6\n512 384\n255\n")>0);
     for(unsigned i=0;i<512*384;i++)CHECK(fwrite(pixels+4*i,1,3,f)==3);CHECK(!fclose(f));
 }
+/* Observe rendered pages, rather than only checking the eventual gift flags. */
+static void mom_gift_page(HGFieldApp *app,void *context) {
+    unsigned *seen=context;const char *page=hg_field_app_dialogue_page(app);
+    if(strstr(page,"Bag to carry"))*seen|=1;
+    if(strstr(page,"Trainer Card"))*seen|=2;
+    if(strstr(page,"save a record"))*seen|=4;
+    if(strstr(page,"also rather helpful"))*seen|=8;
+    if(strstr(page,"received")&&strstr(page,"Pokégear"))*seen|=16;
+    if(strstr(page,"received the Bag")){*seen|=32;if(getenv("HG_ACCEPT_EVIDENCE"))acceptance_frame(app,0,"bag-unlock");}
+    if(strstr(page,"received your")&&strstr(page,"Trainer Card")){*seen|=64;if(getenv("HG_ACCEPT_EVIDENCE"))acceptance_frame(app,0,"trainer-card-unlock");}
+    if(strstr(page,"Save button unlocked")){*seen|=128;if(getenv("HG_ACCEPT_EVIDENCE"))acceptance_frame(app,0,"save-unlock");}
+    if(strstr(page,"Options button unlocked")){*seen|=256;if(getenv("HG_ACCEPT_EVIDENCE"))acceptance_frame(app,0,"options-unlock");}
+}
 static void close_conversation(HGFieldApp *app) {
     unsigned pages=0,ticks=0;
     while(hg_field_app_interaction_busy(app)&&ticks++<2048) {
@@ -203,10 +216,11 @@ int main(void) {
     CHECK(PlayerProfile_GetMoney(hg_story_save_profile(opening_field.saveData))==3000);
     hg_test_portal(arrival,63);
     CHECK(hg_field_app_map(arrival)==63&&hg_field_app_story(arrival)==arrival_story);
-    CHECK(hg_test_settle(arrival)>0);int opening_flag;
+    unsigned mom_pages=0;CHECK(hg_test_settle_observe(arrival,1,mom_gift_page,&mom_pages)>0);
+    CHECK((mom_pages&15)==15);CHECK((mom_pages&(32|64|128|256))==(32|64|128|256));int opening_flag;
     CHECK(hg_story_flag_get(arrival_story,FLAG_GOT_BAG,&opening_flag)&&opening_flag);
     CHECK(hg_story_flag_get(arrival_story,FLAG_GOT_TRAINER_CARD,&opening_flag)&&opening_flag);
-    hg_test_walk_to(arrival,3,10);hg_field_app_input(arrival,0x80);hg_field_app_step(arrival);hg_field_app_clear_input(arrival);
+    hg_test_walk_to(arrival,3,10);hg_field_app_input(arrival,0x80);for(unsigned hold=0;hold<30;hold++){hg_field_app_step(arrival);hg_field_app_input(arrival,0x80);}hg_field_app_input(arrival,0);hg_field_app_clear_input(arrival);
     CHECK(hg_field_app_map(arrival)==60&&hg_field_app_story(arrival)==arrival_story);
     hg_test_settle(arrival);
     hg_test_walk_to(arrival,684,394);
@@ -235,7 +249,7 @@ int main(void) {
     unsigned chosen=0,menu=0,starter_ticks=0;
     while(hg_field_app_interaction_busy(arrival)&&starter_ticks++<4096) {
         CHECK(!strstr(hg_field_app_dialogue(arrival),"isn’t available yet"));
-        if(hg_field_app_starter_pending(arrival)){acceptance_frame(arrival,expected[starter_choice],"choice");chosen++;for(unsigned i=0;i<starter_choice;i++){hg_field_app_input(arrival,0x80);hg_field_app_step(arrival);}hg_field_app_interact(arrival);}
+        if(hg_field_app_starter_pending(arrival)){acceptance_frame(arrival,expected[starter_choice],"choice");chosen++;for(unsigned i=0;i<starter_choice;i++){hg_field_app_input(arrival,0x80);for(unsigned hold=0;hold<30;hold++){hg_field_app_step(arrival);hg_field_app_input(arrival,0x80);}hg_field_app_input(arrival,0);}hg_field_app_interact(arrival);}
         else if(hg_field_app_menu_pending(arrival)){acceptance_frame(arrival,expected[starter_choice],"menu");menu++;hg_field_app_interact(arrival);}
         else if(hg_field_app_dialogue(arrival)[0])hg_field_app_interact(arrival);
         hg_field_app_step(arrival);
@@ -252,14 +266,14 @@ int main(void) {
     CHECK(Pokedex_CheckMonCaughtFlag(hg_story_save_dex(saved_field.saveData),species));
     acceptance_frame(arrival,species,"lab");
     hg_test_walk_to(arrival,4,14);
-    hg_field_app_input(arrival,0x80);hg_field_app_step(arrival);hg_field_app_clear_input(arrival);
+    hg_field_app_input(arrival,0x80);for(unsigned hold=0;hold<30;hold++){hg_field_app_step(arrival);hg_field_app_input(arrival,0x80);}hg_field_app_input(arrival,0);hg_field_app_clear_input(arrival);
     CHECK(hg_field_app_map(arrival)==60&&hg_field_app_story(arrival)==arrival_story);
     CHECK(hg_field_app_follower(arrival,&species,&fx,&fz)&&species==expected[starter_choice]);
     CHECK(hg_field_app_player(arrival,&px,&pz)&&fx==px&&fz==pz);
     CHECK(hg_test_settle(arrival)>0); /* Original friend/Marill frame event. */
     uint16_t town_scene;CHECK(hg_story_var_get(arrival_story,VAR_SCENE_NEW_BARK_TOWN_OW,&town_scene)&&town_scene==2);
     for(unsigned step=0;step<2;step++) {
-        hg_field_app_input(arrival,0x80);hg_field_app_step(arrival);hg_field_app_clear_input(arrival);
+        hg_field_app_input(arrival,0x80);for(unsigned hold=0;hold<30;hold++){hg_field_app_step(arrival);hg_field_app_input(arrival,0x80);}hg_field_app_input(arrival,0);hg_field_app_clear_input(arrival);
         for(unsigned tick=0;tick<16;tick++)hg_field_app_step(arrival);
     }
     CHECK(hg_field_app_player(arrival,&px,&pz)&&hg_field_app_follower(arrival,&species,&fx,&fz));
@@ -276,7 +290,8 @@ int main(void) {
     CHECK(Party_GetCount(saved_party)==1&&Bag_GetQuantity(hg_story_save_bag(saved_field.saveData),ITEM_POTION,HEAP_ID_FIELD1)==5);
     hg_test_portal(arrival,60);hg_test_settle(arrival);
     hg_test_portal(arrival,63);hg_test_settle(arrival);hg_test_approach(arrival,2);
-    hg_field_app_interact(arrival);hg_field_app_step(arrival);CHECK(hg_test_settle_choice(arrival,starter_choice%2)>0);
+    hg_field_app_interact(arrival);hg_field_app_step(arrival);mom_pages=0;
+    CHECK(hg_test_settle_observe(arrival,starter_choice%2,mom_gift_page,&mom_pages)>0);CHECK(mom_pages&16);
     CHECK(hg_story_flag_get(arrival_story,FLAG_GOT_POKEGEAR,&arrival_flag)&&arrival_flag);
     CHECK(Party_GetCount(saved_party)==1&&Bag_GetQuantity(hg_story_save_bag(saved_field.saveData),ITEM_POTION,HEAP_ID_FIELD1)==5);
     hg_test_portal(arrival,60);hg_test_settle(arrival);CHECK(hg_field_app_story(arrival)==arrival_story);
@@ -318,8 +333,9 @@ int main(void) {
     CHECK(hg_field_app_running_shoes(arrival));
     acceptance_frame(arrival,species,"route-30");
     Pokemon *resting=Party_GetMonByIndex(saved_party,0);u32 damaged=1,condition=8;u8 empty_pp=0;
-    SetMonData(resting,MON_DATA_HP,&damaged);SetMonData(resting,MON_DATA_STATUS,&condition);SetMonData(resting,MON_DATA_MOVE1_PP,&empty_pp);
     hg_test_portal(arrival,143);
+    /* Damage the healing fixture indoors, after real grass encounters on the trip. */
+    SetMonData(resting,MON_DATA_HP,&damaged);SetMonData(resting,MON_DATA_STATUS,&condition);SetMonData(resting,MON_DATA_MOVE1_PP,&empty_pp);
     CHECK(hg_story_flag_get(arrival_story,FLAG_GOT_APRICORN_BOX,&arrival_flag)&&arrival_flag);
     CHECK(Bag_GetQuantity(hg_story_save_bag(saved_field.saveData),ITEM_APRICORN_BOX,HEAP_ID_FIELD1)==1);
     unsigned rest_ticks=0;int fade_out=0,black=0,fade_in=0;
@@ -345,15 +361,33 @@ int main(void) {
     CHECK(*hg_story_save_blackout_spawn(saved_field.saveData)==2);
     acceptance_frame(arrival,species,"mr-pokemon");
     hg_test_portal(arrival,34);
-    unsigned long long phone_revision=hg_story_revision(arrival_story);
-    for(unsigned tick=0;tick<64&&!hg_field_app_dialogue(arrival)[0];tick++)hg_field_app_step(arrival);
-    CHECK(strstr(hg_field_app_dialogue(arrival),"isn’t available yet")&&strstr(hg_field_app_error(arrival),"opcode 430"));
-    CHECK(hg_story_revision(arrival_story)==phone_revision);
-    CHECK(hg_story_flag_get(arrival_story,FLAG_GOT_ELMS_PANIC_CALL,&arrival_flag)&&!arrival_flag);
+    unsigned phone_ticks=0,phone_messages=0;int phone_seen=0;int phone_x,phone_z;CHECK(hg_field_app_player(arrival,&phone_x,&phone_z));
+    for(;phone_ticks<4096;phone_ticks++) {
+        hg_field_app_step(arrival);
+        CHECK(!strstr(hg_field_app_dialogue(arrival),"isn’t available yet"));
+        if(hg_field_app_phone_active(arrival)) {
+            if(hg_field_app_dialogue(arrival)[0]&&!phone_seen){CHECK(strstr(hg_field_app_dialogue(arrival),"Ethan")&&strstr(hg_field_app_dialogue(arrival),"disaster"));acceptance_frame(arrival,species,"elm-phone");phone_seen=1;}
+        }
+        if(hg_field_app_dialogue(arrival)[0]){phone_messages++;hg_field_app_interact(arrival);}
+        if(phone_seen&&!hg_field_app_interaction_busy(arrival)&&!hg_field_app_dialogue(arrival)[0])break;
+    }
+    CHECK(phone_ticks<4096&&phone_seen&&phone_messages&&!hg_field_app_phone_active(arrival));
+    CHECK(!hg_field_app_error(arrival)[0]&&!hg_field_app_brightness(arrival));
+    CHECK(hg_story_flag_get(arrival_story,FLAG_GOT_ELMS_PANIC_CALL,&arrival_flag)&&arrival_flag);
     CHECK(Bag_GetQuantity(hg_story_save_bag(saved_field.saveData),ITEM_MYSTERY_EGG,HEAP_ID_FIELD1)==1);
+    int returned_x,returned_z;CHECK(hg_field_app_player(arrival,&returned_x,&returned_z)&&returned_x==phone_x&&returned_z==phone_z);
+    acceptance_frame(arrival,species,"elm-phone-return");
     CHECK(hg_field_app_running_shoes(arrival));
     CHECK(hg_field_app_story(arrival)==arrival_story&&hg_story_phone_registered(arrival_story,PHONE_CONTACT_PROF__ELM));
 
+    hg_test_portal(arrival,67);hg_test_settle(arrival);
+    hg_test_walk_to(arrival,574,398);unsigned long long rival_revision=hg_story_revision(arrival_story);
+    hg_field_app_input(arrival,0x10);hg_field_app_step(arrival);hg_field_app_clear_input(arrival);
+    for(unsigned tick=0;tick<16;tick++)hg_field_app_step(arrival);
+    CHECK(strstr(hg_field_app_dialogue(arrival),"isn’t available yet"));
+    CHECK(strstr(hg_field_app_error(arrival),"opcode 213"));
+    int rival_x,rival_z;CHECK(hg_field_app_player(arrival,&rival_x,&rival_z)&&rival_x==574&&rival_z==398);
+    CHECK(hg_story_revision(arrival_story)==rival_revision);
     hg_field_app_free(arrival);
     }
     /* Full original introduction from its real coordinate-trigger row. */
