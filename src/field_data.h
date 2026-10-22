@@ -62,3 +62,5 @@ int hg_field_resources_height(HGFieldResources *,int x,int z,unsigned mode,
 /* Same static provider at arbitrary nonnegative matrix-global Q12 position. */
 int hg_field_resources_height_at(HGFieldResources *,int32_t x,int32_t z,unsigned mode,
                                  int32_t reference,int32_t *height);
+
+unsigned hg_field_resources_matrix_width(const HGFieldResources *);

@@ -3,6 +3,7 @@
 Full field_control/field_warp_tasks units are NOT compiled by this target.
 Source text, line locations and hashes remain reviewable in the build directory.
 """
+from generated_files import write_text_if_changed
 import hashlib,json,pathlib,re,sys
 root,out=map(pathlib.Path,sys.argv[1:])
 event=(root/'include/map_events_internal.h').read_text()
@@ -12,7 +13,7 @@ for name in ('BgEvent','WarpEvent','CoordEvent','MapEvents'):
  types.append(re.search(pattern,event,re.M|re.S)[0])
 field=(root/'include/field_system.h').read_text()
 types.append(re.search(r'typedef struct FieldInput \{.*?^\} FieldInput;',field,re.M|re.S)[0])
-(out/'event_types.inc').write_text('/* Original declarations; build-local. */\n'+'\n'.join(types)+'\n')
+write_text_if_changed(out/'event_types.inc', '/* Original declarations; build-local. */\n'+'\n'.join(types)+'\n')
 groups={
  'src/field/field_control.c':('PlayerAvatar_GetStandingTileCoords','ShiftFieldCoordsByCompassDirection','PlayerAvatar_GetFacingTileCoords','SetLocation','FieldSystem_MapConnection','FieldSystem_CheckMapTransition'),
  'src/location_backup.c':('Location_SetToPlayerRoom',),
@@ -34,10 +35,10 @@ for relative,names in groups.items():
   match=matches[0];body=match[0];line=text[:match.start()].count('\n')+1
   lines.extend([f'#line {line} "{path}"',body])
   provenance.append({'source':relative,'function':name,'line':line,'source_sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'slice_sha256':hashlib.sha256(body.encode()).hexdigest()})
-(out/'transition_kernel.inc').write_text('\n'.join(lines)+'\n')
+write_text_if_changed(out/'transition_kernel.inc', '\n'.join(lines)+'\n')
 whole=('src/map_events.c','src/save_local_field_data.c')
 declarations=('include/map_events_internal.h','include/field_system.h','include/field_types_def.h','include/map_events.h','include/save_local_field_data.h')
-(out/'transition_provenance.json').write_text(json.dumps({'functions':provenance,
+write_text_if_changed(out/'transition_provenance.json', json.dumps({'functions':provenance,
  'whole_c_inputs':{p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in whole},
  'declaration_inputs':{p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in declarations}},indent=2)+'\n')
 # Coherent original interaction selector closure, separate from warp services.
@@ -49,6 +50,6 @@ for name in ('PlayerAvatar_GetStandingTileCoords','ShiftFieldCoordsByCompassDire
  selected.extend([match[0].split(' {\n',1)[0]+';'])
  selected.extend([f'#line {line} "{control}"',match[0]])
  provenance.append({'source':'src/field/field_control.c','function':name,'line':line,'source_sha256':hashlib.sha256(control.read_bytes()).hexdigest(),'slice_sha256':hashlib.sha256(match[0].encode()).hexdigest()})
-(out/'interaction_control_kernel.inc').write_text('\n'.join(selected)+'\n')
+write_text_if_changed(out/'interaction_control_kernel.inc', '\n'.join(selected)+'\n')
 report=json.loads((out/'transition_provenance.json').read_text());report['interaction_functions']=provenance[-6:]
-(out/'transition_provenance.json').write_text(json.dumps(report,indent=2)+'\n')
+write_text_if_changed(out/'transition_provenance.json', json.dumps(report,indent=2)+'\n')

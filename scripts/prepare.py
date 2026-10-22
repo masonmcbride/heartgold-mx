@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Generate private build inputs without modifying the local upstream checkout."""
+from generated_files import write_text_if_changed
 import csv, hashlib, json, pathlib, re, sys
 root, out = map(pathlib.Path, sys.argv[1:])
 # Match upstream msgenc Json::WriteHeader's ordinal IDs for every message
@@ -16,10 +17,10 @@ for source in sorted((root/'files/msgdata/msg').glob('*.json')):
     for prefix in ('msgdata/msg', 'files/msgdata/msg'):
         dest = out/prefix/(source.stem+'.h')
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(header)
+        write_text_if_changed(dest, header)
     message_inputs[source.relative_to(root).as_posix()] = hashlib.sha256(source.read_bytes()).hexdigest()
-(out/'message_indices_provenance.json').write_text(json.dumps({'sources':message_inputs, 'banks':len(message_inputs)}, indent=2)+'\n')
-(out/'message_bank_count.inc').write_text('#define HG_MESSAGE_BANK_COUNT '+str(1+max(int(pathlib.Path(p).stem.split('_')[1]) for p in message_inputs))+'\n')
+write_text_if_changed(out/'message_indices_provenance.json', json.dumps({'sources':message_inputs, 'banks':len(message_inputs)}, indent=2)+'\n')
+write_text_if_changed(out/'message_bank_count.inc', '#define HG_MESSAGE_BANK_COUNT '+str(1+max(int(pathlib.Path(p).stem.split('_')[1]) for p in message_inputs))+'\n')
 text = (root / 'src/item.c').read_text()
 for name in ('item_data', 'item_icon'):
     dest = out / 'files/itemtool/itemdata' / (name + '.naix')
@@ -31,10 +32,11 @@ for name in ('item_data', 'item_icon'):
         if not match:
             raise ValueError(symbol)
         lines.append(f'#define {symbol} {int(match[1])}\n')
-    dest.write_text(''.join(lines))
+    write_text_if_changed(dest, ''.join(lines))
 p = out / 'files/msgdata/msg.naix'
 p.parent.mkdir(parents=True, exist_ok=True)
-p.write_text(''.join(f'#define msg_{n} {int(n)}\n' for n in sorted(set(re.findall(r'\bmsg_(\d+)', text)))))
+messages=(root/'files/msgdata/NARC_msg.txt').read_text().splitlines()
+write_text_if_changed(p, '/* Private indices from original manifests. */\n'+''.join(f'#define {name.removeprefix("NARC_msg_").removesuffix("_bin")} {i}\n' for i,name in enumerate(messages)))
 rows = list(csv.DictReader((root / 'files/itemtool/itemdata/item_data.csv').open()))
 manifest = (root / 'files/itemtool/itemdata/item_data.txt').read_text().splitlines()
 party = [line.split(':')[0] for line in manifest[manifest.index('slp_heal:u8.1:bool'):] if ':pad' not in line]
@@ -52,4 +54,4 @@ for index, row in enumerate(rows):
     fields += ['.partyUseParam={' + ','.join(f'.{k}={value(k)}' for k in party) + '}']
     lines.append('[' + str(index) + ']={' + ','.join(fields) + '},\n')
 lines.append('};\n')
-(out / 'item_records.inc').write_text(''.join(lines))
+write_text_if_changed(out / 'item_records.inc', ''.join(lines))

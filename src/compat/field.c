@@ -20,5 +20,5 @@ static void unsupported(const char *name) { fprintf(stderr,"Unsupported field bo
 void GF_RTC_CopyDate(RTCDate *date) { (void)date;unsupported("calendar/save-dependent map variants"); }
 void sub_02066C1C(SaveVarsFlags *s,s32 f) { (void)s;(void)f;unsupported("save flags"); }
 void sub_02066C4C(SaveVarsFlags *s,s32 f) { (void)s;(void)f;unsupported("save flags"); }
-SafariZone *Save_SafariZone_Get(SaveData *s) { (void)s;unsupported("Safari Zone save");return NULL; }
-SafariZoneAreaSet *SafariZone_GetAreaSet(SafariZone *s,s32 i) { (void)s;(void)i;unsupported("Safari Zone areas");return NULL; }
+__attribute__((weak)) SafariZone *Save_SafariZone_Get(SaveData *s) { (void)s;unsupported("Safari Zone save");return NULL; }
+__attribute__((weak)) SafariZoneAreaSet *SafariZone_GetAreaSet(SafariZone *s,s32 i) { (void)s;(void)i;unsupported("Safari Zone areas");return NULL; }

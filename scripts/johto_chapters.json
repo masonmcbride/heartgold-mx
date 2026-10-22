@@ -1,0 +1,1263 @@
+{
+  "schema_version": 1,
+  "classification_basis": "Exact original MapHeader.mapsec constants; geographic ownership defaults only. Not executable reachability, required-event completeness or proven progression predicates.",
+  "root": {
+    "id": "root",
+    "shared_map_sections": [
+      "MAPSEC_NEW_BARK_TOWN",
+      "MAPSEC_GOLDENROD_CITY",
+      "MAPSEC_ECRUTEAK_CITY",
+      "MAPSEC_RADIO_TOWER",
+      "MAPSEC_GOLDENROD_TUNNEL",
+      "MAPSEC_RUINS_OF_ALPH",
+      "MAPSEC_DARK_CAVE",
+      "MAPSEC_ROUTE_46",
+      "MAPSEC_MYSTERY_ZONE",
+      "MAPSEC_GLOBAL_TERMINAL"
+    ],
+    "notes": [
+      "Multi-phase map banks have one root integration owner until exact script-entry/event ownership is extracted; child scope descriptions are requests, not overlapping file ownership.",
+      "Ruins of Alph, Dark Cave and Route 46 have multiple access/progression phases; preserve optional events and original gates.",
+      "MAPSEC_MYSTERY_ZONE contains common/unused/network maps: exact map role classification is pending; do not treat all as playable narrative content.",
+      "Common service extraction covers shared systems even when their map has only one chapter owner."
+    ]
+  },
+  "chapters": [
+    {
+      "id": "violet",
+      "title": "Opening / Violet / Falkner",
+      "map_sections": [
+        "MAPSEC_CHERRYGROVE_CITY",
+        "MAPSEC_VIOLET_CITY",
+        "MAPSEC_ROUTE_29",
+        "MAPSEC_ROUTE_30",
+        "MAPSEC_ROUTE_31",
+        "MAPSEC_SPROUT_TOWER"
+      ],
+      "scope_notes": [
+        "Original new game through Zephyr Badge; opening regression retained."
+      ],
+      "integration_dependencies": [],
+      "boundary_contracts": [
+        "Gameplay-produced original save; original flags, badges, inventory, party/boxes and object state retained across restart.",
+        "Original script predicate extraction and connected execution required before this boundary is accepted."
+      ],
+      "test_team": [
+        {
+          "species": "Geodude",
+          "species_id": 74,
+          "level": 13,
+          "moves": [
+            "Defense Curl",
+            "Mud Sport",
+            "Rock Polish",
+            "Rock Throw"
+          ],
+          "move_ids": [
+            111,
+            300,
+            397,
+            88
+          ]
+        },
+        {
+          "species": "Mareep",
+          "species_id": 179,
+          "level": 12,
+          "moves": [
+            "Tackle",
+            "Growl",
+            "Thunder Shock"
+          ],
+          "move_ids": [
+            33,
+            45,
+            84
+          ]
+        },
+        {
+          "species": "Chikorita",
+          "species_id": 152,
+          "level": 11,
+          "moves": [
+            "Tackle",
+            "Growl",
+            "Razor Leaf",
+            "Poison Powder"
+          ],
+          "move_ids": [
+            33,
+            45,
+            75,
+            77
+          ]
+        },
+        {
+          "species": "Hoothoot",
+          "species_id": 163,
+          "level": 11,
+          "moves": [
+            "Growl",
+            "Foresight",
+            "Hypnosis",
+            "Peck"
+          ],
+          "move_ids": [
+            45,
+            193,
+            95,
+            64
+          ]
+        },
+        {
+          "species": "Wooper",
+          "species_id": 194,
+          "level": 11,
+          "moves": [
+            "Water Gun",
+            "Tail Whip",
+            "Mud Sport",
+            "Mud Shot"
+          ],
+          "move_ids": [
+            55,
+            39,
+            300,
+            341
+          ]
+        },
+        {
+          "species": "Gastly",
+          "species_id": 92,
+          "level": 11,
+          "moves": [
+            "Hypnosis",
+            "Lick",
+            "Spite",
+            "Mean Look"
+          ],
+          "move_ids": [
+            95,
+            122,
+            180,
+            212
+          ]
+        }
+      ]
+    },
+    {
+      "id": "azalea",
+      "title": "Azalea / Bugsy",
+      "map_sections": [
+        "MAPSEC_AZALEA_TOWN",
+        "MAPSEC_ROUTE_32",
+        "MAPSEC_ROUTE_33",
+        "MAPSEC_UNION_CAVE",
+        "MAPSEC_SLOWPOKE_WELL",
+        "MAPSEC_ILEX_FOREST"
+      ],
+      "scope_notes": [
+        "Kurt, Slowpoke Well, Hive Badge, rival and original Ilex/Cut progression."
+      ],
+      "integration_dependencies": [
+        "violet"
+      ],
+      "boundary_contracts": [
+        "Gameplay-produced original save; original flags, badges, inventory, party/boxes and object state retained across restart.",
+        "Original script predicate extraction and connected execution required before this boundary is accepted."
+      ],
+      "test_team": [
+        {
+          "species": "Quilava",
+          "species_id": 156,
+          "level": 17,
+          "moves": [
+            "Leer",
+            "Smoke Screen",
+            "Ember",
+            "Quick Attack"
+          ],
+          "move_ids": [
+            43,
+            108,
+            52,
+            98
+          ]
+        },
+        {
+          "species": "Flaaffy",
+          "species_id": 180,
+          "level": 16,
+          "moves": [
+            "Tackle",
+            "Growl",
+            "Thunder Shock",
+            "Thunder Wave"
+          ],
+          "move_ids": [
+            33,
+            45,
+            84,
+            86
+          ]
+        },
+        {
+          "species": "Slowpoke",
+          "species_id": 79,
+          "level": 16,
+          "moves": [
+            "Tackle",
+            "Growl",
+            "Water Gun",
+            "Confusion"
+          ],
+          "move_ids": [
+            33,
+            45,
+            55,
+            93
+          ]
+        },
+        {
+          "species": "Heracross",
+          "species_id": 214,
+          "level": 17,
+          "moves": [
+            "Horn Attack",
+            "Endure",
+            "Fury Attack",
+            "Aerial Ace"
+          ],
+          "move_ids": [
+            30,
+            203,
+            31,
+            332
+          ]
+        },
+        {
+          "species": "Zubat",
+          "species_id": 41,
+          "level": 16,
+          "moves": [
+            "Leech Life",
+            "Supersonic",
+            "Astonish",
+            "Bite"
+          ],
+          "move_ids": [
+            141,
+            48,
+            310,
+            44
+          ]
+        },
+        {
+          "species": "Oddish",
+          "species_id": 43,
+          "level": 15,
+          "moves": [
+            "Sweet Scent",
+            "Acid",
+            "Poison Powder",
+            "Stun Spore"
+          ],
+          "move_ids": [
+            230,
+            51,
+            77,
+            78
+          ]
+        }
+      ]
+    },
+    {
+      "id": "goldenrod",
+      "title": "Goldenrod / Whitney",
+      "map_sections": [
+        "MAPSEC_ROUTE_34",
+        "MAPSEC_ROUTE_35",
+        "MAPSEC_ROUTE_36",
+        "MAPSEC_NATIONAL_PARK",
+        "MAPSEC_POKEATHLON_DOME"
+      ],
+      "scope_notes": [
+        "First Goldenrod visit, Plain Badge, SquirtBottle and Sudowoodo; multi-phase Goldenrod banks remain root-owned pending entry split.",
+        "Optional first-access National Park and Pokeathlon content remains in scope; availability predicates require extraction."
+      ],
+      "integration_dependencies": [
+        "azalea"
+      ],
+      "boundary_contracts": [
+        "Gameplay-produced original save; original flags, badges, inventory, party/boxes and object state retained across restart.",
+        "Original script predicate extraction and connected execution required before this boundary is accepted."
+      ],
+      "test_team": [
+        {
+          "species": "Bayleef",
+          "species_id": 153,
+          "level": 20,
+          "moves": [
+            "Razor Leaf",
+            "Poison Powder",
+            "Synthesis",
+            "Reflect"
+          ],
+          "move_ids": [
+            75,
+            77,
+            235,
+            115
+          ]
+        },
+        {
+          "species": "Geodude",
+          "species_id": 74,
+          "level": 20,
+          "moves": [
+            "Rock Polish",
+            "Rock Throw",
+            "Magnitude",
+            "Selfdestruct"
+          ],
+          "move_ids": [
+            397,
+            88,
+            222,
+            120
+          ]
+        },
+        {
+          "species": "Drowzee",
+          "species_id": 96,
+          "level": 19,
+          "moves": [
+            "Disable",
+            "Confusion",
+            "Headbutt",
+            "Poison Gas"
+          ],
+          "move_ids": [
+            50,
+            93,
+            29,
+            139
+          ]
+        },
+        {
+          "species": "Nidorina",
+          "species_id": 30,
+          "level": 20,
+          "moves": [
+            "Tail Whip",
+            "Double Kick",
+            "Poison Sting",
+            "Fury Swipes"
+          ],
+          "move_ids": [
+            39,
+            24,
+            40,
+            154
+          ]
+        },
+        {
+          "species": "Growlithe",
+          "species_id": 58,
+          "level": 19,
+          "moves": [
+            "Ember",
+            "Leer",
+            "Odor Sleuth",
+            "Helping Hand"
+          ],
+          "move_ids": [
+            52,
+            43,
+            316,
+            270
+          ]
+        },
+        {
+          "species": "Butterfree",
+          "species_id": 12,
+          "level": 20,
+          "moves": [
+            "Stun Spore",
+            "Sleep Powder",
+            "Gust",
+            "Supersonic"
+          ],
+          "move_ids": [
+            78,
+            79,
+            16,
+            48
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ecruteak",
+      "title": "Ecruteak / Morty",
+      "map_sections": [
+        "MAPSEC_ROUTE_37",
+        "MAPSEC_BURNED_TOWER"
+      ],
+      "scope_notes": [
+        "Burned Tower, rival, legendary release, Surf and Fog Badge; Dance Theater shares later Kimono Girls events and remains root-owned."
+      ],
+      "integration_dependencies": [
+        "goldenrod"
+      ],
+      "boundary_contracts": [
+        "Gameplay-produced original save; original flags, badges, inventory, party/boxes and object state retained across restart.",
+        "Original script predicate extraction and connected execution required before this boundary is accepted."
+      ],
+      "test_team": [
+        {
+          "species": "Croconaw",
+          "species_id": 159,
+          "level": 24,
+          "moves": [
+            "Bite",
+            "Scary Face",
+            "Ice Fang",
+            "Flail"
+          ],
+          "move_ids": [
+            44,
+            184,
+            423,
+            175
+          ]
+        },
+        {
+          "species": "Noctowl",
+          "species_id": 164,
+          "level": 24,
+          "moves": [
+            "Peck",
+            "Uproar",
+            "Reflect",
+            "Confusion"
+          ],
+          "move_ids": [
+            64,
+            253,
+            115,
+            93
+          ]
+        },
+        {
+          "species": "Sudowoodo",
+          "species_id": 185,
+          "level": 24,
+          "moves": [
+            "Low Kick",
+            "Rock Throw",
+            "Mimic",
+            "Block"
+          ],
+          "move_ids": [
+            67,
+            88,
+            102,
+            335
+          ]
+        },
+        {
+          "species": "Magnemite",
+          "species_id": 81,
+          "level": 23,
+          "moves": [
+            "Supersonic",
+            "Sonic Boom",
+            "Thunder Wave",
+            "Spark"
+          ],
+          "move_ids": [
+            48,
+            49,
+            86,
+            209
+          ]
+        },
+        {
+          "species": "Eevee",
+          "species_id": 133,
+          "level": 23,
+          "moves": [
+            "Helping Hand",
+            "Sand Attack",
+            "Growl",
+            "Quick Attack"
+          ],
+          "move_ids": [
+            270,
+            28,
+            45,
+            98
+          ]
+        },
+        {
+          "species": "Haunter",
+          "species_id": 93,
+          "level": 25,
+          "moves": [
+            "Night Shade",
+            "Confuse Ray",
+            "Sucker Punch",
+            "Shadow Punch"
+          ],
+          "move_ids": [
+            101,
+            109,
+            389,
+            325
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cianwood",
+      "title": "Cianwood / Chuck",
+      "map_sections": [
+        "MAPSEC_CIANWOOD_CITY",
+        "MAPSEC_ROUTE_40",
+        "MAPSEC_ROUTE_41",
+        "MAPSEC_ROUTE_47",
+        "MAPSEC_ROUTE_48",
+        "MAPSEC_SAFARI_ZONE_GATE",
+        "MAPSEC_CLIFF_CAVE",
+        "MAPSEC_CLIFF_EDGE_GATE",
+        "MAPSEC_SAFARI_ZONE",
+        "MAPSEC_WHIRL_ISLANDS"
+      ],
+      "scope_notes": [
+        "Sea crossing, medicine acquisition, Storm Badge and Fly.",
+        "Medicine acquisition is a separate event contract from Chuck victory; do not force their order.",
+        "Optional western branches and Whirl Islands receive one owner; time/story gates remain original."
+      ],
+      "integration_dependencies": [
+        "ecruteak"
+      ],
+      "boundary_contracts": [
+        "Gameplay-produced original save; original flags, badges, inventory, party/boxes and object state retained across restart.",
+        "Original script predicate extraction and connected execution required before this boundary is accepted."
+      ],
+      "test_team": [
+        {
+          "species": "Quilava",
+          "species_id": 156,
+          "level": 30,
+          "moves": [
+            "Ember",
+            "Quick Attack",
+            "Flame Wheel",
+            "Defense Curl"
+          ],
+          "move_ids": [
+            52,
+            98,
+            172,
+            111
+          ]
+        },
+        {
+          "species": "Ampharos",
+          "species_id": 181,
+          "level": 30,
+          "moves": [
+            "Thunder Wave",
+            "Cotton Spore",
+            "Charge",
+            "Attribute Flags"
+          ],
+          "move_ids": [
+            86,
+            178,
+            268,
+            9
+          ]
+        },
+        {
+          "species": "Quagsire",
+          "species_id": 195,
+          "level": 29,
+          "moves": [
+            "Mud Shot",
+            "Slam",
+            "Mud Bomb",
+            "Amnesia"
+          ],
+          "move_ids": [
+            341,
+            21,
+            426,
+            133
+          ]
+        },
+        {
+          "species": "Fearow",
+          "species_id": 22,
+          "level": 29,
+          "moves": [
+            "Pursuit",
+            "Aerial Ace",
+            "Mirror Move",
+            "Agility"
+          ],
+          "move_ids": [
+            228,
+            332,
+            119,
+            97
+          ]
+        },
+        {
+          "species": "Gloom",
+          "species_id": 44,
+          "level": 28,
+          "moves": [
+            "Poison Powder",
+            "Stun Spore",
+            "Sleep Powder",
+            "Mega Drain"
+          ],
+          "move_ids": [
+            77,
+            78,
+            79,
+            72
+          ]
+        },
+        {
+          "species": "Heracross",
+          "species_id": 214,
+          "level": 30,
+          "moves": [
+            "Fury Attack",
+            "Aerial Ace",
+            "Brick Break",
+            "Counter"
+          ],
+          "move_ids": [
+            31,
+            332,
+            280,
+            68
+          ]
+        }
+      ]
+    },
+    {
+      "id": "olivine",
+      "title": "Olivine / Jasmine",
+      "map_sections": [
+        "MAPSEC_OLIVINE_CITY",
+        "MAPSEC_ROUTE_38",
+        "MAPSEC_ROUTE_39",
+        "MAPSEC_LIGHTHOUSE"
+      ],
+      "scope_notes": [
+        "Lighthouse setup precedes Cianwood medicine delivery; Jasmine completion depends on medicine, not necessarily Storm Badge."
+      ],
+      "integration_dependencies": [
+        "ecruteak"
+      ],
+      "boundary_contracts": [
+        "Gameplay-produced original save; original flags, badges, inventory, party/boxes and object state retained across restart.",
+        "Original script predicate extraction and connected execution required before this boundary is accepted."
+      ],
+      "test_team": [
+        {
+          "species": "Feraligatr",
+          "species_id": 160,
+          "level": 33,
+          "moves": [
+            "Ice Fang",
+            "Flail",
+            "Agility",
+            "Crunch"
+          ],
+          "move_ids": [
+            423,
+            175,
+            97,
+            242
+          ]
+        },
+        {
+          "species": "Magneton",
+          "species_id": 82,
+          "level": 32,
+          "moves": [
+            "Thunder Wave",
+            "Spark",
+            "Lock On",
+            "Magnet Bomb"
+          ],
+          "move_ids": [
+            86,
+            209,
+            199,
+            443
+          ]
+        },
+        {
+          "species": "Graveler",
+          "species_id": 75,
+          "level": 32,
+          "moves": [
+            "Magnitude",
+            "Selfdestruct",
+            "Rollout",
+            "Rock Blast"
+          ],
+          "move_ids": [
+            222,
+            120,
+            205,
+            350
+          ]
+        },
+        {
+          "species": "Machoke",
+          "species_id": 67,
+          "level": 32,
+          "moves": [
+            "Seismic Toss",
+            "Revenge",
+            "Vital Throw",
+            "Submission"
+          ],
+          "move_ids": [
+            69,
+            279,
+            233,
+            66
+          ]
+        },
+        {
+          "species": "Vaporeon",
+          "species_id": 134,
+          "level": 32,
+          "moves": [
+            "Sand Attack",
+            "Water Gun",
+            "Quick Attack",
+            "Bite"
+          ],
+          "move_ids": [
+            28,
+            55,
+            98,
+            44
+          ]
+        },
+        {
+          "species": "Golbat",
+          "species_id": 42,
+          "level": 32,
+          "moves": [
+            "Bite",
+            "Wing Attack",
+            "Confuse Ray",
+            "Air Cutter"
+          ],
+          "move_ids": [
+            44,
+            17,
+            109,
+            314
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mahogany",
+      "title": "Mahogany / Pryce",
+      "map_sections": [
+        "MAPSEC_MAHOGANY_TOWN",
+        "MAPSEC_LAKE_OF_RAGE",
+        "MAPSEC_ROUTE_42",
+        "MAPSEC_ROUTE_43",
+        "MAPSEC_MT_MORTAR",
+        "MAPSEC_TEAM_ROCKET_HQ"
+      ],
+      "scope_notes": [
+        "Red Gyarados, Rocket HQ and Glacier Badge; optional Mt Mortar paths retained with original gates."
+      ],
+      "integration_dependencies": [
+        "ecruteak"
+      ],
+      "boundary_contracts": [
+        "Gameplay-produced original save; original flags, badges, inventory, party/boxes and object state retained across restart.",
+        "Original script predicate extraction and connected execution required before this boundary is accepted."
+      ],
+      "test_team": [
+        {
+          "species": "Meganium",
+          "species_id": 154,
+          "level": 35,
+          "moves": [
+            "Magical Leaf",
+            "Natural Gift",
+            "Petal Dance",
+            "Sweet Scent"
+          ],
+          "move_ids": [
+            345,
+            363,
+            80,
+            230
+          ]
+        },
+        {
+          "species": "Ampharos",
+          "species_id": 181,
+          "level": 34,
+          "moves": [
+            "Cotton Spore",
+            "Charge",
+            "Attribute Flags",
+            "Discharge"
+          ],
+          "move_ids": [
+            178,
+            268,
+            9,
+            435
+          ]
+        },
+        {
+          "species": "Poliwhirl",
+          "species_id": 61,
+          "level": 34,
+          "moves": [
+            "Rain Dance",
+            "Body Slam",
+            "Bubble Beam",
+            "Mud Shot"
+          ],
+          "move_ids": [
+            240,
+            34,
+            61,
+            341
+          ]
+        },
+        {
+          "species": "Sandslash",
+          "species_id": 28,
+          "level": 34,
+          "moves": [
+            "Rollout",
+            "Crush Claw",
+            "Fury Cutter",
+            "Sand Tomb"
+          ],
+          "move_ids": [
+            205,
+            306,
+            210,
+            328
+          ]
+        },
+        {
+          "species": "Girafarig",
+          "species_id": 203,
+          "level": 34,
+          "moves": [
+            "Psybeam",
+            "Baton Pass",
+            "Assurance",
+            "Double Hit"
+          ],
+          "move_ids": [
+            60,
+            226,
+            372,
+            458
+          ]
+        },
+        {
+          "species": "Growlithe",
+          "species_id": 58,
+          "level": 34,
+          "moves": [
+            "Reversal",
+            "Fire Fang",
+            "Take Down",
+            "Flamethrower"
+          ],
+          "move_ids": [
+            179,
+            424,
+            36,
+            53
+          ]
+        }
+      ]
+    },
+    {
+      "id": "blackthorn",
+      "title": "Blackthorn / Clair",
+      "map_sections": [
+        "MAPSEC_BLACKTHORN_CITY",
+        "MAPSEC_ROUTE_44",
+        "MAPSEC_ROUTE_45",
+        "MAPSEC_ICE_PATH",
+        "MAPSEC_DRAGONS_DEN"
+      ],
+      "scope_notes": [
+        "Rocket takeover entries in root-owned Goldenrod maps; Ice Path, Rising Badge and Dragon Den.",
+        "Radio Tower trigger is unresolved original predicate, not an assumed Pryce-only dependency."
+      ],
+      "integration_dependencies": [
+        "mahogany"
+      ],
+      "boundary_contracts": [
+        "Gameplay-produced original save; original flags, badges, inventory, party/boxes and object state retained across restart.",
+        "Original script predicate extraction and connected execution required before this boundary is accepted."
+      ],
+      "test_team": [
+        {
+          "species": "Typhlosion",
+          "species_id": 157,
+          "level": 39,
+          "moves": [
+            "Flame Wheel",
+            "Defense Curl",
+            "Swift",
+            "Lava Plume"
+          ],
+          "move_ids": [
+            172,
+            111,
+            129,
+            436
+          ]
+        },
+        {
+          "species": "Piloswine",
+          "species_id": 221,
+          "level": 38,
+          "moves": [
+            "Icy Wind",
+            "Ice Fang",
+            "Take Down",
+            "Fury Attack"
+          ],
+          "move_ids": [
+            196,
+            423,
+            36,
+            31
+          ]
+        },
+        {
+          "species": "Lanturn",
+          "species_id": 171,
+          "level": 38,
+          "moves": [
+            "Swallow",
+            "Spit Up",
+            "Bubble Beam",
+            "Signal Beam"
+          ],
+          "move_ids": [
+            256,
+            255,
+            61,
+            324
+          ]
+        },
+        {
+          "species": "Dragonair",
+          "species_id": 148,
+          "level": 38,
+          "moves": [
+            "Dragon Rage",
+            "Slam",
+            "Agility",
+            "Aqua Tail"
+          ],
+          "move_ids": [
+            82,
+            21,
+            97,
+            401
+          ]
+        },
+        {
+          "species": "Crobat",
+          "species_id": 169,
+          "level": 38,
+          "moves": [
+            "Wing Attack",
+            "Confuse Ray",
+            "Air Cutter",
+            "Mean Look"
+          ],
+          "move_ids": [
+            17,
+            109,
+            314,
+            212
+          ]
+        },
+        {
+          "species": "Heracross",
+          "species_id": 214,
+          "level": 38,
+          "moves": [
+            "Brick Break",
+            "Counter",
+            "Take Down",
+            "Close Combat"
+          ],
+          "move_ids": [
+            280,
+            68,
+            36,
+            370
+          ]
+        }
+      ]
+    },
+    {
+      "id": "league",
+      "title": "League / ending",
+      "map_sections": [
+        "MAPSEC_BELL_TOWER",
+        "MAPSEC_BELLCHIME_TRAIL",
+        "MAPSEC_ROUTE_26",
+        "MAPSEC_ROUTE_27",
+        "MAPSEC_TOHJO_FALLS",
+        "MAPSEC_VICTORY_ROAD_JK",
+        "MAPSEC_INDIGO_PLATEAU",
+        "MAPSEC_POKEMON_LEAGUE"
+      ],
+      "scope_notes": [
+        "Elm late gift, Kimono Girls, HeartGold Ho-Oh progression, League approach, Elite Four, Lance, Hall of Fame and first credits.",
+        "Original late events in New Bark and Ecruteak remain root-owned until entry ownership is extracted."
+      ],
+      "integration_dependencies": [
+        "violet",
+        "azalea",
+        "goldenrod",
+        "ecruteak",
+        "cianwood",
+        "olivine",
+        "mahogany",
+        "blackthorn"
+      ],
+      "boundary_contracts": [
+        "Gameplay-produced original save; original flags, badges, inventory, party/boxes and object state retained across restart.",
+        "Original script predicate extraction and connected execution required before this boundary is accepted."
+      ],
+      "test_team": [
+        {
+          "species": "Feraligatr",
+          "species_id": 160,
+          "level": 47,
+          "moves": [
+            "Agility",
+            "Crunch",
+            "Slash",
+            "Screech"
+          ],
+          "move_ids": [
+            97,
+            242,
+            163,
+            103
+          ]
+        },
+        {
+          "species": "Ampharos",
+          "species_id": 181,
+          "level": 46,
+          "moves": [
+            "Charge",
+            "Attribute Flags",
+            "Discharge",
+            "Signal Beam"
+          ],
+          "move_ids": [
+            268,
+            9,
+            435,
+            324
+          ]
+        },
+        {
+          "species": "Espeon",
+          "species_id": 196,
+          "level": 46,
+          "moves": [
+            "Quick Attack",
+            "Swift",
+            "Psybeam",
+            "Future Sight"
+          ],
+          "move_ids": [
+            98,
+            129,
+            60,
+            248
+          ]
+        },
+        {
+          "species": "Mamoswine",
+          "species_id": 473,
+          "level": 46,
+          "moves": [
+            "Ice Fang",
+            "Take Down",
+            "Double Hit",
+            "Earthquake"
+          ],
+          "move_ids": [
+            423,
+            36,
+            458,
+            89
+          ]
+        },
+        {
+          "species": "Xatu",
+          "species_id": 178,
+          "level": 46,
+          "moves": [
+            "Tailwind",
+            "Wish",
+            "Psycho Shift",
+            "Future Sight"
+          ],
+          "move_ids": [
+            366,
+            273,
+            375,
+            248
+          ]
+        },
+        {
+          "species": "Heracross",
+          "species_id": 214,
+          "level": 46,
+          "moves": [
+            "Counter",
+            "Take Down",
+            "Close Combat",
+            "Reversal"
+          ],
+          "move_ids": [
+            68,
+            36,
+            370,
+            179
+          ]
+        }
+      ]
+    }
+  ],
+  "excluded_map_sections": {
+    "MAPSEC_ROUTE_1": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_2": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_3": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_4": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_5": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_6": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_7": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_8": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_9": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_10": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_11": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_12": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_13": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_14": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_15": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_16": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_17": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_18": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_22": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_24": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_25": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_28": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_PALLET_TOWN": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_VIRIDIAN_CITY": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_PEWTER_CITY": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_CERULEAN_CITY": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_LAVENDER_TOWN": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_VERMILION_CITY": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_CELADON_CITY": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_FUCHSIA_CITY": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_CINNABAR_ISLAND": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_SAFFRON_CITY": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_MT_SILVER": "Postgame or special-event content outside first-credits acceptance; persistence records remain required. Original gate/references still require audit.",
+    "MAPSEC_ROUTE_19": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_20": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROUTE_21": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_DIGLETTS_CAVE": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_MT_MOON": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_ROCK_TUNNEL": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_PAL_PARK": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_MT_SILVER_CAVE": "Postgame or special-event content outside first-credits acceptance; persistence records remain required. Original gate/references still require audit.",
+    "MAPSEC_CERULEAN_CAVE": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_SEAFOAM_ISLANDS": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_VIRIDIAN_FOREST": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_POWER_PLANT": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_BATTLE_PARK": "Postgame or special-event content outside first-credits acceptance; persistence records remain required. Original gate/references still require audit.",
+    "MAPSEC_BATTLE_TOWER": "Postgame or special-event content outside first-credits acceptance; persistence records remain required. Original gate/references still require audit.",
+    "MAPSEC_BATTLE_FRONTIER": "Postgame or special-event content outside first-credits acceptance; persistence records remain required. Original gate/references still require audit.",
+    "MAPSEC_BATTLE_FACTORY": "Postgame or special-event content outside first-credits acceptance; persistence records remain required. Original gate/references still require audit.",
+    "MAPSEC_BATTLE_HALL": "Postgame or special-event content outside first-credits acceptance; persistence records remain required. Original gate/references still require audit.",
+    "MAPSEC_BATTLE_CASTLE": "Postgame or special-event content outside first-credits acceptance; persistence records remain required. Original gate/references still require audit.",
+    "MAPSEC_BATTLE_ARCADE": "Postgame or special-event content outside first-credits acceptance; persistence records remain required. Original gate/references still require audit.",
+    "MAPSEC_SS_AQUA": "Postgame or special-event content outside first-credits acceptance; persistence records remain required. Original gate/references still require audit.",
+    "MAPSEC_ROTOMS_ROOM": "Outside pre-first-credits target; original Kanto section. Any pre-credits script reference must be surfaced as a dependency, not discarded.",
+    "MAPSEC_FRONTIER_ACCESS": "Postgame or special-event content outside first-credits acceptance; persistence records remain required. Original gate/references still require audit.",
+    "MAPSEC_SINJOH_RUINS": "Postgame or special-event content outside first-credits acceptance; persistence records remain required. Original gate/references still require audit.",
+    "MAPSEC_EMBEDDED_TOWER": "Postgame or special-event content outside first-credits acceptance; persistence records remain required. Original gate/references still require audit."
+  },
+  "unresolved_map_sections": {
+    "MAPSEC_JUBILIFE_CITY": "Original headers label maps unused; exact exclusion requires reference/reachability audit.",
+    "MAPSEC_FIGHT_AREA": "Original headers label maps unused; exact exclusion requires reference/reachability audit."
+  },
+  "map_overrides": {
+    "MAP_GOLDENROD_GYM": {
+      "owner": "goldenrod",
+      "reason": "Whitney gym is chapter-specific; city-wide and Radio Tower banks retain their shared root owner."
+    },
+    "MAP_ECRUTEAK_GYM": {
+      "owner": "ecruteak",
+      "reason": "Morty gym is chapter-specific; shared city and Dance Theater phases retain their root owner."
+    }
+  },
+  "event_dependency_contracts": [
+    {
+      "producer": "olivine",
+      "output": "lighthouse_setup",
+      "consumer": "cianwood",
+      "input": "medicine_request",
+      "status": "planned; extract original conditions"
+    },
+    {
+      "producer": "cianwood",
+      "output": "medicine_acquired",
+      "consumer": "olivine",
+      "input": "medicine_delivery",
+      "status": "planned; independent of Chuck victory"
+    },
+    {
+      "producer": "root",
+      "output": "original_radio_tower_takeover_predicate",
+      "consumer": "blackthorn",
+      "input": "rocket_takeover_available",
+      "status": "unresolved; must extract original flags/badge logic"
+    }
+  ]
+}

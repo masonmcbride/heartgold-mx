@@ -142,3 +142,24 @@ void hg_transition_sync_player(HGTransition *t) {
     t->location->y=(int)PlayerAvatar_GetZCoord(t->field.playerAvatar);
     t->location->direction=(int)PlayerAvatar_GetFacingDirection(t->field.playerAvatar);
 }
+
+void hg_transition_export_local(const HGTransition *t,void *record) {
+    GF_ASSERT(t&&record);memcpy(record,t->local,Save_LocalFieldData_sizeof());
+}
+void hg_transition_restore_local(HGTransition *t,const void *record) {
+    GF_ASSERT(t&&record);memcpy(t->local,record,Save_LocalFieldData_sizeof());
+}
+
+int hg_transition_relocate_record(void *record,const HGFieldLocation *destination) {
+    if(!record||!destination||destination->warp<-1||destination->map<0||destination->x<0||destination->z<0||destination->direction<0||destination->direction>3||!hg_transition_supported((unsigned)destination->map))return 0;
+    HGEventView events;if(!hg_event_load((unsigned)destination->map,&events)||(destination->warp>=0&&(unsigned)destination->warp>=events.warp_count))return 0;
+    HGTransition t={0};t.local=malloc(Save_LocalFieldData_sizeof());if(!t.local)return 0;
+    memcpy(t.local,record,Save_LocalFieldData_sizeof());t.location=LocalFieldData_GetCurrentPosition(t.local);
+    t.field.location=t.location;t.field.saveData=(SaveData *)(void *)&t;
+    Field_AllocateMapEvents(&t.field,HEAP_ID_DEFAULT);
+    Location next={destination->map,destination->warp,destination->x,destination->z,destination->direction};
+    sub_02052F94(&t.field,&next);
+    int ok=!t.failed;
+    if(ok)memcpy(record,t.local,Save_LocalFieldData_sizeof());
+    Field_FreeMapEvents(&t.field);free(t.local);return ok;
+}

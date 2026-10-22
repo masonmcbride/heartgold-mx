@@ -60,3 +60,21 @@ int hg_story_apricorn_tree(const HGStoryState *,unsigned index,unsigned *kind,in
 
 int hg_field_script_phone_active(const HGFieldScript *);
 const char *hg_field_script_phone_contact(const HGFieldScript *);
+
+/* Battle application joins the private script candidate before replay resumes. */
+int hg_field_script_battle_request(HGFieldScript *,unsigned *,struct FieldSystem *);
+int hg_field_script_battle_complete(HGFieldScript *,unsigned result);
+
+size_t hg_story_snapshot_size(void);
+int hg_story_snapshot_export(const HGStoryState *,void *,size_t);
+HGStoryState *hg_story_snapshot_import(const void *,size_t);
+int hg_story_checkpoint_stage(const HGStoryState *,unsigned stage);
+
+int hg_field_script_name_pending(HGFieldScript *);
+const char *hg_field_script_name_text(HGFieldScript *);
+int hg_field_script_name_edit(HGFieldScript *,const char *);
+int hg_field_script_name_submit(HGFieldScript *,const char *,int cancel);
+
+unsigned hg_field_script_menu_count(const HGFieldScript *);
+const char *hg_field_script_menu_label(const HGFieldScript *,unsigned);
+struct HGShop *hg_field_script_shop(HGFieldScript *);

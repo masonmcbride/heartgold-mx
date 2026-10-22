@@ -1,6 +1,7 @@
 #include "compat/motion.h"
 #include "compat/pokemon.h"
 #include "compat/starter.h"
+#include "compat/pokemon_services.h"
 #include "motion_guest.h"
 #include "map_header.h"
 #include "choose_starter_app.h"
@@ -34,9 +35,6 @@ static void launch_native_choice(FieldSystem *field,const OverlayManagerTemplate
 static void scene_available(FieldSystem *field) { owner(field)->overlay_ready=1; }
 static BOOL overlay_ready(FieldSystem *field) { return owner(field)->overlay_ready; }
 static void child_scene_started(void) { GF_ASSERT(running&&running->pending); }
-static BOOL compatible(void *opaque,unsigned location) { (void)opaque;int result;GF_ASSERT(hg_motion_location_compatible(location,&result));return result; }
-static int map_location(void *opaque,unsigned type,unsigned index) { (void)opaque;unsigned result;GF_ASSERT(hg_motion_map_location(type,index,&result));return (int)result; }
-static void copy_date(void *opaque,HGMonDate *out) { *out=((HGStarter *)opaque)->date; }
 typedef struct POKEWALKER POKEWALKER;
 static POKEWALKER *unsupported_walker(SaveData *save) { (void)save;abort(); }
 static void unsupported_course(POKEWALKER *walker,int course) { (void)walker;(void)course;abort(); }
@@ -84,7 +82,7 @@ int hg_starter_choose(HGStarter *s,unsigned index) {
 }
 int hg_starter_tick(HGStarter *s) {
     if(!s)return 0;if(s->done)return 1;GF_ASSERT(!running);running=s;
-    HGPokemonServices previous=hg_pokemon_services_exchange((HGPokemonServices){s,compatible,map_location,copy_date});
+    HGPokemonServices previous=hg_pokemon_services_exchange(hg_mon_services(&s->date));
     GF_ASSERT(hg_motion_fade_tick(s->field->native_fade));
     if(s->preview&&s->pending)hg_starter_choose(s,0);
     hg_field_tasks_tick(s->field);

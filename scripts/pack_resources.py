@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Private NARC containers: unchanged icon bytes; UTF-8 adapters from message JSON."""
+from generated_files import write_bytes_if_changed, write_text_if_changed
 import json, pathlib, struct, sys
 root,out=map(pathlib.Path,sys.argv[1:]);out.mkdir(parents=True,exist_ok=True)
 from narc_tools import pack
@@ -21,9 +22,9 @@ for source in sorted((root/'files/msgdata/msg').glob('msg_*.json')):
     pack(out/f'msg_{group:04}.narc',members)
 
 # Retain original archive bytes for bag graphics and fonts.
-(out/'font.narc').write_bytes((root/'files/graphic/font.narc').read_bytes())
-(out/'bag.narc').write_bytes((root/'files/a/0/1/5').read_bytes())
+write_bytes_if_changed(out/'font.narc', (root/'files/graphic/font.narc').read_bytes())
+write_bytes_if_changed(out/'bag.narc', (root/'files/a/0/1/5').read_bytes())
 # Local UTF-8 -> original glyph-code adapter, not a replacement font.
 import re
 mapping={ord(v):int(k,16) for k,v in re.findall(r'^([0-9A-F]{4})=(.)$',(root/'tools/msgenc/charmap.txt').read_text(),re.M) if 0<int(k,16)<=509}
-(out.parent/'charmap.inc').write_text('static const struct { uint32_t unicode; uint16_t glyph; } glyph_map[] = {\n'+''.join(f'{{{u},{g}}},\n' for u,g in sorted(mapping.items()))+'};\n')
+write_text_if_changed(out.parent/'charmap.inc', 'static const struct { uint32_t unicode; uint16_t glyph; } glyph_map[] = {\n'+''.join(f'{{{u},{g}}},\n' for u,g in sorted(mapping.items()))+'};\n')

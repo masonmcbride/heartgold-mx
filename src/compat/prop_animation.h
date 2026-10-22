@@ -14,3 +14,15 @@ void ov01_021E9BB8(FieldSystem *,u8 tag);
 void ov01_021E9BDC(FieldSystem *,u8 tag);
 void ov01_021E9C00(FieldSystem *,u8 tag);
 void ov01_021E9C20(FieldSystem *,u8 tag);
+
+/* Task-facing operations share the same original animation owner as scripts. */
+int hg_prop_animation_load(HGPropAnimations *,unsigned tag,unsigned model,const double world[3]);
+int hg_prop_animation_play(HGPropAnimations *,unsigned tag,unsigned index);
+int hg_prop_animation_finished(HGPropAnimations *,unsigned tag);
+int hg_prop_animation_unload(HGPropAnimations *,unsigned tag);
+
+/* Original door rectangle/list metadata; 1 opened, 0 no door, -1 unsupported. */
+int hg_prop_animation_open_door(HGPropAnimations *,HGFieldResources *,int x,int z,unsigned tag,unsigned *sound);
+
+int hg_prop_animation_door_begin(HGPropAnimations *,HGFieldResources *,int x,int z,unsigned tag,int exiting,unsigned *sound);
+int hg_prop_animation_close_door(HGPropAnimations *,unsigned tag,unsigned *sound);

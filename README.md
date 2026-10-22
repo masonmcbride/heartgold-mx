@@ -1,6 +1,6 @@
 # HeartGold MX
 
-An experimental Apple Silicon build that compiles and executes original Pokémon HeartGold gameplay C with a small compatibility runtime. MX means M-series chips, with X as the variable. The current applications are an interactive inventory and a native searchable map browser; 453 of 540 map entries currently render. Original gameplay C runs natively; original ARM static terrain routines now execute through a bounded Thumb interpreter. New Bark and its seven interiors now support walking, running and door/stair travel through admitted original input, collision, command and warp logic, with native scene presentation. A persistent native story owner now runs original initialization and admitted conditional script handlers. Elm’s lab now runs its original resume script and coordinate-triggered introduction, including the professor’s movement and reaction. The complete first-starter route now runs for all three starters: choice, original post-choice dialogue, five-Potion gift and leaving/re-entering with the chosen Pokemon following. The native nickname prompt currently supports keeping the original name. Full original field-controller execution is still incomplete.
+An experimental Apple Silicon build that compiles and executes original Pokémon HeartGold gameplay C with a small compatibility runtime. MX means M-series chips, with X as the variable. The current applications are an interactive inventory and a native searchable map browser; 453 of 540 map entries currently render. Original gameplay C runs natively; original ARM static terrain routines now execute through a bounded Thumb interpreter. New Bark and its seven interiors now support walking, running, ledge hopping and door/stair travel through admitted original input, collision, command and warp logic, with native scene presentation and the original fade/sound travel animation. A persistent native story owner now runs original initialization and admitted conditional script handlers. Elm’s lab now runs its original resume script and coordinate-triggered introduction, including the professor’s movement and reaction. The complete first-starter route now runs for all three starters: choice, original post-choice dialogue, five-Potion gift and leaving/re-entering with the chosen Pokemon following. The native nickname prompt currently supports keeping the original name. Full original field-controller execution is still incomplete.
 
 The default field viewer now starts at the original bedroom position, without
 running shoes. The connected original-script route covers Mom's introduction,
@@ -10,19 +10,42 @@ and phone registration. Route 29 travel, Cherrygrove's tour, Running Shoes and
 Map Card, and Route 30's Apricorn Box gift now execute. Mr. Pokemon's introduction
 now completes with the Mystery Egg, healing, Pokedex and Oak's phone number.
 Elm's original incoming call now completes through a native phone view and
-returns to the field. The return trip reaches the rival's unported trainer-battle
-command. Walking in grass now starts visible wild battles, with Fight/Run,
-original damage and EXP, level-up and return to the same field session. See [Mr. Pokemon's checkpoint](docs/mr-pokemon.md).
+returns to the field. The return trip now triggers the visible first-rival battle
+and completes its original post-battle dialogue, shove and departure for all
+three starters. The original allowed-loss path heals and resumes too.
+Returning to Elm now completes the police scene, native rival-name entry and
+Mystery Egg handoff for all three starters, including cancellation/retry and
+lab re-entry. See [iteration measurements](docs/iteration-deltas.md).
+Walking in grass now starts visible wild battles with Fight, Run and Poké Ball
+when available, original damage and EXP, level-up and field return. See [Mr. Pokemon's checkpoint](docs/mr-pokemon.md).
 The starter now uses the [shared original application lifecycle](docs/application-lifecycle.md)
 and the same original brightness controller as field scripts. Elm's scripted call now uses that lifecycle too; general Pokegear browsing,
-trainer battles and saving still need integration. See [Elm's phone call](docs/elm-phone.md).
+general trainer encounters and broader Continue/time handling still need integration. See [Elm's phone call](docs/elm-phone.md).
+
+Use **Jump to checkpoint…** at the top right to start at **Route 29**, **Before
+rival**, **After rival**, **Before tutorial** or **After tutorial**, with any
+starter. These fifteen prepared states come
+from executing the original opening route; they include the required party,
+items, flags and calls. **Back** restores the session you left. Checkpoints are
+versioned native development snapshots, not original DS saves. See
+[checkpoint validation and regeneration](docs/checkpoints.md).
 
 Field menus now inspect your live session: click **Bag (B)** or **Pokémon (P)**,
 or press B/P. The panel opens on the right and pauses walking. Use A/D for Bag
 pockets, W/S for items or Pokémon, and Esc to close. Menu directions move once
 per press; release before moving again. Item quantities/descriptions
 and Pokémon HP, status, EXP, stats and move PP reflect story gifts and battles.
-These are viewing panels; using items and rearranging the party are not yet wired.
+Press Enter on a Bag medicine, choose a Pokémon, and choose a move when needed.
+HP/status/PP medicines, revives, vitamins and applicable berries use the original
+item-effect functions and consume an item only when it takes effect. Rare Candy,
+evolution, Sacred Ash and party rearrangement remain unavailable.
+
+Cherrygrove’s Poké Mart clerk now offers Buy/Sell/Quit through the original
+script. The native shop panel uses W/S to select, Enter to confirm, A/D to
+adjust quantities by ten, and Esc to return. Original stock progression,
+prices, purchases, sales and the ten-Poké-Ball Premier Ball bonus are connected
+to the same saved Bag and money as battles and gifts. Poké Balls appear after
+the original catching-tutorial unlock. See [item transactions](docs/item-transactions.md).
 
 Mom’s first gifts now show acknowledgment boxes for the Bag, Trainer Card,
 Save and Options unlocks, alongside their original fanfares.
@@ -31,8 +54,33 @@ The [battle runtime](docs/battle-runtime.md) now connects live land encounters
 to a visible battle on the left and controls on the right. Choose with W/S and
 confirm with Enter/Space. Original Pokémon artwork, HP, moves and PP are shown;
 finished battles publish party/EXP changes back to the suspended field session.
-Original trainer AI, blackout recovery, capture and Bag/party battle menus remain
-unported. The rival is not yet playable.
+The native battle command menu also offers **Bag** and **Pokémon**. Bag lists
+supported HP/status/PP medicines; choose the party target and, for Ether/Max
+Ether, a move. Esc backs out without spending an item or turn. Pokémon supports
+voluntary switching and required replacement after fainting. Original item effects
+update the active battler and party together; the original controller runs the
+enemy response. Trainer medicine use, X items, other balls and move-learning/
+evolution applications remain incomplete.
+Normal/shiny sprite palettes now follow the original palette sources, and the
+two-screen battle view scales to the available width.
+The original trainer AI executes through the existing Thumb interpreter. All
+three first-rival matchups now pass through the live field/cutscene interface,
+including original messages, EXP, result publication and scripted departure.
+The original catching tutorial now executes its automated Marill/Rattata battle,
+capture and five-Ball gift for all starters. Capture presentation uses native
+animation adapters; ordinary Poke Ball capture now publishes into the party or PC and survives
+Save/Continue. Keeping the original name is supported; nickname entry, other
+ball/item selection and Bag/party battle menus remain unported. Wild defeat can
+now return home or to the registered Pokémon Center through the original
+recovery scripts, with the healed result retained by Save/Continue. Center
+recovery includes the original healing-machine task and texture animation.
+Supported entrance doors now open using original prop animation and sound
+before the travel fade, including Cherrygrove Pokémon Center. Exiting supported
+buildings now opens the destination door, steps the player outside and closes it
+before returning control. Normal Nurse Joy interaction now runs the original
+greeting, confirmation, follower handoff and healing script; declining, fainted
+lead recovery, Pokérus and Save/Continue after healing have connected checks.
+Full character action frames/effects and contest defeat recovery remain unfinished.
 
 The field viewer now plays original map music, script effects, item fanfares and
 Elm’s phone sounds through native audio output. See [audio implementation and checks](docs/audio.md)
@@ -44,9 +92,24 @@ suppresses story events and NPCs, uses existing walking/travel, and restores you
 suspended story session when unchecked. Unsupported scenes remain view-only or
 report their resource limitation. See [free exploration](docs/free-exploration.md).
 
-The active target is the original opening through the first rival battle and
-catching tutorial; that target is not complete. See [the opening route](docs/opening-route.md)
-for the shared lifecycle, executed evidence and remaining dependencies.
+The active target is now a continuous new game through Johto's eight badges,
+Lance, Hall of Fame and first credits, before postgame Kanto exploration.
+Complete saving remains the first priority. The native viewer now offers
+**Save** and **Continue…** using the original save manager and its complete
+42-record owner plus six extra-record APIs. Original elapsed play time now advances
+and survives Save/Continue. Original daily/minute updates now run on Continue
+and in the idle field. Original automatic trigger-call selection/ringing and
+Baoba call presentation now execute. The original Bug Contest owner, timer,
+script commands and Sport Ball battle capture also execute in connected
+component scenarios; the full National Park route and generic calls remain
+incomplete. Save unlocks after Mom's introduction;
+wait for field objects to stop and close menus/dialogue first. Save and Continue
+are separate from the development checkpoint picker. See
+[save evidence and remaining acceptance](docs/save-acceptance.md). See the
+[save inventory](docs/save-inventory.md) and
+[Johto implementation boundaries](docs/johto-playthrough.md).
+The [opening route](docs/opening-route.md) records the narrower executed checkpoint
+and its remaining presentation and runtime limits.
 
 
 See [the full-game workstreams](docs/full-game-workstreams.md) for the generated whole-source/function inventory, shared solution contracts and current batch fixes.
@@ -116,7 +179,7 @@ Implemented services:
 - input bits for the original list menu, plus a window/cursor adapter that records invalidation, scrolling requests, and cursor positions;
 - four native-owned original task queues, with original queue APIs and a bounded monotonic 60 Hz host driver. The original `System` declaration is retained with native pointers, and key updates preserve its queue fields.
 
-The menu's DS drawing calls notify the native view boundary; they do not rasterize original DS window tiles or fonts. Its menu entries deliberately have null DS String pointers, since the native table obtains text through the item APIs. The native String/MsgData adapters are not DS binary layouts. The original font code receives the original font archive bytes and validated glyph codes, independently of these string adapters. Only the glyph lookup-table and expansion functions from `text.c` are enabled. Task queues now run original scheduler code, but full text-printer rendering, `FontID_RenderText`, and focus-indicator graphics remain explicitly unsupported. Save-array and full bag-view APIs still abort explicitly. Compiling their callers does not mean those features work.
+The menu's DS drawing calls notify the native view boundary; they do not rasterize original DS window tiles or fonts. Its menu entries deliberately have null DS String pointers, since the native table obtains text through the item APIs. The native String/MsgData adapters are not DS binary layouts. The original font code receives the original font archive bytes and validated glyph codes, independently of these string adapters. Only the glyph lookup-table and expansion functions from `text.c` are enabled. Task queues now run original scheduler code, but full text-printer rendering, `FontID_RenderText`, and focus-indicator graphics remain explicitly unsupported. The original save manager now supplies save-array access for the field story owner; full bag-view APIs still abort explicitly. Compiling their callers does not mean those features work.
 
 `ListMenuGetTemplateField` contains original pointer-to-s32 casts. Clang reports these during compilation. The native adapter does not call pointer-valued cases; it uses original typed structures/accessors. Those casts must be addressed at a boundary before introducing any such callers.
 
@@ -162,7 +225,8 @@ Twenty-seven CTest checks cover:
 - original map-header/matrix loading across all 540 map IDs (280 referenced matrices), validation of all 288 original matrix resources, cell metadata, matrix mutation functions, metatile predicates and invalid field CLI input;
 - textured rendering semantics: signed delta/full vertex equivalence, named material/texture/palette binding, addressing, depth order, cutout, alpha blending, shared-edge coverage, camera changes/reset and malformed texture resources;
 - original walk/run command selection, running-shoe/B gating, stateful diagonal input, step statistics, encrypted statistics records and RNG/encryption vectors;
-- all 14 New Bark portal anchors, staged local-field commits, interior movement, town/house and upstairs/downstairs travel with retained player statistics;
+- all 14 New Bark portal anchors, staged local-field commits, interior movement, town/house and upstairs/downstairs travel with retained player statistics, and the original fade-out/scene-swap/fade-in presentation with the door/stair sound and busy-during-fade input gating;
+- the original directional ledge hop selected from the player-input collision mask (command 56+direction over the original sixteen-tick, two-tile arc);
 - original event-object initialization, fourteen visible event actors, source metadata, real occupancy and staged population replacement;
 - original new-game flag script, conditional conversations, persistent variables/flags, original forward/backward control flow/frame and movement waits, player-name formatting, empty party query, isolated temporary state/RNG and publication/scene rollback;
 - original task priority/FIFO order, queue capacity/reuse, insertion/removal during dispatch, environment lifetime, four-queue routing, input-state preservation and bounded 60 Hz host timing;
@@ -227,4 +291,4 @@ The native viewer also has a **Characters · sprite meshes** category: 192 suppo
 Original `task.c` now executes child/parent field tasks and application waits in the running scene app, on a native timer independent of camera redraws. See [field task runtime](docs/field-task-runtime.md) for execution evidence and the remaining avatar/field-loop boundary.
 
 
-Run `./build/heartgold_field_viewer` to start at the original bedroom position. Click the scene and hold **WASD** to walk; **Shift + WASD** runs once running shoes are available. Selecting a map creates a separate inspection session; ordinary travel retains the same game state. Original collision checks gate each step; release stops movement. The camera follows the player; arrows/drag orbit, scroll or +/− zoom, shift-drag pans, and R recenters. Door and stair travel connects New Bark with its seven interiors, retaining the player and step count. Other maps remain inspection views. Original walking commands now advance the player’s position and static terrain height each tick through their original command tables. Original hero textures animate direction and stepping in a native billboard; pose selection remains native. See [original walking execution](docs/original-walking.md) and [walk/run control and statistics](docs/original-locomotion.md). Face the town or lab sign and press Enter/Space to read its original text. Professor Elm, the red-haired rival at the window, the breeder, Mom, the town woman, the boy in Elm’s upstairs apartment and the southwest-house woman now use the [persistent script owner](docs/story-runtime.md). The rival’s two messages and original shove/jump movement complete before input resumes; the breeder and player-house sign format the inspection name Ethan. Admitted conditions execute original handlers and state survives travel. Unsupported interactions display a dismissible explanation; the original introduction, starter acquisition and Pokegear route now run as described in [the opening route](docs/opening-route.md). Enter/Space advances pages and closes the final page. See [original transition execution](docs/original-transitions.md) for the eight-map network and source/host boundaries. Twelve actors selected by original flags now render and block movement through original occupancy; see [event actor integration](docs/event-actors.md). Original animation-controller execution, NPC AI, general story interactions, outdoor header crossings and full game startup remain pending. See [background interaction](docs/field-interaction.md) for original event/script execution and native UI boundaries. See [player movement](docs/player-movement.md) for execution boundaries and tests.
+Run `./build/heartgold_field_viewer` to start at the original bedroom position. Click the scene and hold **WASD** to walk; **Shift + WASD** runs once running shoes are available. Selecting a map creates a separate inspection session; ordinary travel retains the same game state. Original collision checks gate each step; release stops movement. The camera follows the player; arrows/drag orbit, scroll or +/− zoom, shift-drag pans, and R recenters. Door and stair travel connects New Bark with its seven interiors, retaining the player and step count, and now plays the original fade-to-black/scene-swap/fade-in with the door/stair sound. Ledges hop down with the original sixteen-tick, two-tile arc. Other maps remain inspection views. Original walking commands now advance the player’s position and static terrain height each tick through their original command tables. Original hero textures animate direction and stepping in a native billboard; pose selection remains native. See [original walking execution](docs/original-walking.md) and [walk/run control and statistics](docs/original-locomotion.md). Face the town or lab sign and press Enter/Space to read its original text. Professor Elm, the red-haired rival at the window, the breeder, Mom, the town woman, the boy in Elm’s upstairs apartment and the southwest-house woman now use the [persistent script owner](docs/story-runtime.md). The rival’s two messages and original shove/jump movement complete before input resumes; the breeder and player-house sign format the inspection name Ethan. Admitted conditions execute original handlers and state survives travel. Unsupported interactions display a dismissible explanation; the original introduction, starter acquisition and Pokegear route now run as described in [the opening route](docs/opening-route.md). Enter/Space advances pages and closes the final page. See [original transition execution](docs/original-transitions.md) for the eight-map network and source/host boundaries. Twelve actors selected by original flags now render and block movement through original occupancy; see [event actor integration](docs/event-actors.md). Original animation-controller execution, NPC AI, general story interactions, outdoor header crossings and full game startup remain pending. See [background interaction](docs/field-interaction.md) for original event/script execution and native UI boundaries. See [player movement](docs/player-movement.md) for execution boundaries and tests.

@@ -159,7 +159,7 @@ int main(void) {
     CHECK(hg_field_script_ack(s)&&finish(s)==HG_SCRIPT_DONE);hg_field_script_free(s);
     const uint8_t party_count[]={H(332),H(VAR_TEMP_x4000),H(2)};
     s=hg_field_script_bytes(b,party_count,sizeof(party_count),0,542,error,sizeof(error));CHECK(s&&finish(s)==HG_SCRIPT_DONE&&!var(b,VAR_TEMP_x4000));hg_field_script_free(s);
-    const uint8_t unbound_name[]={H(45),12,H(2)},bad_slot[]={H(190),8,H(2)};
+    const uint8_t unbound_name[]={H(45),12,H(2)},bad_slot[]={H(190),16,H(2)};
     CHECK(!hg_field_script_bytes(b,unbound_name,sizeof(unbound_name),0,542,error,sizeof(error)));
     CHECK(!hg_field_script_bytes(b,bad_slot,sizeof(bad_slot),0,542,error,sizeof(error)));
     /* Original standard-bank routing is independent of the current map's

@@ -82,6 +82,7 @@ u16 GetWindowHeight(Window *);
 String *native_string_new(void);
 void native_string_free(String *);
 const char *native_string_utf8(const String *);
+int native_message_bank(const MsgData *);
 
 #define POKEHEARTGOLD_GF_GFX_LOADER_H
 #include "constants/charcode.h"

@@ -3,17 +3,18 @@
 #include "field_data.h"
 #include "map_header.h"
 #include "ds_model.h"
+#include "motion_guest.h"
 #include "constants/maps.h"
 u16 FieldSystem_VarGet(FieldSystem *,u16);
 /* Typed native arena and graphics objects: original playback uses native
  * pointers; these are never exposed to guest ARM or serialized as save data. */
 typedef struct { unsigned unused; } NNSFndAllocator;
-typedef struct { fx32 frame;DSJointAnimation joint; } NNSG3dAnmObj;
+typedef struct { fx32 frame;DSJointAnimation joint;DSTextureAnimation texture; } NNSG3dAnmObj;
 typedef struct NNSG3dResTex NNSG3dResTex;
 #include "prop_animation_types.inc"
 #define ANIM_ARCHIVE_ID_NONE -1
 static void GF_AssertFail(void) { abort(); }
-static fx32 NNS_G3dAnmObjGetNumFrame(const NNSG3dAnmObj *a) { return (fx32)a->joint.frames*FX32_ONE; }
+static fx32 NNS_G3dAnmObjGetNumFrame(const NNSG3dAnmObj *a) { return (fx32)(a->joint.frames?a->joint.frames:a->texture.frames)*FX32_ONE; }
 static void NNS_G3dRenderObjAddAnmObj(NNSG3dRenderObj *r,NNSG3dAnmObj *a) { GF_ASSERT(r&&!r->anmJnt);r->anmJnt=a; }
 static void NNS_G3dRenderObjRemoveAnmObj(NNSG3dRenderObj *r,NNSG3dAnmObj *a) { GF_ASSERT(r&&r->anmJnt==a);r->anmJnt=NULL; }
 void NARC_ReadWholeMember(NARC *,u32,void *);
@@ -28,7 +29,7 @@ static void ov01_0220431C(FieldSystemUnkSubCC_Sub0 *pool,MapPropAnimation *a) {
 static void ov01_02204500(FieldSystemUnkSubCC_Sub0 *pool,MapPropAnimation *a) { (void)pool;free(a->animObj); }
 static void ov01_02204470(FieldSystemUnkSubCC_Sub0 *pool,MapPropAnimation *a,void *res,NNSG3dResMdl *model,NNSG3dResTex *texture) {
     (void)pool;(void)model;(void)texture;const u8 *p=res;size_t n=(u32)p[8]|(u32)p[9]<<8|(u32)p[10]<<16|(u32)p[11]<<24;
-    a->animObj=calloc(1,sizeof(*a->animObj));GF_ASSERT(a->animObj&&ds_joint_animation_open(p,n,&a->animObj->joint));a->res=res;
+    a->animObj=calloc(1,sizeof(*a->animObj));GF_ASSERT(a->animObj&&(ds_joint_animation_open(p,n,&a->animObj->joint)||ds_texture_animation_open(p,n,&a->animObj->texture)));a->res=res;
 }
 #include "prop_animation_kernel.inc"
 typedef struct { u8 tag;unsigned model,selected;double world[3];NNSG3dRenderObj render; } PropTrack;
@@ -131,8 +132,86 @@ unsigned hg_prop_animations_poses(const HGPropAnimations *s,HGPropPose out[16]) 
     for(unsigned i=0;i<16;i++)if(s->tracks[i].tag) {
         const MapPropOneShotAnimation *shot=MapPropOneShotAnimationManager_GetAnimation((MapPropOneShotAnimationManager *)&s->shots,s->tracks[i].tag);
         if(!shot->currentAnimation)continue;NNSG3dAnmObj *obj=shot->currentAnimation->animation->animObj;
-        out[count].model=s->tracks[i].model;memcpy(out[count].world,s->tracks[i].world,sizeof(out[count].world));
-        GF_ASSERT(ds_joint_animation_pose(&obj->joint,(unsigned)obj->frame/FX32_ONE,&out[count].pose));count++;
+        memset(out+count,0,sizeof(*out));out[count].model=s->tracks[i].model;memcpy(out[count].world,s->tracks[i].world,sizeof(out[count].world));
+        unsigned frame=(unsigned)obj->frame/FX32_ONE;
+        if(obj->joint.frames)GF_ASSERT(ds_joint_animation_pose(&obj->joint,frame,&out[count].pose));
+        else {out[count].texture=obj->texture;out[count].texture_frame=frame;}
+        count++;
     }
     return count;
+}
+
+int hg_prop_animation_load(HGPropAnimations *s,unsigned tag,unsigned model,const double world[3]) {
+    if(!s||!tag||tag>255||track(s,tag)||s->pool.unk22>12||!world)return 0;
+    const u8 *list,*bytes;size_t n,size;DSModel mesh;
+    if(!native_resource_member(s->list_archive,0,model,&list,&n)||n!=24||list[0]!=1||
+       !native_resource_member(s->model_archive,0,model,&bytes,&size)||!ds_model_open(bytes,size,0,&mesh))return 0;
+    unsigned count=0;
+    for(unsigned i=0;i<4;i++) {
+        uint32_t id=(uint32_t)half(list+8+4*i)|(uint32_t)half(list+10+4*i)<<16;
+        if(id==UINT32_MAX)break;
+        DSJointAnimation joint={0};DSTextureAnimation texture={0};if(!native_resource_member(NARC_a_1_0_6,0,id,&bytes,&size)||(!ds_joint_animation_open(bytes,size,&joint)&&!ds_texture_animation_open(bytes,size,&texture)))return 0;
+        for(unsigned f=0;f<joint.frames;f++){DSJointPose pose;DSModelStats stats;if(!ds_joint_animation_pose(&joint,f,&pose)||!ds_model_scene_pose(&mesh,-1,-1,&pose,NULL,NULL,&stats))return 0;}
+        if(texture.frames) {
+            const u8 *model_bytes;size_t model_size;DSTextureBank bank;unsigned matched=0;
+            if(!native_resource_member(s->model_archive,0,model,&model_bytes,&model_size)||!ds_texture_bank(model_bytes,model_size,&bank))return 0;
+            for(unsigned m=0;m<mesh.materials;m++) {
+                DSModelMaterial material;if(!ds_model_material(&mesh,m,&material))return 0;int animated=0;
+                for(unsigned f=0;f<texture.frames;f++) {
+                    char tex[17],pal[17];int result=ds_texture_animation_frame(&texture,f,material.name,tex,pal);DSTexture sample;
+                    if(result<0||(result&&(!ds_texture_find(&bank,tex,pal,&sample)||sample.width!=material.width||sample.height!=material.height)))return 0;
+                    animated|=result;
+                }
+                matched+=animated;
+            }
+            if(matched!=texture.materials)return 0;
+        }
+        count++;
+    }
+    if(!count||count>16-s->pool.unk22)return 0;
+    for(unsigned i=0;i<16;i++)if(!s->tracks[i].tag){PropTrack *t=s->tracks+i;*t=(PropTrack){.tag=(u8)tag,.model=model};memcpy(t->world,world,sizeof(t->world));load_track(s,t);return 1;}
+    return 0;
+}
+int hg_prop_animation_play(HGPropAnimations *s,unsigned tag,unsigned index) {
+    PropTrack *t=s?track(s,tag):NULL;if(!t)return 0;
+    MapPropOneShotAnimation *shot=MapPropOneShotAnimationManager_GetAnimation(&s->shots,tag);
+    if(index>=(unsigned)shot->animations.count)return 0;t->selected=index;MapPropOneShotAnimationManager_PlayAnimation(&s->shots,tag,index);return 1;
+}
+int hg_prop_animation_finished(HGPropAnimations *s,unsigned tag) { return s&&track(s,tag)?MapPropOneShotAnimationManager_IsAnimationLoopFinished(&s->shots,tag):-1; }
+int hg_prop_animation_unload(HGPropAnimations *s,unsigned tag) {
+    PropTrack *t=s?track(s,tag):NULL;if(!t)return 0;MapPropOneShotAnimationManager_UnloadAnimation(&s->manager,&s->shots,tag);memset(t,0,sizeof(*t));return 1;
+}
+
+int hg_prop_animation_door_begin(HGPropAnimations *s,HGFieldResources *resources,int x,int z,unsigned tag,int exiting,unsigned *sound) {
+    if(!s||!resources||!sound||x<1||z<1||x>32765||z>32766)return -1;
+    PropTrack selected={0};unsigned found=0;unsigned cells[8],cell_count=0;const u8 *selected_list=NULL;
+    /* ov01_021E90E4 calls sub_02054A60(x,z,-1,-1,3,1): inclusive
+     * matrix-global rectangle [x-1,x+2] by [z-1,z]. Exit task
+     * ov01_021E9374 uses [z,z+1]. Deduplicate chunks in either case. */
+    for(int tz=z-1+!!exiting;tz<=z+!!exiting;tz++)for(int tx=x-1;tx<=x+2;tx++) {
+        HGFieldTile tile;if(!hg_field_resources_tile(resources,tx,tz,&tile))continue;
+        unsigned cell=tile.matrix_z*256+tile.matrix_x,i=0;for(;i<cell_count;i++)if(cells[i]==cell)break;
+        if(i<cell_count)continue;cells[cell_count++]=cell;
+        for(size_t off=0;off+48<=tile.land.props_size;off+=48) {
+            const u8 *b=tile.land.props+off;unsigned model=half(b)|(unsigned)half(b+2)<<16;const u8 *list;size_t n;
+            if(!native_resource_member(s->list_archive,0,model,&list,&n)||n!=24||!list[4])continue;
+            int32_t xyz[3];for(unsigned k=0;k<3;k++){uint32_t v=(uint32_t)half(b+4+4*k)|(uint32_t)half(b+6+4*k)<<16;memcpy(xyz+k,&v,4);}
+            double world[]={tile.matrix_x*512.0+256+xyz[0]/4096.0,tile.altitude*8.0+xyz[1]/4096.0,tile.matrix_z*512.0+256+xyz[2]/4096.0};
+            if(world[0]<(x-1)*16.0||world[0]>(x+2)*16.0||world[2]<(z-1+!!exiting)*16.0||world[2]>(z+!!exiting)*16.0)continue;
+            if(found++)return -1;selected=(PropTrack){.model=model};memcpy(selected.world,world,sizeof(world));selected_list=list;
+        }
+    }
+    if(!found)return 0;
+    if(!hg_motion_door_sound(selected_list,1,sound)||!hg_prop_animation_load(s,tag,selected.model,selected.world)){fprintf(stderr,"Unsupported door animation model %u\n",selected.model);return -1;}
+    if(!hg_prop_animation_play(s,tag,0)){hg_prop_animation_unload(s,tag);return -1;}
+    return 1;
+}
+
+int hg_prop_animation_open_door(HGPropAnimations *s,HGFieldResources *resources,int x,int z,unsigned tag,unsigned *sound) {
+    return hg_prop_animation_door_begin(s,resources,x,z,tag,0,sound);
+}
+int hg_prop_animation_close_door(HGPropAnimations *s,unsigned tag,unsigned *sound) {
+    PropTrack *t=s?track(s,tag):NULL;const u8 *list;size_t n;
+    return t&&sound&&native_resource_member(s->list_archive,0,t->model,&list,&n)&&n==24&&
+        hg_motion_door_sound(list,0,sound)&&hg_prop_animation_play(s,tag,1);
 }

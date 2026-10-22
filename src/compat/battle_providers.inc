@@ -1,10 +1,15 @@
+static int native_battle_medicine(unsigned);
+static unsigned native_trainer_party(HGBattle *,unsigned);
+static int tutorial_select(HGBattle *);
+static unsigned native_trainer_command(HGBattle *,unsigned);
+static unsigned native_trainer_move(HGBattle *,unsigned);
 static void format_battle_message(HGBattle *,const BattleMessage *);
 /* Native owner services. Original battle emitters produce all event packets. */
 static void BattleController_SendLocalMessage(BattleSystem *sys,int recipient,int battler,void *bytes,u8 size) {
     HGBattle *b=(HGBattle *)sys;GF_ASSERT(battler>=0&&battler<4&&size);
     if(recipient==0){memcpy(sys->ctx->battleBuffer[battler],bytes,size);return;}
     GF_ASSERT(recipient==1&&b->count<NELEMS(b->events));unsigned at=(b->read+b->count++)%NELEMS(b->events);
-    b->events[at].battler=battler;b->events[at].size=size;memcpy(b->events[at].bytes,bytes,size);
+    b->events[at].presented=0;b->events[at].battler=battler;b->events[at].size=size;memcpy(b->events[at].bytes,bytes,size);
 }
 void *Heap_Alloc(enum HeapID heap,u32 size) {
     (void)heap;void *p=calloc(1,size);GF_ASSERT(p);
@@ -32,11 +37,42 @@ static void process_event(HGBattle *b) {
     unsigned command=b->events[b->read].bytes[0],side=b->events[b->read].battler;BattleContext *ctx=b->system.ctx;
     switch(command){
     case BATTLE_COMMAND_SET_COMMAND_SELECTION:
-        if(side){ctx->battleBuffer[side][0]=BATTLE_INPUT_FIGHT;break;}
+        if(side){ctx->battleBuffer[side][0]=(b->system.battleType&BATTLE_TYPE_TRAINER)?native_trainer_command(b,side):BATTLE_INPUT_FIGHT;break;}
+        if(b->system.battleType&BATTLE_TYPE_TUTORIAL){
+            if(!b->events[b->read].presented){BattleMessage message={0};message.id=b->system.unk2421?1226+b->profiles[0].gender:921;message.tag=b->system.unk2421?TAG_NONE:TAG_NICKNAME;message.param[0]=0;format_battle_message(b,&message);b->events[b->read].presented=1;b->waiting=b->direct_message=1;return;}
+            int action=tutorial_select(b);if(action<0)return;ctx->battleBuffer[0][0]=action==CURSOR_INPUT_FIGHT?BATTLE_INPUT_FIGHT:BATTLE_INPUT_BAG;break;}
         snprintf(b->text,sizeof(b->text),"What will %s do?",mon_name(b,0));b->menu=1;return;
     case BATTLE_COMMAND_SHOW_MOVE_SELECT_MENU:
-        if(side){if(b->system.battleType&BATTLE_TYPE_TRAINER)battle_boundary_failed("original trainer AI");unsigned legal=StruggleCheck(&b->system,ctx,side,0,-1);unsigned moves[4],count=0;for(unsigned i=0;i<4;i++)if(!(legal&(1u<<i)))moves[count++]=i+1;GF_ASSERT(count);ctx->battleBuffer[side][0]=moves[BattleSystem_Random(&b->system)%count];break;}
+        if(side){if(b->system.battleType&BATTLE_TYPE_TRAINER){ctx->battleBuffer[side][0]=native_trainer_move(b,side)+1;break;}unsigned legal=StruggleCheck(&b->system,ctx,side,0,-1);unsigned moves[4],count=0;for(unsigned i=0;i<4;i++)if(!(legal&(1u<<i)))moves[count++]=i+1;GF_ASSERT(count);ctx->battleBuffer[side][0]=moves[BattleSystem_Random(&b->system)%count];break;}
+        if(b->system.battleType&BATTLE_TYPE_TUTORIAL){int action=tutorial_select(b);if(action<0)return;GF_ASSERT(action==CURSOR_INPUT_MOVE_1);ctx->battleBuffer[0][0]=1;ov12_0223BB10(&b->system,1);break;}
         b->menu=2;return;
+    case BATTLE_COMMAND_SHOW_BAG_MENU:{
+        GF_ASSERT(side==0);
+        if(!(b->system.battleType&BATTLE_TYPE_TUTORIAL)&&!b->direct_ball){
+            b->bag_count=0;b->menu_hint[0]=0;
+            for(unsigned item=1;item<ITEMS_COUNT;item++)if(native_battle_medicine(item)&&Bag_GetQuantity(&b->bag,item,HEAP_ID_BATTLE))b->bag_items[b->bag_count++]=(u16)item;
+            b->menu=4;return;
+        }
+        GF_ASSERT((b->system.battleType&BATTLE_TYPE_TUTORIAL)||hg_battle_can_throw(b));BattleItemUse use={.item=ITEM_POKE_BALL,.category=BTLPOCKETLIST_BALLS,.target=0};
+        GF_ASSERT(Bag_GetQuantity(&b->bag,ITEM_POKE_BALL,HEAP_ID_BATTLE));BattleController_EmitSelectedBagItem(&b->system,side,use);break;}
+    case BATTLE_COMMAND_SHOW_PARTY_MENU:{
+        PartyMenuMessage m;GF_ASSERT(b->events[b->read].size==sizeof(m));memcpy(&m,b->events[b->read].bytes,sizeof(m));
+        GF_ASSERT(m.battler==side&&m.listMode<=1);
+        if(side){GF_ASSERT(!m.canSwitch);BattleController_EmitPartyMenuResult(&b->system,side,native_trainer_party(b,side)+1);break;}
+        GF_ASSERT(side==0);
+        b->menu_battler=side;b->party_forced=m.listMode==1;b->party_cannot_switch=m.canSwitch;b->party_excluded=m.doublesSelection;b->menu_hint[0]=0;b->menu=7;return;}
+    case BATTLE_COMMAND_SHOW_YES_NO_MENU:{
+        YesNoMenuMessage prompt;GF_ASSERT(b->events[b->read].size==sizeof(prompt));memcpy(&prompt,b->events[b->read].bytes,sizeof(prompt));
+        GF_ASSERT(side==0);
+        if(prompt.yesNoType==3||prompt.yesNoType==4){GF_ASSERT(!prompt.promptMsg);b->yesno_type=prompt.yesNoType;b->menu=8;return;}
+        GF_ASSERT(prompt.yesNoType==5&&prompt.promptMsg==0x364);
+        snprintf(b->text,sizeof(b->text),"Keep %s's original name?",mon_name(b,1));b->menu=3;return;}
+    case BATTLE_COMMAND_OPEN_CAPTURE_BALL:break;
+    case BATTLE_COMMAND_SHOW_POKEMON:
+        /* Original breakout reuses send-out. End the native capture visual
+         * when that command is presented, before its acknowledgement. */
+        if(side==BATTLER_ENEMY)b->capture_phase=0;
+        break;
     case BATTLE_COMMAND_PRINT_ATTACK_MESSAGE:{
         AttackMsgMessage message;GF_ASSERT(b->events[b->read].size==sizeof(message));memcpy(&message,b->events[b->read].bytes,sizeof(message));
         const uint8_t *name;size_t size;GF_ASSERT(native_resource_member(NARC_msgdata_msg,750,message.move,&name,&size));snprintf(b->text,sizeof(b->text),"%s used\n%s!",mon_name(b,side),(const char *)name);b->waiting=1;return;}
@@ -52,12 +88,39 @@ static void process_event(HGBattle *b) {
         if(side==1){GF_ASSERT(b->system.battleType&BATTLE_TYPE_TRAINER);msg.id=972;msg.tag=TAG_TRCLASS_TRNAME_NICKNAME;msg.param[0]=msg.param[1]=side;msg.param[2]=side|(ctx->selectedMonIndex[side]<<8);}
         else {msg.id=979;msg.tag=TAG_NICKNAME|0x80;msg.param[0]=side|(ctx->selectedMonIndex[side]<<8);}
         format_battle_message(b,&msg);b->waiting=1;return;}
+    /* Native message binding of original single-battle formatters
+     * ov12_02261390 / ov12_02261464; preserve original HP thresholds/tags. */
+    case BATTLE_COMMAND_SET_STATUS_ICON:{
+        /* Native HUD reads the original BattleMon status updated by the script. */
+        SetStatusIconMessage m;GF_ASSERT(b->events[b->read].size==sizeof(m));memcpy(&m,b->events[b->read].bytes,sizeof(m));break;}
+    case BATTLE_COMMAND_PRINT_RETURN_MESSAGE:{
+        ReturnMsgMessage m;GF_ASSERT(b->events[b->read].size==sizeof(m));memcpy(&m,b->events[b->read].bytes,sizeof(m));BattleMessage msg={0};
+        if(side){msg.id=989;msg.tag=TAG_TRCLASS_TRNAME_NICKNAME;msg.param[0]=msg.param[1]=side;msg.param[2]=side|(m.partySlot<<8);}
+        else {msg.id=!m.hpPercent?984:m.hpPercent<25?985:m.hpPercent<50?988:m.hpPercent<75?986:987;msg.tag=TAG_NICKNAME;msg.param[0]=side|(m.partySlot<<8);}
+        format_battle_message(b,&msg);b->waiting=1;return;}
+    case BATTLE_COMMAND_PRINT_SEND_OUT_MESSAGE:{
+        SendOutMsgMessage m;GF_ASSERT(b->events[b->read].size==sizeof(m));memcpy(&m,b->events[b->read].bytes,sizeof(m));BattleMessage msg={0};
+        if(side){msg.id=972;msg.tag=TAG_TRCLASS_TRNAME_NICKNAME;msg.param[0]=msg.param[1]=side;msg.param[2]=side|(m.partySlot<<8);}
+        else {msg.id=m.hpPercent<100?982:m.hpPercent<325?983:m.hpPercent<550?981:m.hpPercent<775?980:979;msg.tag=TAG_NICKNAME;msg.param[0]=side|(m.partySlot<<8);}
+        format_battle_message(b,&msg);b->waiting=1;return;}
+    case BATTLE_COMMAND_PRINT_TRAINER_MESSAGE:{
+        TrainerMsgMessage msg;GF_ASSERT(b->events[b->read].size==sizeof(msg));memcpy(&msg,b->events[b->read].bytes,sizeof(msg));
+        const uint8_t *table,*text;size_t length,text_length;GF_ASSERT(native_resource_member(NARC_poketool_trmsg_trtbl,0,0,&table,&length));
+        unsigned trainer=b->system.trainerId[side];int found=0;
+        for(size_t at=0;at+4<=length;at+=4){u16 id,kind;memcpy(&id,table+at,2);memcpy(&kind,table+at+2,2);if(id==trainer&&kind==msg.msg){
+            GF_ASSERT(native_resource_member(NARC_msgdata_msg,728,(unsigned)(at/4),&text,&text_length));GF_ASSERT(!memchr(text,'{',text_length));snprintf(b->text,sizeof(b->text),"%s",text);found=1;break;}}
+        GF_ASSERT(found);b->waiting=1;return;}
     case BATTLE_COMMAND_PRINT_MESSAGE:{BattleMessage m;GF_ASSERT(b->events[b->read].size==sizeof(m));memcpy(&m,b->events[b->read].bytes,sizeof(m));format_battle_message(b,&m);b->waiting=1;return;}
-    case BATTLE_COMMAND_67:battle_boundary_failed("blackout recovery");
+    case BATTLE_COMMAND_67:{
+        Message_022645C8 fade;GF_ASSERT(b->events[b->read].size==sizeof(fade));memcpy(&fade,b->events[b->read].bytes,sizeof(fade));GF_ASSERT(fade.unk1<=1);
+        if(!b->events[b->read].presented){b->events[b->read].presented=1;b->blackout_ticks=0;if(fade.unk1)ds_audio_fade(b->audio,0,16);}
+        unsigned frame=b->blackout_ticks++;if(frame>16)break;
+        if((int)frame>b->blackout_brightness)b->blackout_brightness=frame;return;}
+
     case BATTLE_COMMAND_PLAY_SOUND:{PlaySoundMessage msg;GF_ASSERT(b->events[b->read].size==sizeof(msg));memcpy(&msg,b->events[b->read].bytes,sizeof(msg));PlaySE(msg.sdatID);break;}
     case BATTLE_COMMAND_PRINT_ESCAPE_MESSAGE:{
         EscapeMsgMessage msg;GF_ASSERT(b->events[b->read].size==sizeof(msg));memcpy(&msg,b->events[b->read].bytes,sizeof(msg));
-        GF_ASSERT(b->system.battleType==0&&msg.escaperBitmask==1);
+        GF_ASSERT(!(b->system.battleType&~BATTLE_TYPE_BUG_CONTEST)&&msg.escaperBitmask==1);
         /* Original single-player branch of ov12_022619E4. */
         BattleMessage text={.id=781,.tag=TAG_NONE};BattleSystem_SetBattleOutcomeFlags(&b->system,0xc2);format_battle_message(b,&text);b->waiting=1;return;}
     case BATTLE_COMMAND_INCREMENT_RECORD:{RecordIncrementMessage m;GF_ASSERT(b->events[b->read].size==sizeof(m));memcpy(&m,b->events[b->read].bytes,sizeof(m));
@@ -68,7 +131,7 @@ static void process_event(HGBattle *b) {
     case BATTLE_COMMAND_PLAY_MUSIC:{MusicPlayMessage m;GF_ASSERT(b->events[b->read].size==sizeof(m));memcpy(&m,b->events[b->read].bytes,sizeof(m));PlayBGM(m.bgmID);break;}
     case BATTLE_COMMAND_UPDATE_PARTY_MON:{UpdatePartyMonMessage m;GF_ASSERT(b->events[b->read].size==sizeof(m));memcpy(&m,b->events[b->read].bytes,sizeof(m));Pokemon *mon=BattleSystem_GetPartyMon(&b->system,side,m.partySlot);SetMonData(mon,MON_DATA_HP,&m.curHP);SetMonData(mon,MON_DATA_STATUS,&m.status);for(unsigned i=0;i<4;i++)SetMonData(mon,MON_DATA_MOVE1_PP+i,m.ppCur+i);break;}
     case BATTLE_COMMAND_SETUP_UI:case BATTLE_COMMAND_SET_ENCOUNTER:case BATTLE_COMMAND_SHOW_ENCOUNTER:
-    case BATTLE_COMMAND_SET_TRAINER_ENCOUNTER:case BATTLE_COMMAND_SHOW_POKEMON:case BATTLE_COMMAND_RETURN_POKEMON:
+    case BATTLE_COMMAND_SET_TRAINER_ENCOUNTER:case BATTLE_COMMAND_RETURN_POKEMON:
     case BATTLE_COMMAND_DELETE_POKEMON:case BATTLE_COMMAND_THROW_TRAINER_BALL:case BATTLE_COMMAND_SLIDE_TRAINER_OUT:
     case BATTLE_COMMAND_SLIDE_TRAINER_IN:case BATTLE_COMMAND_SLIDE_HEALTHBOX_IN:case BATTLE_COMMAND_SLIDE_HEALTHBOX_OUT:
     case BATTLE_COMMAND_SET_MOVE_ANIMATION:case BATTLE_COMMAND_FLICKER_BATTLER:case BATTLE_COMMAND_UPDATE_HP_GAUGE:
@@ -85,7 +148,7 @@ static void process_event(HGBattle *b) {
 }
 static void BattleSystem_LoadLevelUpNameplate(BattleSystem *s,GetterWork *w,Pokemon *m){(void)s;(void)w;(void)m;battle_boundary_failed("level-up nameplate");}
 static void BattleSystem_UnloadLevelUpNameplate(BattleSystem *s,GetterWork *w){(void)s;(void)w;battle_boundary_failed("level-up nameplate");}
-const OverlayManagerTemplate gOverlayTemplate_NamingScreen={0};
+
 
 static u32 native_sqrt_input;
 void CP_SetSqrt32(u32 value){native_sqrt_input=value;}
@@ -156,12 +219,15 @@ void BufferIntegerAsString(MessageFormat *f,u32 slot,s32 number,u32 digits,Print
     else battle_boundary_failed("integer printing mode");
 }
 static void format_battle_message(HGBattle *battle,const BattleMessage *source){
-    BattleMessage msg=*source;memset(&battle->format,0,sizeof(battle->format));
+    /* Original MessageFormat slots persist across messages (TAG_NONE can reuse
+     * a prior trainer/name binding, including the blackout announcement). */
+    BattleMessage msg=*source;
     BattleSystem_AdjustMessageForSide(&battle->system,&msg);BattleSystem_BufferMessage(&battle->system,&msg);
     const uint8_t *bytes;size_t size;GF_ASSERT(native_resource_member(NARC_msgdata_msg,197,msg.id,&bytes,&size)&&size&&bytes[size-1]==0);
     size_t at=0,written=0;
     while(at+1<size){
         if(bytes[at]=='{'){
+            if(size-at>=sizeof("{YESNO 0}")-1&&!memcmp(bytes+at,"{YESNO 0}",sizeof("{YESNO 0}")-1)){at+=sizeof("{YESNO 0}")-1;continue;}
             unsigned control;int control_length=0;
             if(sscanf((const char *)bytes+at,"{WAIT %u}%n",&control,&control_length)==1&&control_length){
                 switch(control){case 1:battle->wait_effect=1;break;case 2:battle->wait_fanfare=1;break;
@@ -170,7 +236,7 @@ static void format_battle_message(HGBattle *battle,const BattleMessage *source){
                 at+=control_length;continue;
             }
             unsigned type,slot,last;int consumed=0;
-            if(sscanf((const char *)bytes+at,"{STRVAR_1 %u, %u, %u}%n",&type,&slot,&last,&consumed)!=3||!consumed||last!=0||slot>=NELEMS(battle->format.names)||!battle->format.names[slot][0])battle_boundary_failed("battle message control");
+            if(sscanf((const char *)bytes+at,"{STRVAR_1 %u, %u, %u}%n",&type,&slot,&last,&consumed)!=3||!consumed||last!=0||slot>=NELEMS(battle->format.names)||!battle->format.names[slot][0]){char reason[96];snprintf(reason,sizeof(reason),"battle message %u control %.48s",msg.id,bytes+at);battle_boundary_failed(reason);}
             const char *value=battle->format.names[slot];size_t n=strlen(value);GF_ASSERT(n<sizeof(battle->text)-written);memcpy(battle->text+written,value,n);written+=n;at+=consumed;
         }else{GF_ASSERT(written+1<sizeof(battle->text));battle->text[written++]=bytes[at]=='\f'?'\n':bytes[at];at++;}
     }

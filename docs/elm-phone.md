@@ -1,5 +1,11 @@
 # Elm's incoming call checkpoint
 
+Current continuation: the first rival now runs as a visible field battle and
+finishes its original post-battle departure for all three starters. Both win and
+allowed loss resume. See [checkpoints](checkpoints.md) and the latest
+[battle checkpoint](battle-runtime.md#rival-fieldscript-application-connection).
+Earlier limits below record the preceding checkpoint.
+
 The connected original opening now completes Elm's panic call after leaving
 Mr. Pokemon's house for all three starters. The native phone view displays the
 original contact name and gender-selected message, including the player's name.

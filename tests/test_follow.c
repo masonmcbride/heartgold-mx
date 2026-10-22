@@ -58,6 +58,32 @@ int main(void) {
   CHECK(MapObject_GetXCoord(follower)==basex+dx[direction]&&MapObject_GetZCoord(follower)==basez+dz[direction]);
   CHECK(MapObject_GetMovementCommand(follower)==255);
  }
+ /* A real ledge must notify the normal follower controller as well as move
+  * the player. Continue walking to drain the queued follower jump. */
+ HGFieldResources *ledge=hg_field_resources_new(117);CHECK(ledge);
+ field.native_scene_resources=ledge;
+ place(ledge,objects,38,19);place(ledge,follower,38,18);
+ MapObject_SetFacingDirectionDirect(objects,1);MapObject_SetNextFacingDirection(objects,1);
+ memset(session.follower,0,sizeof(session.follower));
+ CHECK(hg_motion_follow_tick(ledge,avatar,follower,&session,1,48));
+ unsigned follower_jump=0;
+ for(unsigned step=0;step<2;step++) {
+  CHECK(hg_motion_locomotion_begin(ledge,avatar,0x80,&session,&move)&&move.moved);
+  if(!step)CHECK(MapObject_GetMovementCommand(objects)==57);
+  int complete=0;
+  for(unsigned tick=0;tick<48;tick++) {
+   int finished=0;if(!complete)CHECK(hg_motion_player_tick(ledge,objects,&finished));
+   CHECK(hg_motion_follow_tick(ledge,avatar,follower,&session,0,48));
+   int32_t arc;CHECK(hg_motion_follow_height(follower,&arc));
+   if(arc>0)follower_jump=1;
+   if(finished){complete=1;CHECK(hg_motion_clear_held(objects));}
+  }
+  CHECK(complete&&MapObject_GetZCoord(objects)==21+(int)step);
+  CHECK(MapObject_GetZCoord(follower)==(step?21:19));
+ }
+ CHECK(follower_jump);
+ int32_t landed_height;CHECK(hg_motion_follow_height(follower,&landed_height)&&!landed_height);
+ hg_field_resources_free(ledge);
  free(session.stats);
  PlayerAvatar_FreeToHeap(avatar);hg_field_resources_free(r);puts("Original follower creation and movement passed");return 0;
 }

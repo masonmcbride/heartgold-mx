@@ -24,3 +24,10 @@ int hg_transition_supported(unsigned map);
 int hg_transition_inspect(HGTransition *,HGTransitionState *);
 /* Native owner synchronization at a settled movement boundary. */
 void hg_transition_sync_player(HGTransition *);
+
+/* Copy the complete original field record at save/restore boundaries. */
+void hg_transition_export_local(const HGTransition *,void *record);
+void hg_transition_restore_local(HGTransition *,const void *record);
+
+/* Private original local-field relocation for non-portal tasks (e.g. blackout). */
+int hg_transition_relocate_record(void *local_record,const HGFieldLocation *);

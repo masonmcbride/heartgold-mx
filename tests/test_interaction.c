@@ -10,6 +10,8 @@
 #include "constants/phone_contacts.h"
 #include "save_pokegear.h"
 #include <string.h>
+#include <sys/stat.h>
+#include "game_stats.h"
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"%s:%d %s\n",__FILE__,__LINE__,#x);exit(1);}}while(0)
 #include "field_routes.h"
 static void acceptance_frame(HGFieldApp *app,unsigned species,const char *stage) {
@@ -42,6 +44,15 @@ static void close_conversation(HGFieldApp *app) {
         if(hg_field_app_dialogue(app)[0]){hg_field_app_interact(app);pages++;}hg_field_app_step(app);
     }
     CHECK(pages&&pages<64&&ticks<2048&&!hg_field_app_dialogue(app)[0]);
+}
+static void checkpoint(HGFieldApp *app,unsigned species,unsigned stage){
+    mkdir("build/checkpoints",0755);char path[256],error[256];snprintf(path,sizeof(path),"build/checkpoints/%u-%u.hgcheckpoint",species,stage);
+    if(!hg_field_app_checkpoint_write(app,path,stage,error,sizeof(error))){fprintf(stderr,"Checkpoint %s: %s\n",path,error);CHECK(0);}
+    HGFieldApp *copy=hg_field_app_checkpoint_load(path,error,sizeof(error));if(!copy)fprintf(stderr,"Resume %s: %s\n",path,error);CHECK(copy);
+    int x,z,cx,cz;CHECK(hg_field_app_player(app,&x,&z)&&hg_field_app_player(copy,&cx,&cz)&&x==cx&&z==cz);CHECK(hg_field_app_map(app)==hg_field_app_map(copy));
+    FieldSystem a={0},b={0};hg_story_bind_field(hg_field_app_story(app),&a);hg_story_bind_field(hg_field_app_story(copy),&b);
+    CHECK(!memcmp(hg_story_save_party(a.saveData),hg_story_save_party(b.saveData),sizeof(Party)));CHECK(!memcmp(hg_story_save_bag(a.saveData),hg_story_save_bag(b.saveData),sizeof(Bag)));
+    CHECK(hg_field_app_running_shoes(app)==hg_field_app_running_shoes(copy));hg_field_app_free(copy);
 }
 int main(void) {
     HGEventView view;CHECK(hg_event_load(60,&view));
@@ -156,12 +167,14 @@ int main(void) {
      * discovered from actual actor occupancy rather than handwritten keys. */
     app=hg_field_app_new(60,error,sizeof(error));CHECK(app);HGStoryState *story=hg_field_app_story(app);CHECK(story);
     hg_test_walk_to(app,695,397);hg_field_app_input(app,0x40);hg_field_app_step(app);hg_field_app_clear_input(app);
+    hg_test_travel(app,63,32);
     CHECK(hg_field_app_map(app)==63&&hg_field_app_story(app)==story);hg_test_approach(app,2);
     unsigned long long revision=hg_story_revision(story);unsigned steps=hg_field_app_steps(app);
     hg_field_app_interact(app);hg_field_app_step(app);
     CHECK(!strcmp(hg_field_app_dialogue(app),"Professor Elm has been waiting for\nyou, dear. Please, go and help him."));
     CHECK(hg_story_revision(story)==revision);close_conversation(app);CHECK(hg_story_revision(story)==revision+1&&hg_field_app_steps(app)==steps);
     hg_test_walk_to(app,3,10);hg_field_app_input(app,0x80);hg_field_app_step(app);hg_field_app_clear_input(app);
+    hg_test_travel(app,60,32);
     CHECK(hg_field_app_map(app)==60&&hg_field_app_story(app)==story);uint16_t scene;CHECK(hg_story_var_get(story,VAR_SCENE_NEW_BARK_TOWN_OW,&scene)&&scene==0);
     hg_test_approach(app,2);hg_field_app_interact(app);hg_field_app_step(app);
     CHECK(strstr(hg_field_app_dialogue(app),"I like your Bag!"));close_conversation(app);hg_field_app_free(app);
@@ -225,6 +238,7 @@ int main(void) {
     hg_test_settle(arrival);
     hg_test_walk_to(arrival,684,394);
     hg_field_app_input(arrival,0x40);hg_field_app_step(arrival);hg_field_app_clear_input(arrival);
+    hg_test_travel(arrival,61,32);
     CHECK(hg_field_app_map(arrival)==61&&hg_field_app_story(arrival)==arrival_story);
     for(unsigned step=0;step<4;step++) {
         hg_field_app_input(arrival,0x40);hg_field_app_step(arrival);hg_field_app_clear_input(arrival);
@@ -286,6 +300,7 @@ int main(void) {
     for(unsigned tick=0;tick<16;tick++)hg_field_app_step(arrival);
     CHECK(hg_field_app_player(arrival,&px,&pz)&&pz==outside_z-1);
     hg_test_walk_to(arrival,684,394);hg_field_app_input(arrival,0x40);hg_field_app_step(arrival);hg_field_app_clear_input(arrival);
+    hg_test_travel(arrival,61,32);
     CHECK(hg_field_app_map(arrival)==61&&hg_field_app_follower(arrival,&species,&fx,&fz)&&species==expected[starter_choice]);
     CHECK(Party_GetCount(saved_party)==1&&Bag_GetQuantity(hg_story_save_bag(saved_field.saveData),ITEM_POTION,HEAP_ID_FIELD1)==5);
     hg_test_portal(arrival,60);hg_test_settle(arrival);
@@ -316,7 +331,7 @@ int main(void) {
     CHECK(hg_field_app_steps(arrival)==border_steps+1&&hg_story_revision(arrival_story)>border_revision);
     CHECK(hg_field_app_story(arrival)==arrival_story&&hg_story_phone_registered(arrival_story,PHONE_CONTACT_PROF__ELM));
     CHECK(Party_GetCount(saved_party)==1&&Bag_GetQuantity(hg_story_save_bag(saved_field.saveData),ITEM_POTION,HEAP_ID_FIELD1)==5);
-    acceptance_frame(arrival,species,"route-29");
+    acceptance_frame(arrival,species,"route-29");checkpoint(arrival,species,1);
     hg_test_approach(arrival,std_apricorn_tree);
     hg_field_app_interact(arrival);hg_field_app_step(arrival);CHECK(hg_test_settle(arrival)>0);
     CHECK(!hg_field_app_error(arrival)[0]);
@@ -358,7 +373,7 @@ int main(void) {
     CHECK(Pokedex_IsEnabled(hg_story_save_dex(saved_field.saveData)));
     CHECK(hg_story_phone_registered(arrival_story,PHONE_CONTACT_PROF__OAK));
     CHECK(Save_SysInfo_GetMysteryGiftActive(hg_story_save_sys_info(saved_field.saveData)));
-    CHECK(*hg_story_save_blackout_spawn(saved_field.saveData)==2);
+    CHECK(hg_story_blackout_spawn(saved_field.saveData)==2);
     acceptance_frame(arrival,species,"mr-pokemon");
     hg_test_portal(arrival,34);
     unsigned phone_ticks=0,phone_messages=0;int phone_seen=0;int phone_x,phone_z;CHECK(hg_field_app_player(arrival,&phone_x,&phone_z));
@@ -381,13 +396,24 @@ int main(void) {
     CHECK(hg_field_app_story(arrival)==arrival_story&&hg_story_phone_registered(arrival_story,PHONE_CONTACT_PROF__ELM));
 
     hg_test_portal(arrival,67);hg_test_settle(arrival);
-    hg_test_walk_to(arrival,574,398);unsigned long long rival_revision=hg_story_revision(arrival_story);
+    hg_test_walk_to(arrival,574,398);hg_test_settle(arrival);checkpoint(arrival,species,2);unsigned long long rival_revision=hg_story_revision(arrival_story);
     hg_field_app_input(arrival,0x10);hg_field_app_step(arrival);hg_field_app_clear_input(arrival);
-    for(unsigned tick=0;tick<16;tick++)hg_field_app_step(arrival);
-    CHECK(strstr(hg_field_app_dialogue(arrival),"isn’t available yet"));
-    CHECK(strstr(hg_field_app_error(arrival),"opcode 213"));
-    int rival_x,rival_z;CHECK(hg_field_app_player(arrival,&rival_x,&rival_z)&&rival_x==574&&rival_z==398);
-    CHECK(hg_story_revision(arrival_story)==rival_revision);
+    unsigned before_rival_exp=GetMonData(Party_GetMonByIndex(saved_party,0),MON_DATA_EXPERIENCE,NULL),before_rival_count=GameStats_GetCapped(hg_story_save_stats(saved_field.saveData),GAME_STAT_TRAINER_BATTLES);
+    unsigned rival_seen=0,rival_done=0;for(unsigned tick=0;tick<16000;tick++){
+        hg_field_app_step(arrival);
+        if(hg_field_app_error(arrival)[0])fprintf(stderr,"Rival: %s\n",hg_field_app_error(arrival));CHECK(!hg_field_app_error(arrival)[0]);
+        if(hg_field_app_battle_active(arrival)){
+            CHECK(hg_field_app_battle_trainer(arrival));CHECK(hg_story_revision(arrival_story)==rival_revision);CHECK(GetMonData(Party_GetMonByIndex(saved_party,0),MON_DATA_EXPERIENCE,NULL)==before_rival_exp);CHECK(GameStats_GetCapped(hg_story_save_stats(saved_field.saveData),GAME_STAT_TRAINER_BATTLES)==before_rival_count);if(!rival_seen){char blocked[256];CHECK(!hg_field_app_checkpoint_write(arrival,"build/checkpoints/busy.hgcheckpoint",2,blocked,sizeof(blocked)));acceptance_frame(arrival,species,"rival-battle");rival_seen=1;}
+            hg_test_battle_input(arrival);
+        }else if(hg_field_app_dialogue(arrival)[0])hg_field_app_interact(arrival);
+        if(rival_seen&&!hg_field_app_interaction_busy(arrival)&&!hg_field_app_dialogue(arrival)[0]){rival_done=1;break;}
+    }
+    CHECK(rival_seen&&rival_done&&hg_field_app_story(arrival)==arrival_story);CHECK(GameStats_GetCapped(hg_story_save_stats(saved_field.saveData),GAME_STAT_TRAINER_BATTLES)==before_rival_count+1);
+    CHECK(hg_story_flag_get(arrival_story,FLAG_HIDE_CHERRYGROVE_RIVAL,&arrival_flag)&&arrival_flag);
+    uint16_t rival_outcome;CHECK(hg_story_var_get(arrival_story,VAR_BATTLE_RESULT,&rival_outcome)&&(rival_outcome==1||rival_outcome==2));
+    CHECK(hg_story_revision(arrival_story)>rival_revision);CHECK(hg_field_app_follower(arrival,NULL,NULL,NULL));
+    acceptance_frame(arrival,species,"rival-return");checkpoint(arrival,species,3);
+    printf("Starter %u: visible rival outcome %u, original cutscene return and checkpoint round trips passed\n",species,rival_outcome);
     hg_field_app_free(arrival);
     }
     /* Full original introduction from its real coordinate-trigger row. */

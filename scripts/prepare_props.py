@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Retain selected original declarations without importing unused SDK objects."""
+from generated_files import write_text_if_changed
 import pathlib,re,sys
 root,out=map(pathlib.Path,sys.argv[1:])
 selected=[('include/field/overlay_01_02204004.h','Field3dRenderObj'),('include/unk_02097268.h','SafariObjectConfig')]
@@ -11,7 +12,7 @@ for relative,name in selected:
     parts.extend([f'#line {text[:match.start()].count(chr(10))+1} "{root/relative}"',match.group()])
 text=(root/'include/field/map_load_manager.h').read_text()
 parts.append(re.search(r'^#define MAP_PROP_MAX\s+\d+',text,re.M).group())
-(out/'prop_types.inc').write_text('\n'.join(parts)+'\n')
+write_text_if_changed(out/'prop_types.inc', '\n'.join(parts)+'\n')
 # Original one-shot playback and frame/loop control. Native arenas replace DS
 # byte-count allocations (the original pointer-bearing slots are 32-bit).
 import hashlib,json
@@ -25,7 +26,7 @@ for name,source in [('MapPropAnimation',base_header),('FieldSystemUnkSubCC_Sub0'
     parts.append(matches[0][0])
 for match in re.finditer(r'^#define MAP_PROP_\w+\s+\d+\s*$',anim_header,re.M):parts.append(match[0])
 for match in re.finditer(r'^typedef struct \w+ \{.*?^\} \w+;',anim_header,re.M|re.S):parts.append(match[0])
-(out/'prop_animation_types.inc').write_text('typedef struct FieldSystemUnkSubCC_Sub0 FieldSystemUnkSubCC_Sub0;\n'+'\n'.join(parts)+'\n')
+write_text_if_changed(out/'prop_animation_types.inc', 'typedef struct FieldSystemUnkSubCC_Sub0 FieldSystemUnkSubCC_Sub0;\n'+'\n'.join(parts)+'\n')
 # Query the reachable source closure once instead of maintaining its helpers.
 # DS arena allocation and NNS resource objects are explicit native boundaries.
 source_paths=('src/field/map_prop_animation.c','src/field/overlay_01_02204004.c')
@@ -57,5 +58,5 @@ for rel,names in selection.items():
   body=matches[0][0];line=text[:matches[0].start()].count('\n')+1
   decls.append(body.split(' {',1)[0]+';');code.extend([f'#line {line} "{root/rel}"',body])
   records.append({'source':rel,'function':name,'sha256':hashlib.sha256(body.encode()).hexdigest()})
-(out/'prop_animation_kernel.inc').write_text('\n'.join(decls+code)+'\n')
-(out/'prop_animation_provenance.json').write_text(json.dumps(records,indent=2)+'\n')
+write_text_if_changed(out/'prop_animation_kernel.inc', '\n'.join(decls+code)+'\n')
+write_text_if_changed(out/'prop_animation_provenance.json', json.dumps(records,indent=2)+'\n')

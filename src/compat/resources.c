@@ -3,7 +3,7 @@
 #include "message_bank_count.inc"
 /* Process-lifetime cache. All callers run on the main thread. */
 typedef struct { uint8_t *bytes; DSNarc narc; } Cache;
-static Cache cache[44];
+static Cache cache[45];
 static Cache message_cache[HG_MESSAGE_BANK_COUNT];
 static Cache *resource_archive(int archive,int group) {
     const char *name;int slot;char message_name[32];Cache *c;
@@ -11,7 +11,8 @@ static Cache *resource_archive(int archive,int group) {
         if(group<0||group>=HG_MESSAGE_BANK_COUNT)return 0;
         snprintf(message_name,sizeof(message_name),"msg_%04d.narc",group);name=message_name;c=&message_cache[group];
     } else {
-        if(archive==NARC_itemtool_itemdata_item_icon) { slot=0;name="item_icon.narc"; }
+        if(archive==NARC_a_2_3_0) { slot=44;name="safari_enc.narc"; }
+        else if(archive==NARC_itemtool_itemdata_item_icon) { slot=0;name="item_icon.narc"; }
         else if(archive==NARC_graphic_font) { slot=4;name="font.narc"; }
         else if(archive==NARC_native_bag) { slot=5;name="bag.narc"; }
         else if(archive==NARC_fielddata_mapmatrix_map_matrix) { slot=6;name="map_matrix.narc"; }

@@ -13,6 +13,9 @@ _Static_assert(sizeof(hg_field_guest_image)<=0x8000,"Guest image overlaps marsha
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#define TASK_HANDLE 0x03060000u
+#define TASK_ENV 0x0200b200u
+#define CAMERA_HANDLE 0x03060004u
 #define FADE_WORK 0x0200b000u
 #define FADE_ENV 0x0200b100u
 #define STATIC_HEIGHT 0x02110000u
@@ -37,6 +40,7 @@ typedef struct { PlayerAvatar *avatar; LocalMapObject *object;
     MapObjectManager *manager; HGFieldResources *field; VecFx32 *vector; HGFieldTile selected; const uint8_t *backgrounds; unsigned background_count; int selected_valid; int static_environment;
     uint32_t *facing_handle;HGMotionEffect *effect;int effect_update;
     HGMotionSession *session;uint16_t input_keys;
+    int *location_output;const uint8_t *door_list;HGMotionTask *task;
     HGMotionFade *fade;FieldSystem *story_field;const uint8_t *coordinates;unsigned coordinate_count;
 } MotionBoundary;
 static int store(DSThumb *cpu,uint32_t address,uint32_t value,unsigned width) {
@@ -59,12 +63,49 @@ static int boundary(DSThumb *cpu, void *opaque) {
         if(cpu->r[0]!=FIELD_ADDRESS || (int32_t)cpu->r[2]<0 || (int32_t)cpu->r[3]<0)return -1;
         HGFieldTile terrain;
         if(!hg_field_resources_tile(b->field,(int32_t)cpu->r[2]/65536,(int32_t)cpu->r[3]/65536,&terrain)||!hg_transition_supported(terrain.map_header))return -1;
-        int32_t height;
+        int32_t height=(int32_t)cpu->r[1];
         uint32_t status;
-        if(!load_word(cpu,cpu->r[13],&status) ||
-           hg_field_resources_height_at(b->field,(int32_t)cpu->r[2],(int32_t)cpu->r[3],0,(int32_t)cpu->r[1],&height)!=1)return -1;
-        if(status && !store(cpu,status,1,1))return -1;
+        if(!load_word(cpu,cpu->r[13],&status))return -1;
+        int surface=hg_field_resources_height_at(b->field,(int32_t)cpu->r[2],(int32_t)cpu->r[3],0,(int32_t)cpu->r[1],&height);
+        if(surface!=0&&surface!=1)return -1; /* Dynamic platforms remain unsupported. */
+        /* No BDHC surface is an original status, used by offstage event actors.
+         * sub_02061248 leaves their explicit event/script height unchanged. */
+        if(status && !store(cpu,status,(uint32_t)surface,1))return -1;
         cpu->r[0]=(uint32_t)height;return 1;
+    }
+    if(b->task&&name) {
+        HGMotionTask *task=b->task;
+        if(!strcmp(name,"TaskManager_GetFieldSystem")&&cpu->r[0]==TASK_HANDLE){cpu->r[0]=FIELD_ADDRESS;return 1;}
+        if(!strcmp(name,"TaskManager_GetEnvironment")&&cpu->r[0]==TASK_HANDLE){cpu->r[0]=TASK_ENV;return 1;}
+        if(!strcmp(name,"Heap_AllocAtEnd")&&cpu->r[1]==sizeof(task->environment)){cpu->r[0]=TASK_ENV;return 1;}
+        if(!strcmp(name,"Heap_Free")&&cpu->r[0]==TASK_ENV){task->active=0;return 1;}
+        if(!strcmp(name,"TaskManager_Call")&&cpu->r[0]==TASK_HANDLE&&cpu->r[1]==(HG_FIELD_GUEST_ov01_02205B14|1)&&cpu->r[2]==TASK_ENV){task->callback=cpu->r[1]&~1u;task->active=1;return 1;}
+        if((!strcmp(name,"FollowMon_IsActive")||!strcmp(name,"FollowMon_GetMapObject"))&&cpu->r[0]==FIELD_ADDRESS){
+            LocalMapObject *follower=MapObjectManager_GetFirstActiveObjectByID(b->manager,obj_partner_poke);
+            if(!strcmp(name,"FollowMon_IsActive")){cpu->r[0]=follower!=NULL;return 1;}
+            if(!follower)return -1;
+            for(unsigned i=0;i<b->manager->objectCount;i++)if(b->manager->objects+i==follower){cpu->r[0]=OBJECT_BASE+4*i;return 1;}
+            return -1;
+        }
+        if(!strcmp(name,"ov01_0220329C")&&cpu->r[1]==3){
+            unsigned index=(cpu->r[0]-OBJECT_BASE)/4;
+            if(cpu->r[0]<OBJECT_BASE||(cpu->r[0]&3)||index>=b->manager->objectCount||MapObject_GetID(b->manager->objects+index)!=obj_partner_poke)return -1;
+            task->retract=1;return 1; /* Host sprite presentation, original task owns the wait. */
+        }
+        if(!strcmp(name,"ov01_021F771C")&&cpu->r[0]==MANAGER_HANDLE){cpu->r[0]=CAMERA_HANDLE;return 1;}
+        if(!strcmp(name,"sub_02023E78")&&cpu->r[0]==CAMERA_HANDLE){
+            /* Original resets the camera's temporary handoff scale to unity.
+             * This host camera stays centered on the player throughout. */
+            uint32_t v;for(unsigned i=0;i<3;i++)if(!load_word(cpu,cpu->r[1]+4*i,&v)||v!=4096)return -1;
+            return 1;
+        }
+    }
+    if(b->door_list&&name) {
+        if(!strcmp(name,"ov01_021FB904")){cpu->r[0]=0x03050000;return 1;}
+        if(!strcmp(name,"NARC_ReadWholeMember")) {
+            if(cpu->r[0]!=0x03050000||cpu->r[1]||cpu->r[2]<0x02008000)return -1;
+            void *out=ds_translate(&cpu->memory,cpu->r[2],24);if(!out)return -1;memcpy(out,b->door_list,24);return 1;
+        }
     }
     if(b->fade&&name) {
         if(!strcmp(name,"Heap_Alloc")) {
@@ -236,6 +277,13 @@ static int boundary(DSThumb *cpu, void *opaque) {
     }
     if(object && !strcmp(name,"MapObject_TestFlagsBits")){cpu->r[0]=MapObject_TestFlagsBits(object,cpu->r[1]);return 1;}
     if(!strcmp(name,"FieldSystem_GetPlayerAvatar")&&b->avatar&&cpu->r[0]==FIELD_ADDRESS){cpu->r[0]=HANDLE;return 1;}
+    if(!strcmp(name,"PlayerAvatar_GetSpriteByStateAndGender")){
+        if(cpu->r[0]>14||cpu->r[1]>1)return -1;
+        cpu->r[0]=PlayerAvatar_GetSpriteByStateAndGender(cpu->r[0],cpu->r[1]);return 1;
+    }
+    /* DS graphics teardown/recreation is replaced by the host's sprite owner.
+     * Resource admission happens before running the private avatar transition. */
+    if(object&&!strcmp(name,"ov01_021FA930")){MapObject_SetSpriteID(object,cpu->r[1]);return 1;}
     if(cpu->r[0]!=HANDLE && !object)return -1;
     if(b->avatar && !strcmp(name,"PlayerAvatar_GetMapObject")){
         LocalMapObject *player=PlayerAvatar_GetMapObject(b->avatar);
@@ -253,6 +301,15 @@ static int boundary(DSThumb *cpu, void *opaque) {
     if(b->avatar && !strcmp(name,"PlayerAvatar_SetUnk8")){PlayerAvatar_SetUnk8(b->avatar,cpu->r[1]);return 1;}
     if(b->field && b->object && !strcmp(name,"MapObject_GetFieldSystem")) {cpu->r[0]=FIELD_ADDRESS;return 1;}
 #define GET_AVATAR(n) if(!strcmp(name,#n)&&b->avatar){cpu->r[0]=(uint32_t)n(b->avatar);return 1;}
+    GET_AVATAR(PlayerAvatar_GetTransitionFlags)
+    GET_AVATAR(PlayerAvatar_GetGender)
+    GET_AVATAR(PlayerAvatar_GetUnk34)
+#define SET_AVATAR(n) if(!strcmp(name,#n)&&b->avatar){n(b->avatar,cpu->r[1]);return 1;}
+    SET_AVATAR(PlayerAvatar_SetTransitionFlags)
+    SET_AVATAR(PlayerAvatar_SetState)
+    SET_AVATAR(PlayerAvatar_SetUnk34)
+#undef SET_AVATAR
+    if(b->avatar&&!strcmp(name,"PlayerAvatar_ClearUnk24ClearFlag2")){PlayerAvatar_ClearUnk24ClearFlag2(b->avatar);return 1;}
     GET_AVATAR(PlayerAvatar_GetFacingDirection)
     GET_AVATAR(PlayerAvatar_GetXCoord)
     GET_AVATAR(PlayerAvatar_GetZCoord)
@@ -271,6 +328,11 @@ static int boundary(DSThumb *cpu, void *opaque) {
            !store(cpu,cpu->r[1]+8,(uint32_t)v.z,4))return -1;
         return 1;
     }
+    if(object && !strcmp(name,"MapObject_GetParam")) {
+        if(cpu->r[1]>2)return -1;
+        cpu->r[0]=MapObject_GetParam(object,cpu->r[1]);return 1;
+    }
+    GET_OBJECT(MapObject_GetID)
     GET_OBJECT(MapObject_GetInitialX)
     GET_OBJECT(MapObject_GetInitialZ)
     GET_OBJECT(MapObject_GetXRange)
@@ -335,6 +397,8 @@ static int boundary(DSThumb *cpu, void *opaque) {
     SET_OBJECT(sub_02069E84)
     SET_OBJECT(sub_02069DC8)
 #define OBJECT_ACTION(n) if(!strcmp(name,#n)&&object){n(object);return 1;}
+    OBJECT_ACTION(MapObject_UnpauseMovement)
+    OBJECT_ACTION(MapObject_PauseMovement)
     OBJECT_ACTION(MapObject_ClearSingleMovement)
     OBJECT_ACTION(MapObject_SetSingleMovement)
     OBJECT_ACTION(MapObject_ClearEndMovement)
@@ -356,6 +420,12 @@ static int run(MotionBoundary *b,uint32_t entry,uint32_t arg0,uint32_t arg1,uint
         store(&cpu,FIELD_ADDRESS+0x60,DISPATCH_ADDRESS,4);
         store(&cpu,DISPATCH_ADDRESS,b->static_environment?STATIC_HEIGHT+1:HG_FIELD_GUEST_sub_02054654+1,4);
         store(&cpu,DISPATCH_ADDRESS+4,HG_FIELD_GUEST_sub_020547D8+1,4);
+    }
+    if(b->task) {
+        memcpy(ram+TASK_ENV-0x02000000u,b->task->environment,sizeof(b->task->environment));
+        store(&cpu,FIELD_ADDRESS+0x10,TASK_HANDLE,4);
+        LocalMapObject *follower=MapObjectManager_GetFirstActiveObjectByID(b->manager,obj_partner_poke);
+        for(unsigned i=0;follower&&i<b->manager->objectCount;i++)if(b->manager->objects+i==follower)store(&cpu,FIELD_ADDRESS+0xe4,OBJECT_BASE+4*i,4);
     }
     if(b->session) {
         store(&cpu,FIELD_ADDRESS+0xc,SAVE_HANDLE,4);
@@ -389,6 +459,7 @@ static int run(MotionBoundary *b,uint32_t entry,uint32_t arg0,uint32_t arg1,uint
                 status,cpu.r[15],cpu.fault_instruction,name);
         fprintf(stderr,"Guest fault address=%08x r0=%08x r1=%08x r2=%08x r4=%08x r6=%08x\n",cpu.fault_address,cpu.r[0],cpu.r[1],cpu.r[2],cpu.r[4],cpu.r[6]);
     }
+    if(ok&&b->task)memcpy(b->task->environment,ram+TASK_ENV-0x02000000u,sizeof(b->task->environment));
     if(ok&&b->fade){memcpy(b->fade->work,ram+FADE_WORK-0x02000000u,sizeof(b->fade->work));memcpy(b->fade->environment,ram+FADE_ENV-0x02000000u,sizeof(b->fade->environment));}
     if(ok&&b->vector) {
         uint32_t x,y,z;
@@ -400,6 +471,10 @@ static int run(MotionBoundary *b,uint32_t entry,uint32_t arg0,uint32_t arg1,uint
     if(ok&&b->object)memcpy(sub_0205F394(b->object),ram+AI_ADDRESS-0x02000000u,16);
     if(ok&&b->object)memcpy(sub_0205F3E4(b->object),ram+MOVEMENT_ADDRESS-0x02000000u,16);
     if(ok&&b->session)memcpy(b->session->follower,ram+FIELD_ADDRESS-0x02000000u+0xe4,32);
+    if(ok&&b->location_output){
+        int output[5];for(unsigned i=0;i<5;i++){uint32_t value;if(!load_word(&cpu,0x0200a000+4*i,&value)){ok=0;break;}output[i]=(int32_t)value;}
+        if(ok)memcpy(b->location_output,output,sizeof(output));
+    }
     if(ok&&result)*result=cpu.r[0];free(ram);return ok;
 }
 int hg_motion_direction(PlayerAvatar *avatar,uint16_t keys,int *direction) {
@@ -417,6 +492,12 @@ int hg_motion_clear_held(LocalMapObject *object) {
 int hg_motion_sync_previous(LocalMapObject *object) {
     if(!object)return 0;LocalMapObject saved=*object;MotionBoundary b={.object=object};
     if(run(&b,HG_FIELD_GUEST_sub_02060F78,HANDLE,0,0,0,NULL))return 1;
+    *object=saved;return 0;
+}
+int hg_motion_update_height(HGFieldResources *field,LocalMapObject *object) {
+    if(!field||!object)return 0;LocalMapObject saved=*object;
+    MotionBoundary b={.object=object,.field=field,.static_environment=1};
+    if(run(&b,HG_FIELD_GUEST_sub_02061070,HANDLE,0,0,0,NULL))return 1;
     *object=saved;return 0;
 }
 int hg_motion_settle(HGFieldResources *field,LocalMapObject *object) {
@@ -551,14 +632,14 @@ int hg_motion_walk_begin(HGFieldResources *field,PlayerAvatar *avatar,uint16_t k
 int hg_motion_script_command(unsigned command) {
     /* Regular facing, walking, in-place, jumping and delay families all use
      * the original command table and shared position/height services. */
-    return command<=66||command==69||command==70||command==71||command==72||command==75||(command>=76&&command<=79);
+    return command<=66||command==69||command==70||command==71||command==72||command==75||(command>=76&&command<=83)||(command>=88&&command<=91)||command==100||command==102||command==104;
 }
 static int command_tick(HGFieldResources *field,LocalMapObject *object,int *complete,int scripted,HGMotionEffect *effect,int defer_reset) {
     if(!field||!object||!complete||!object->unkC8)return 0;
     HGFieldTile tile;
     if(!hg_field_resources_tile(field,MapObject_GetXCoord(object),MapObject_GetZCoord(object),&tile)||!hg_transition_supported(tile.map_header))return 0;
     unsigned command=MapObject_GetMovementCommand(object);
-    if(!(scripted?hg_motion_script_command(command):((command>=12&&command<=15)||(command>=88&&command<=91)))||MapObject_GetMovementStep(object)>1)return 0;
+    if(!(scripted?hg_motion_script_command(command):((command>=12&&command<=15)||(command>=88&&command<=91)||(command>=56&&command<=59)))||MapObject_GetMovementStep(object)>(command==100?2u:1u))return 0;
     if(command==75&&!effect)return 0;
     LocalMapObject saved=*object;HGMotionEffect saved_effect={0};if(effect)saved_effect=*effect;
     MotionBoundary b={.object=object,.field=field,.static_environment=1,.effect=effect};uint32_t result;
@@ -590,7 +671,9 @@ int hg_motion_locomotion_begin(HGFieldResources *field,PlayerAvatar *avatar,uint
     HGMotionMove move={.direction=direction};
     if(direction<0){*out=move;return 1;}
     if(!hg_motion_player_collision(field,avatar,(unsigned)direction,&move.collision_mask)){*avatar=saved_avatar;return 0;}
-    if(move.collision_mask){*out=move;return 1;}
+    /* The original controller selects ledges as well as walking/running and
+     * publishes the command to the avatar and follower queue together. */
+    if(move.collision_mask && !(move.collision_mask&0x4)){*out=move;return 1;}
     LocalMapObject saved_object=*object;HGMotionSession saved_session=*session;
     HGFieldTile current;
     if(!hg_field_resources_tile(field,MapObject_GetXCoord(object),MapObject_GetZCoord(object),&current)) {
@@ -601,7 +684,7 @@ int hg_motion_locomotion_begin(HGFieldResources *field,PlayerAvatar *avatar,uint
     if(!saved_stats){*object=saved_object;*avatar=saved_avatar;return 0;}memcpy(saved_stats,session->stats,size);
     int ok=run(&b,HG_FIELD_GUEST_sub_0205D4B4,HANDLE,HANDLE,(uint32_t)direction,0,NULL);
     unsigned command=MapObject_GetMovementCommand(object);
-    if(!ok||!((command>=12&&command<=15)||(command>=88&&command<=91))) {
+    if(!ok||!((command>=12&&command<=15)||(command>=88&&command<=91)||(command>=56&&command<=59))) {
         *object=saved_object;*avatar=saved_avatar;*session=saved_session;
         memcpy(session->stats,saved_stats,size);free(saved_stats);return 0;
     }
@@ -661,11 +744,20 @@ int hg_motion_map_location(unsigned type,unsigned offset,unsigned *out) {
 }
 
 int hg_motion_follow_tick(HGFieldResources *field,PlayerAvatar *avatar,LocalMapObject *follower,HGMotionSession *session,int init,unsigned movement) {
-    if(!field||!avatar||!follower||!session||(movement!=48&&movement!=55))return 0;
+    if(!field||!avatar||!follower||!session||(movement!=48&&movement!=55&&movement!=56))return 0;
     LocalMapObject saved=*follower;HGMotionSession before=*session;
     MotionBoundary b={.field=field,.avatar=avatar,.object=follower,.manager=follower->manager,.session=session,.static_environment=1};
-    uint32_t entry=init==2?HG_FIELD_GUEST_sub_020659CC:init?HG_FIELD_GUEST_sub_020658D4:movement==48?HG_FIELD_GUEST_sub_02065900:HG_FIELD_GUEST_sub_02065938;
+    uint32_t entry=init==2?HG_FIELD_GUEST_sub_020659CC:init?HG_FIELD_GUEST_sub_020658D4:movement==48?HG_FIELD_GUEST_sub_02065900:movement==55?HG_FIELD_GUEST_sub_02065938:HG_FIELD_GUEST_sub_02065968;
     if(!run(&b,entry,HANDLE,0,0,0,NULL)){*follower=saved;*session=before;return 0;}return 1;
+}
+
+/* Original follower sprite arc reads the movement controller's own phase and
+ * frame counters; presentation needs no second animation clock. */
+int hg_motion_follow_height(LocalMapObject *object,int32_t *height) {
+    if(!object||!height)return 0;
+    MotionBoundary b={.object=object};uint32_t result;
+    if(!run(&b,HG_FIELD_GUEST_ov01_022054E0,HANDLE,0,0,0,&result))return 0;
+    *height=(int32_t)result;return 1;
 }
 
 int hg_motion_follow_position(HGFieldResources *field,PlayerAvatar *avatar,LocalMapObject *follower,unsigned direction,unsigned facing) {
@@ -703,4 +795,50 @@ int hg_motion_fade_tick(HGMotionFade *fade) {
     if(!fade||!fade->active)return 1;HGMotionFade next=*fade;unsigned result;
     if(!fade_run(&next,&result)||result>1)return 0;
     if(result)next.active=0;*fade=next;return 1;
+}
+
+int hg_motion_position_center(int x,int z,VecFx32 *position) {
+    if(!position||x<0||z<0)return 0;
+    MotionBoundary b={.vector=position};
+    return run(&b,HG_FIELD_GUEST_sub_020611C8,HANDLE,(uint32_t)x,(uint32_t)z,0,NULL);
+}
+
+int hg_field_guest_spawn(unsigned spawn,int special,int output[5]) {
+    if(!output||!spawn||spawn>30||(special!=0&&special!=1))return 0;
+    int result[5];MotionBoundary b={.location_output=result};
+    if(!run(&b,special?HG_FIELD_GUEST_GetSpecialSpawnWarpData:HG_FIELD_GUEST_GetDeathWarpData,spawn,0x0200a000,0,0,NULL))return 0;
+    memcpy(output,result,sizeof(result));return 1;
+}
+
+int hg_motion_avatar_transition(PlayerAvatar *avatar) {
+    const unsigned supported=(1u<<0)|(1u<<8)|(1u<<10)|(1u<<11);
+    if(!avatar||!avatar->mapObject||(PlayerAvatar_GetTransitionFlags(avatar)&~supported)||PlayerAvatar_GetUnk34(avatar))return 0;
+    PlayerAvatar candidate=*avatar;LocalMapObject object=*avatar->mapObject;PlayerSaveData save;
+    candidate.mapObject=&object;
+    if(avatar->playerSaveData){save=*avatar->playerSaveData;candidate.playerSaveData=&save;}
+    MotionBoundary b={.avatar=&candidate,.object=&object};
+    if(!run(&b,HG_FIELD_GUEST_Field_PlayerAvatar_ApplyTransitionFlags,HANDLE,0,0,0,NULL))return 0;
+    *avatar->mapObject=object;if(avatar->playerSaveData)*avatar->playerSaveData=save;
+    candidate.mapObject=avatar->mapObject;candidate.playerSaveData=avatar->playerSaveData;*avatar=candidate;return 1;
+}
+
+int hg_motion_door_sound(const uint8_t list[24],int opening,unsigned *sound) {
+    if(!list||!sound||(opening!=0&&opening!=1)||list[4]<1||list[4]>4)return 0;
+    MotionBoundary b={.door_list=list};uint32_t result;
+    if(!run(&b,HG_FIELD_GUEST_GetDoorSE,FIELD_ADDRESS,0,(unsigned)opening,0,&result))return 0;
+    *sound=result;return 1;
+}
+
+int hg_motion_handoff_begin(FieldSystem *field,HGMotionTask *task){
+    if(!field||!task||task->active)return 0;
+    HGMotionTask candidate={0};MotionBoundary b={.field=field->native_scene_resources,.avatar=field->playerAvatar,.object=PlayerAvatar_GetMapObject(field->playerAvatar),.manager=field->mapObjectManager,.task=&candidate,.static_environment=1};
+    if(!run(&b,HG_FIELD_GUEST_ov01_02205AEC,FIELD_ADDRESS,0,0,0,NULL)||!candidate.active)return 0;
+    *task=candidate;return 1;
+}
+int hg_motion_task_tick(FieldSystem *field,HGMotionTask *task){
+    if(!task||!task->active)return 1;
+    if(!field||task->callback!=HG_FIELD_GUEST_ov01_02205B14)return 0;
+    MotionBoundary b={.field=field->native_scene_resources,.avatar=field->playerAvatar,.object=PlayerAvatar_GetMapObject(field->playerAvatar),.manager=field->mapObjectManager,.task=task,.static_environment=1};uint32_t result;
+    if(!run(&b,task->callback,TASK_HANDLE,0,0,0,&result)||result>1)return 0;
+    if(result)task->active=0;return 1;
 }

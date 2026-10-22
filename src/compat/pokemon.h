@@ -1,5 +1,10 @@
 #pragma once
 #include "compat/story.h"
+/* This header is the native replacement for the original pokemon.h. The
+ * original pulls the Nitro sprite/3D SDK chain in through sprite_system.h,
+ * which no native unit can compile; the same declarations are provided here
+ * through the generated pokemon records and decls. */
+#define POKEHEARTGOLD_POKEMON_H
 #include "item.h"
 #include "move.h"
 #include "constants/abilities.h"
@@ -39,6 +44,7 @@ typedef struct {
     BOOL (*location_compatible)(void *,unsigned);
     int (*map_location)(void *,unsigned,unsigned);
     void (*date)(void *,HGMonDate *);
+    BOOL (*is_night)(void *);
 } HGPokemonServices;
 HGPokemonServices hg_pokemon_services_exchange(HGPokemonServices);
 

@@ -6,10 +6,18 @@
 #define HEIGHT 600
 static void field_fail(unsigned line) { fprintf(stderr,"Field viewer check failed at src/field_viewer.m:%u\n",line);exit(EXIT_FAILURE); }
 void hg_ui_test_approach(HGFieldApp *,unsigned);
+void hg_ui_test_return_to_elm(HGFieldApp *);
+void hg_test_prepare_defeat(HGFieldApp *);
+void hg_ui_test_approach_center_door(HGFieldApp *);
+void hg_ui_test_prepare_nurse(HGFieldApp *);
+void hg_ui_test_prepare_mart(HGFieldApp *);
+void hg_ui_test_prepare_mother(HGFieldApp *);
+int hg_ui_test_nurse_healed(HGFieldApp *);
 @interface FieldCanvas : NSView
 @property const HGFieldView *field;
 @property HGFieldApp *application;
 @property HGFieldApp *suspendedStory;
+@property HGFieldApp *previousCheckpoint;
 @property BOOL exploring;
 @property BOOL audioEnabled;
 @property HGFieldView *characterScene;
@@ -24,6 +32,9 @@ void hg_ui_test_approach(HGFieldApp *,unsigned);
 - (BOOL)render;
 - (void)resetCamera;
 - (BOOL)loadMap:(unsigned)map error:(char *)error;
+- (BOOL)loadCheckpoint:(NSString *)path error:(char *)error;
+- (BOOL)loadSession:(NSString *)path cartridge:(BOOL)cartridge error:(char *)error;
+- (BOOL)undoCheckpoint:(char *)error;
 - (BOOL)loadCharacter:(unsigned)model error:(char *)error;
 - (BOOL)setExplorationEnabled:(BOOL)enabled error:(char *)error;
 @end
@@ -50,7 +61,7 @@ void hg_ui_test_approach(HGFieldApp *,unsigned);
     }];
     [[NSRunLoop mainRunLoop] addTimer:self.simulationTimer forMode:NSRunLoopCommonModes];return self;
 }
-- (void)dealloc { [self.simulationTimer invalidate];hg_field_app_free(self.application);hg_field_app_free(self.suspendedStory);hg_field_view_free(self.characterScene); }
+- (void)dealloc { [self.simulationTimer invalidate];hg_field_app_free(self.application);hg_field_app_free(self.suspendedStory);hg_field_app_free(self.previousCheckpoint);hg_field_view_free(self.characterScene); }
 - (BOOL)loadMap:(unsigned)map error:(char *)error {
     self.movementKeys=0;hg_field_view_free(self.characterScene);self.characterScene=NULL;
     HGFieldApp *next=self.exploring?hg_field_app_new_explore(map,error,256):map==64?hg_field_app_new_game(error,256):hg_field_app_new(map,error,256);hg_field_app_free(self.application);self.application=next;self.field=hg_field_app_view(next);
@@ -58,6 +69,24 @@ void hg_ui_test_approach(HGFieldApp *,unsigned);
     if(next)[self resetCamera];
     if(![self render]) { snprintf(error,256,"Rasterization failed");hg_field_app_free(self.application);self.application=NULL;self.field=NULL;[self render];return NO; }
     return next!=NULL;
+}
+- (BOOL)loadCheckpoint:(NSString *)path error:(char *)error { return [self loadSession:path cartridge:NO error:error]; }
+- (BOOL)loadSession:(NSString *)path cartridge:(BOOL)cartridge error:(char *)error {
+    HGFieldApp *next=cartridge?hg_field_app_continue(path.fileSystemRepresentation,error,256):hg_field_app_checkpoint_load(path.fileSystemRepresentation,error,256);if(!next)return NO;
+    DSCamera camera;hg_field_app_camera(next,&camera,WIDTH,HEIGHT);
+    if(!hg_field_app_render(next,&camera,self.bitmap.bitmapData,WIDTH,HEIGHT)){snprintf(error,256,"Cannot display this checkpoint");hg_field_app_free(next);return NO;}
+    if(self.audioEnabled&&!hg_field_app_audio_enable(next,1,error,256)){hg_field_app_free(next);return NO;}
+    HGFieldApp *old=self.exploring?self.suspendedStory:self.application;
+    if(self.exploring){hg_field_app_free(self.application);self.suspendedStory=NULL;}
+    hg_field_app_free(self.previousCheckpoint);self.previousCheckpoint=old;hg_field_app_audio_enable(old,0,NULL,0);
+    self.application=next;self.exploring=NO;self.movementKeys=0;hg_field_app_clear_input(next);hg_field_view_free(self.characterScene);self.characterScene=NULL;self.field=hg_field_app_view(next);self.camera=camera;return [self render];
+}
+- (BOOL)undoCheckpoint:(char *)error {
+    if(!self.previousCheckpoint){snprintf(error,256,"No previous session");return NO;}
+    if(self.audioEnabled&&!hg_field_app_audio_enable(self.previousCheckpoint,1,error,256))return NO;
+    if(self.exploring){hg_field_app_free(self.application);self.application=self.suspendedStory;self.suspendedStory=NULL;self.exploring=NO;}
+    hg_field_app_audio_enable(self.application,0,NULL,0);HGFieldApp *old=self.application;self.application=self.previousCheckpoint;self.previousCheckpoint=old;
+    self.movementKeys=0;hg_field_app_resume(self.application);hg_field_view_free(self.characterScene);self.characterScene=NULL;self.field=hg_field_app_view(self.application);[self resetCamera];return [self render];
 }
 - (BOOL)setExplorationEnabled:(BOOL)enabled error:(char *)error {
     if(enabled==self.exploring)return YES;
@@ -101,7 +130,17 @@ void hg_ui_test_approach(HGFieldApp *,unsigned);
     [self.image drawInRect:self.bounds fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:1];
 }
 - (void)keyDown:(NSEvent *)event {
+    if(event.keyCode==53&&hg_field_app_battle_active(self.application)){self.movementKeys=0;hg_field_app_battle_cancel(self.application);return;}
+    if(event.keyCode==53&&hg_field_app_shop(self.application)){hg_field_app_shop_cancel(self.application);return;}
     if(!self.field)return;
+    if(hg_field_app_name_pending(self.application)){
+        self.movementKeys=0;hg_field_app_clear_input(self.application);
+        NSString *draft=[NSString stringWithUTF8String:hg_field_app_name_text(self.application)];
+        if(event.keyCode==36||event.keyCode==53){if(!event.isARepeat)hg_field_app_name_submit(self.application,draft.UTF8String,event.keyCode==53);}
+        else if(event.keyCode==51){if(draft.length){NSRange last=[draft rangeOfComposedCharacterSequenceAtIndex:draft.length-1];hg_field_app_name_edit(self.application,[draft substringToIndex:last.location].UTF8String);}}
+        else if(event.characters.length&&![event.characters rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].length){hg_field_app_name_edit(self.application,[draft stringByAppendingString:event.characters].UTF8String);}
+        [self render];return;
+    }
     DSCamera c=self.camera;NSString *key=event.charactersIgnoringModifiers.lowercaseString;BOOL changed=YES;
     if(hg_field_app_player(self.application,NULL,NULL)) {
         if([key isEqualToString:@"b"]||[key isEqualToString:@"p"]||event.keyCode==53){
@@ -168,6 +207,8 @@ static NSString *mapTitle(unsigned map) {
 @property(strong) FieldCanvas *canvas;
 @property(strong) NSSearchField *search;
 @property(strong) NSPopUpButton *category;
+@property(strong) NSPopUpButton *checkpoints;
+@property(strong) NSButton *checkpointBack;
 @property BOOL characters;
 @property(strong) NSTableView *table;
 @property(strong) NSTextField *status;
@@ -184,8 +225,42 @@ static NSString *mapTitle(unsigned map) {
 @property BOOL synchronizingSelection;
 @end
 @implementation FieldApp
+- (BOOL)saveToPath:(NSString *)path {
+    self.canvas.movementKeys=0;hg_field_app_clear_input(self.canvas.application);char error[256];
+    BOOL ok=hg_field_app_save(self.canvas.application,path.fileSystemRepresentation,error,sizeof(error));
+    self.status.stringValue=ok?@"Game saved.":[NSString stringWithUTF8String:error];return ok;
+}
+- (void)saveGame:(id)sender {
+    (void)sender;
+    if(!hg_field_app_save_unlocked(self.canvas.application)){self.status.stringValue=@"Save unlocks after Mom's introduction.";return;}
+    const char *existing=hg_field_app_save_path(self.canvas.application);
+    if(existing[0]){[self saveToPath:[NSString stringWithUTF8String:existing]];return;}
+    NSSavePanel *panel=[NSSavePanel savePanel];panel.nameFieldStringValue=@"HeartGold.sav";
+    if([panel runModal]==NSModalResponseOK)[self saveToPath:panel.URL.path];
+    [self.window makeFirstResponder:self.canvas];
+}
+- (void)continueGame:(id)sender {
+    (void)sender;NSOpenPanel *panel=[NSOpenPanel openPanel];panel.canChooseDirectories=NO;panel.allowsMultipleSelection=NO;
+    if([panel runModal]==NSModalResponseOK) {
+        char error[256];
+        if([self.canvas loadSession:panel.URL.path cartridge:YES error:error])[self synchronizeCheckpoint];
+        else self.status.stringValue=[NSString stringWithUTF8String:error];
+    }
+    [self.window makeFirstResponder:self.canvas];
+}
 - (void)showBag:(id)sender { (void)sender;self.canvas.movementKeys=0;hg_field_app_inspect(self.canvas.application,1);[self.canvas render];[self.window makeFirstResponder:self.canvas]; }
 - (void)showPokemon:(id)sender { (void)sender;self.canvas.movementKeys=0;hg_field_app_inspect(self.canvas.application,2);[self.canvas render];[self.window makeFirstResponder:self.canvas]; }
+- (void)checkpointChanged:(id)sender {
+    (void)sender;NSString *path=self.checkpoints.selectedItem.representedObject;if(!path)return;char error[256];
+    if(![self.canvas loadCheckpoint:path error:error]){self.status.stringValue=[NSString stringWithUTF8String:error];[self.checkpoints selectItemAtIndex:0];return;}
+    [self synchronizeCheckpoint];
+}
+- (void)synchronizeCheckpoint {
+    self.characters=NO;[self.category selectItemAtIndex:0];self.exploration.enabled=YES;self.exploration.state=NSControlStateValueOff;
+    self.selectedMap=hg_field_app_map(self.canvas.application);self.search.stringValue=@"";self.results=[NSMutableDictionary new];self.synchronizingSelection=YES;[self filterMaps];self.synchronizingSelection=NO;
+    self.checkpointBack.enabled=self.canvas.previousCheckpoint!=NULL;[self updateSceneStatus:self.selectedMap success:YES reason:@""];[self.window makeFirstResponder:self.canvas];
+}
+- (void)checkpointBack:(id)sender { (void)sender;char error[256];if(![self.canvas undoCheckpoint:error]){self.status.stringValue=[NSString stringWithUTF8String:error];return;}[self.checkpoints selectItemAtIndex:0];[self synchronizeCheckpoint]; }
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)app { (void)app;return YES; }
 - (NSString *)titleFor:(unsigned)model {
     if(!self.characters)return mapTitle(model);
@@ -268,14 +343,24 @@ static NSString *mapTitle(unsigned map) {
     self.exploration=[NSButton checkboxWithTitle:@"Explore freely" target:self action:@selector(changeExploration:)];self.exploration.frame=NSMakeRect(280,612,180,28);self.exploration.autoresizingMask=NSViewMinYMargin;self.exploration.toolTip=@"Browse scenery without story events or NPCs. Untick to resume your previous session.";[root addSubview:self.exploration];
     NSButton *bag=[NSButton buttonWithTitle:@"Bag (B)" target:self action:@selector(showBag:)];bag.frame=NSMakeRect(470,612,110,28);bag.autoresizingMask=NSViewMinYMargin;[root addSubview:bag];
     NSButton *pokemon=[NSButton buttonWithTitle:@"Pokémon (P)" target:self action:@selector(showPokemon:)];pokemon.frame=NSMakeRect(590,612,140,28);pokemon.autoresizingMask=NSViewMinYMargin;[root addSubview:pokemon];
+    self.checkpoints=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(740,612,250,28) pullsDown:NO];[self.checkpoints addItemWithTitle:@"Jump to checkpoint…"];
+    NSString *checkpointDirectory=[NSBundle.mainBundle.executablePath.stringByDeletingLastPathComponent stringByAppendingPathComponent:@"checkpoints"];
+    NSArray<NSString *> *files=[[[NSFileManager defaultManager] contentsOfDirectoryAtPath:checkpointDirectory error:nil] sortedArrayUsingSelector:@selector(compare:)];
+    NSDictionary *starters=@{@"152":@"Chikorita",@"155":@"Cyndaquil",@"158":@"Totodile"};NSArray *stages=@[@"",@"Route 29",@"Before rival",@"After rival",@"Before tutorial",@"After tutorial"];
+    for(NSString *file in files){if(![file.pathExtension isEqualToString:@"hgcheckpoint"])continue;NSArray *parts=[file.stringByDeletingPathExtension componentsSeparatedByString:@"-"];if(parts.count!=2)continue;NSString *name=starters[parts[0]];NSInteger stage=[parts[1] integerValue];if(!name||stage<1||stage>5)continue;
+        [self.checkpoints addItemWithTitle:[NSString stringWithFormat:@"%@ · %@",name,stages[stage]]];self.checkpoints.lastItem.representedObject=[checkpointDirectory stringByAppendingPathComponent:file];}
+    self.checkpoints.target=self;self.checkpoints.action=@selector(checkpointChanged:);self.checkpoints.autoresizingMask=NSViewMinYMargin;self.checkpoints.toolTip=@"Resume an opening-route state captured after its required events. Back returns to your previous session.";[root addSubview:self.checkpoints];
+    self.checkpointBack=[NSButton buttonWithTitle:@"Back" target:self action:@selector(checkpointBack:)];self.checkpointBack.frame=NSMakeRect(995,612,75,28);self.checkpointBack.autoresizingMask=NSViewMinYMargin;self.checkpointBack.enabled=NO;[root addSubview:self.checkpointBack];
     self.search=[[NSSearchField alloc] initWithFrame:NSMakeRect(10,578,248,28)];self.search.placeholderString=@"Search name or enter an ID";self.search.delegate=self;self.search.autoresizingMask=NSViewMinYMargin;[root addSubview:self.search];
     NSScrollView *scroll=[[NSScrollView alloc] initWithFrame:NSMakeRect(10,48,248,520)];scroll.hasVerticalScroller=YES;scroll.autoresizingMask=NSViewHeightSizable;
     self.table=[[NSTableView alloc] initWithFrame:scroll.bounds];NSTableColumn *column=[[NSTableColumn alloc] initWithIdentifier:@"map"];column.width=240;[self.table addTableColumn:column];self.table.headerView=nil;self.table.rowHeight=28;self.table.dataSource=self;self.table.delegate=self;self.table.allowsEmptySelection=YES;scroll.documentView=self.table;[root addSubview:scroll];
     self.previous=[NSButton buttonWithTitle:@"Previous" target:self action:@selector(previousMap:)];self.previous.frame=NSMakeRect(10,10,120,28);[root addSubview:self.previous];
     self.next=[NSButton buttonWithTitle:@"Next" target:self action:@selector(nextMap:)];self.next.frame=NSMakeRect(138,10,120,28);[root addSubview:self.next];
-    self.status=[NSTextField labelWithString:@""];self.status.frame=NSMakeRect(280,10,790,24);self.status.autoresizingMask=NSViewWidthSizable;self.status.lineBreakMode=NSLineBreakByTruncatingMiddle;[root addSubview:self.status];
+    NSButton *save=[NSButton buttonWithTitle:@"Save" target:self action:@selector(saveGame:)];save.frame=NSMakeRect(280,10,75,28);[root addSubview:save];
+    NSButton *load=[NSButton buttonWithTitle:@"Continue…" target:self action:@selector(continueGame:)];load.frame=NSMakeRect(360,10,100,28);[root addSubview:load];
+    self.status=[NSTextField labelWithString:@""];self.status.frame=NSMakeRect(470,10,600,24);self.status.autoresizingMask=NSViewWidthSizable;self.status.lineBreakMode=NSLineBreakByTruncatingMiddle;[root addSubview:self.status];
     self.window=[[NSWindow alloc] initWithContentRect:root.frame styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable|NSWindowStyleMaskMiniaturizable backing:NSBackingStoreBuffered defer:NO];
-    self.window.contentView=root;self.window.contentMinSize=NSMakeSize(900,580);
+    self.window.contentView=root;self.window.contentMinSize=NSMakeSize(1080,580);
     if(self.exploreAtLaunch) {
         char error[256];if(![self.canvas setExplorationEnabled:YES error:error]){fprintf(stderr,"%s\n",error);field_fail(__LINE__);}
         self.exploration.state=NSControlStateValueOn;
@@ -404,6 +489,7 @@ static NSString *mapTitle(unsigned map) {
             NSEvent *up=[NSEvent keyEventWithType:NSEventTypeKeyUp location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:letter charactersIgnoringModifiers:letter isARepeat:NO keyCode:0];
             [self.canvas keyDown:down];hg_field_app_step(self.canvas.application);[self.canvas keyUp:up];
             for(unsigned tick=0;tick<7;tick++)hg_field_app_step(self.canvas.application);
+            for(unsigned tick=0;tick<64&&hg_field_app_transition_active(self.canvas.application);tick++)hg_field_app_step(self.canvas.application);
         }
         if(hg_field_app_map(travelSession)!=63 || hg_field_app_steps(travelSession)!=8 || ![self.canvas render])field_fail(__LINE__);
         if(self.canvas.application!=travelSession || self.selectedMap!=63 || self.rows[self.table.selectedRow].unsignedIntValue!=63)field_fail(__LINE__);
@@ -412,6 +498,8 @@ static NSString *mapTitle(unsigned map) {
         if(hg_field_app_steps(travelSession)!=8)field_fail(__LINE__);
         NSEvent *exitHouse=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"s" charactersIgnoringModifiers:@"s" isARepeat:NO keyCode:1];
         [self.canvas keyDown:exitHouse];hg_field_app_step(self.canvas.application);
+        /* Door travel now completes through the original asynchronous fade. */
+        for(unsigned tick=0;tick<256&&hg_field_app_map(travelSession)!=60;tick++)hg_field_app_step(travelSession);
         if(hg_field_app_map(travelSession)!=60 || hg_field_app_steps(travelSession)!=8 || ![self.canvas render])field_fail(__LINE__);
         if(self.canvas.application!=travelSession || self.selectedMap!=60 || self.canvas.movementKeys)field_fail(__LINE__);
         if(![self.canvas loadMap:65 error:reloadError])field_fail(__LINE__);
@@ -473,6 +561,29 @@ static NSString *mapTitle(unsigned map) {
         unsigned long long retainedRevision=hg_story_revision(hg_field_app_story(retained));
         self.exploration.state=NSControlStateValueOn;[self changeExploration:nil];
         if(self.canvas.application==retained||self.canvas.suspendedStory!=retained||!hg_field_app_is_exploring(self.canvas.application))field_fail(__LINE__);
+        if(![self.canvas loadMap:67 error:exploreError])field_fail(__LINE__);
+        hg_ui_test_approach_center_door(self.canvas.application);[self.canvas resetCamera];
+        [self.canvas keyDown:walk];hg_field_app_step(self.canvas.application);[self.canvas keyUp:release];
+        unsigned doorFrames=0;BOOL doorImage=NO;
+        for(unsigned tick=0;tick<64&&hg_field_app_transition_active(self.canvas.application);tick++){
+            if(hg_field_app_error(self.canvas.application)[0]||![self.canvas render])field_fail(__LINE__);
+            if(hg_field_app_map(self.canvas.application)==67&&hg_field_app_brightness(self.canvas.application)==0){
+                if(++doorFrames==7){[[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/center-door-opening-ui.png" atomically:YES];doorImage=YES;}
+            }
+            hg_field_app_step(self.canvas.application);
+        }
+        if(!doorImage||hg_field_app_map(self.canvas.application)!=69||hg_field_app_transition_active(self.canvas.application))field_fail(__LINE__);
+        NSEvent *exitDoor=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.canvas.window.windowNumber context:nil characters:@"s" charactersIgnoringModifiers:@"s" isARepeat:NO keyCode:1];
+        [self.canvas keyDown:exitDoor];hg_field_app_step(self.canvas.application);[self.canvas keyUp:release];
+        unsigned exitFrames=0;BOOL exitImage=NO;
+        for(unsigned tick=0;tick<80&&hg_field_app_transition_active(self.canvas.application);tick++){
+            if(hg_field_app_error(self.canvas.application)[0]||![self.canvas render])field_fail(__LINE__);
+            if(hg_field_app_map(self.canvas.application)==67&&hg_field_app_brightness(self.canvas.application)==0){
+                if(++exitFrames==5){[[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/center-door-exit-ui.png" atomically:YES];exitImage=YES;}
+            }
+            hg_field_app_step(self.canvas.application);
+        }
+        if(!exitImage||hg_field_app_map(self.canvas.application)!=67||hg_field_app_transition_active(self.canvas.application))field_fail(__LINE__);
         if(![self.canvas loadMap:143 error:exploreError])field_fail(__LINE__);
         for(unsigned i=0;i<64;i++)hg_field_app_step(self.canvas.application);
         if(hg_field_app_interaction_busy(self.canvas.application)||![self.canvas render])field_fail(__LINE__);
@@ -482,7 +593,144 @@ static NSString *mapTitle(unsigned map) {
         if(self.canvas.application!=retained||self.canvas.suspendedStory||!hg_field_app_player(retained,&restoredX,&restoredZ)||restoredX!=retainedX||restoredZ!=retainedZ||hg_story_revision(hg_field_app_story(retained))!=retainedRevision)field_fail(__LINE__);
         if(![retainedPage isEqualToString:[NSString stringWithUTF8String:hg_field_app_dialogue_page(retained)]]||!hg_field_app_interaction_busy(retained))field_fail(__LINE__);
         settleAutomatic(retained);
-        [self.canvas display];fprintf(stderr,"Map browser smoke: Elm, breeder and rival conversations, rival shove/jump and original completion, Mom, NPC paging, retained travel/session statistics, map-list/camera synchronization, walk/run, town sign, input, timing, search, exploration/session restoration and AppKit display passed\n");[NSApp terminate:nil];
+        HGFieldApp *beforeJump=self.canvas.application;HGStoryState *beforeJumpStory=hg_field_app_story(beforeJump);unsigned long long beforeJumpRevision=hg_story_revision(beforeJumpStory);
+        NSInteger checkpointIndex=-1;for(NSInteger i=1;i<self.checkpoints.numberOfItems;i++)if([self.checkpoints.itemArray[i].representedObject hasSuffix:@"152-2.hgcheckpoint"]){checkpointIndex=i;break;}
+        if(checkpointIndex<0)field_fail(__LINE__);[self.checkpoints selectItemAtIndex:checkpointIndex];[self checkpointChanged:self.checkpoints];
+        if(self.canvas.application==beforeJump||hg_field_app_map(self.canvas.application)!=67||!self.checkpointBack.enabled)field_fail(__LINE__);
+        NSEvent *rivalStep=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"d" charactersIgnoringModifiers:@"d" isARepeat:NO keyCode:2];
+        [self.canvas keyDown:rivalStep];hg_field_app_step(self.canvas.application);self.canvas.movementKeys=0;hg_field_app_clear_input(self.canvas.application);
+        BOOL battleSeen=NO,battleDone=NO,battleImage=NO;
+        for(unsigned tick=0;tick<16000;tick++){
+            hg_field_app_step(self.canvas.application);if(hg_field_app_error(self.canvas.application)[0])field_fail(__LINE__);
+            if(hg_field_app_battle_active(self.canvas.application)){
+                battleSeen=YES;if(!hg_field_app_battle_trainer(self.canvas.application))field_fail(__LINE__);
+                if(hg_field_app_battle_state(self.canvas.application)==HG_BATTLE_MOVES&&!battleImage){if(![self.canvas render])field_fail(__LINE__);[[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/rival-checkpoint-ui.png" atomically:YES];battleImage=YES;}
+                [self.canvas keyDown:confirm];
+            }else if(hg_field_app_dialogue(self.canvas.application)[0])[self.canvas keyDown:confirm];
+            if(battleSeen&&!hg_field_app_interaction_busy(self.canvas.application)&&!hg_field_app_dialogue(self.canvas.application)[0]){battleDone=YES;break;}
+        }
+        if(!battleSeen||!battleDone||!battleImage)field_fail(__LINE__);
+        hg_ui_test_return_to_elm(self.canvas.application);BOOL nameSeen=NO,nameDone=NO;
+        for(unsigned tick=0;tick<8192;tick++){
+            hg_field_app_step(self.canvas.application);if(hg_field_app_error(self.canvas.application)[0])field_fail(__LINE__);
+            if(hg_field_app_name_pending(self.canvas.application)){
+                nameSeen=YES;self.canvas.movementKeys=0;
+                for(NSString *letter in @[@"S",@"i",@"l",@"v",@"e",@"r"]){NSEvent *typed=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:letter charactersIgnoringModifiers:letter isARepeat:NO keyCode:1];[self.canvas keyDown:typed];}
+                if(strcmp(hg_field_app_name_text(self.canvas.application),"Silver")||self.canvas.movementKeys)field_fail(__LINE__);
+                if(![self.canvas render])field_fail(__LINE__);[[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/rival-naming-ui.png" atomically:YES];
+                [self.canvas keyDown:confirm];
+            }else if(hg_field_app_menu_pending(self.canvas.application)){
+                hg_field_app_clear_input(self.canvas.application);hg_field_app_input(self.canvas.application,0x40);hg_field_app_step(self.canvas.application);hg_field_app_clear_input(self.canvas.application);[self.canvas keyDown:confirm];
+            }else if(hg_field_app_dialogue(self.canvas.application)[0])[self.canvas keyDown:confirm];
+            if(nameSeen&&!hg_field_app_interaction_busy(self.canvas.application)){nameDone=YES;break;}
+        }
+        if(!nameSeen||!nameDone)field_fail(__LINE__);
+        for(unsigned tick=0;tick<32;tick++)hg_field_app_step(self.canvas.application);
+        if(![self saveToPath:@"build/evidence/native-save.sav"])field_fail(__LINE__);
+        char continueError[256];HGFieldApp *continued=hg_field_app_continue("build/evidence/native-save.sav",continueError,sizeof(continueError));
+        if(!continued)field_fail(__LINE__);DSCamera continuedCamera;hg_field_app_camera(continued,&continuedCamera,WIDTH,HEIGHT);
+        if(!hg_field_app_render(continued,&continuedCamera,self.canvas.bitmap.bitmapData,WIDTH,HEIGHT))field_fail(__LINE__);
+        hg_field_app_free(continued);
+
+        [self checkpointBack:nil];if(self.canvas.application!=beforeJump||hg_field_app_story(self.canvas.application)!=beforeJumpStory||hg_story_revision(beforeJumpStory)!=beforeJumpRevision)field_fail(__LINE__);
+        NSInteger tutorialIndex=-1;for(NSInteger i=1;i<self.checkpoints.numberOfItems;i++)if([self.checkpoints.itemArray[i].representedObject hasSuffix:@"152-4.hgcheckpoint"]){tutorialIndex=i;break;}
+        if(tutorialIndex<0)field_fail(__LINE__);[self.checkpoints selectItemAtIndex:tutorialIndex];[self checkpointChanged:self.checkpoints];
+        NSEvent *tutorialStep=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"a" charactersIgnoringModifiers:@"a" isARepeat:NO keyCode:0];
+        [self.canvas keyDown:tutorialStep];hg_field_app_step(self.canvas.application);self.canvas.movementKeys=0;hg_field_app_clear_input(self.canvas.application);
+        BOOL tutorialSeen=NO,tutorialDone=NO,captureImage=NO;
+        for(unsigned tick=0;tick<8192;tick++){
+            hg_field_app_step(self.canvas.application);if(hg_field_app_error(self.canvas.application)[0])field_fail(__LINE__);
+            if(hg_field_app_battle_active(self.canvas.application)){
+                tutorialSeen=YES;if(!hg_field_app_battle_tutorial(self.canvas.application)||hg_field_app_battle_trainer(self.canvas.application))field_fail(__LINE__);
+                if(hg_field_app_capture_phase(self.canvas.application)==5&&!captureImage){if(![self.canvas render])field_fail(__LINE__);[[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/catching-tutorial-ui.png" atomically:YES];captureImage=YES;}
+            }
+            if(hg_field_app_dialogue(self.canvas.application)[0])[self.canvas keyDown:confirm];
+            if(tutorialSeen&&!hg_field_app_interaction_busy(self.canvas.application)){tutorialDone=YES;break;}
+        }
+        if(!tutorialSeen||!tutorialDone||!captureImage)field_fail(__LINE__);char tutorialError[256];if(!hg_field_app_checkpoint_write(self.canvas.application,"build/checkpoints/ui-tutorial.hgcheckpoint",5,tutorialError,sizeof(tutorialError)))field_fail(__LINE__);
+        [self checkpointBack:nil];if(self.canvas.application!=beforeJump||hg_field_app_story(self.canvas.application)!=beforeJumpStory||hg_story_revision(beforeJumpStory)!=beforeJumpRevision)field_fail(__LINE__);
+        for(unsigned recoveryCase=0;recoveryCase<2;recoveryCase++) {
+        NSString *lossSuffix=recoveryCase?@"152-5.hgcheckpoint":@"152-1.hgcheckpoint";
+        NSInteger lossIndex=-1;for(NSInteger i=1;i<self.checkpoints.numberOfItems;i++)if([self.checkpoints.itemArray[i].representedObject hasSuffix:lossSuffix]){lossIndex=i;break;}
+        if(lossIndex<0)field_fail(__LINE__);[self.checkpoints selectItemAtIndex:lossIndex];[self checkpointChanged:self.checkpoints];
+        hg_test_prepare_defeat(self.canvas.application);BOOL lossSeen=NO,lossDone=NO,blackoutSeen=NO;unsigned lossSteps=0,centerFrames=0,battleMenuPhase=0;
+        NSEvent *lossDown=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"s" charactersIgnoringModifiers:@"s" isARepeat:NO keyCode:1];
+        NSEvent *battleEscape=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"" charactersIgnoringModifiers:@"" isARepeat:NO keyCode:53];
+        for(unsigned tick=0;tick<20000;tick++){
+            if(!lossSeen&&!hg_field_app_battle_active(self.canvas.application)&&!hg_field_app_interaction_busy(self.canvas.application)&&!(tick%32)){
+                hg_field_app_input(self.canvas.application,lossSteps++&1?0x20:0x10);
+            }
+            hg_field_app_step(self.canvas.application);hg_field_app_clear_input(self.canvas.application);
+            if(recoveryCase&&hg_field_app_map(self.canvas.application)==69){
+                if(![self.canvas render])field_fail(__LINE__);
+                if(++centerFrames==120)[[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/center-recovery-ui.png" atomically:YES];
+            }
+            if(hg_field_app_error(self.canvas.application)[0])field_fail(__LINE__);
+            if(hg_field_app_battle_active(self.canvas.application)){
+                lossSeen=YES;int action=hg_field_app_battle_state(self.canvas.application);
+                if(action==HG_BATTLE_COMMAND&&battleMenuPhase==0){if(!hg_field_app_battle_choose(self.canvas.application,2))field_fail(__LINE__);battleMenuPhase=1;}
+                else if(action==HG_BATTLE_BAG&&battleMenuPhase==1){if(![self.canvas render])field_fail(__LINE__);[[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/battle-bag-ui.png" atomically:YES];[self.canvas keyDown:battleEscape];battleMenuPhase=2;}
+                else if(action==HG_BATTLE_COMMAND&&battleMenuPhase==2){if(!hg_field_app_battle_choose(self.canvas.application,3))field_fail(__LINE__);battleMenuPhase=3;}
+                else if(action==HG_BATTLE_PARTY&&battleMenuPhase==3){if(![self.canvas render])field_fail(__LINE__);[self.canvas keyDown:battleEscape];battleMenuPhase=4;}
+                else if(action==HG_BATTLE_COMMAND||action==HG_BATTLE_MESSAGE)[self.canvas keyDown:confirm];
+                else if(action==HG_BATTLE_MOVES){[self.canvas keyDown:lossDown];hg_field_app_step(self.canvas.application);self.canvas.movementKeys=0;hg_field_app_clear_input(self.canvas.application);[self.canvas keyDown:confirm];}
+            }else if(hg_field_app_dialogue(self.canvas.application)[0]){
+                const char *lossText=hg_field_app_dialogue(self.canvas.application);
+                if(recoveryCase?(strstr(lossText,"scurried to")&&strstr(lossText,"Center, protecting")):(strstr(lossText,"scurried back")&&strstr(lossText,"home, protecting")))blackoutSeen=YES;
+                if(![self.canvas render])field_fail(__LINE__);[self.canvas keyDown:confirm];
+            }
+            if(lossSeen&&hg_field_app_map(self.canvas.application)==(recoveryCase?69:63)&&!hg_field_app_interaction_busy(self.canvas.application)){lossDone=YES;break;}
+        }
+        if(!lossSeen||!blackoutSeen||!lossDone||battleMenuPhase!=4||![self.canvas render]){fprintf(stderr,"Blackout UI: loss=%d message=%d done=%d map=%u state=%d text=%s\n",lossSeen,blackoutSeen,lossDone,hg_field_app_map(self.canvas.application),hg_field_app_battle_state(self.canvas.application),hg_field_app_dialogue(self.canvas.application));field_fail(__LINE__);}
+        if(recoveryCase){
+            hg_ui_test_prepare_nurse(self.canvas.application);[self.canvas keyDown:confirm];BOOL nurseDone=NO,nurseImage=NO;
+            for(unsigned tick=0;tick<2048;tick++){
+                hg_field_app_step(self.canvas.application);
+                if(hg_field_app_error(self.canvas.application)[0]||![self.canvas render])field_fail(__LINE__);
+                if(tick==100){[[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/nurse-healing-ui.png" atomically:YES];nurseImage=YES;}
+                if(hg_field_app_menu_pending(self.canvas.application)){
+                    if(!hg_field_app_menu_choice_supported(self.canvas.application,0))field_fail(__LINE__);
+                    [self.canvas keyDown:walk];hg_field_app_step(self.canvas.application);[self.canvas keyUp:release];[self.canvas keyDown:confirm];
+                }else if(hg_field_app_dialogue(self.canvas.application)[0])[self.canvas keyDown:confirm];
+                if(tick&&!hg_field_app_interaction_busy(self.canvas.application)){nurseDone=YES;break;}
+            }
+            if(!nurseDone||!nurseImage||!hg_ui_test_nurse_healed(self.canvas.application))field_fail(__LINE__);
+            hg_ui_test_prepare_mart(self.canvas.application);[self.canvas keyDown:confirm];BOOL martSeen=NO,martDone=NO;
+            for(unsigned tick=0;tick<2048;tick++){
+                hg_field_app_step(self.canvas.application);if(hg_field_app_error(self.canvas.application)[0]||![self.canvas render])field_fail(__LINE__);
+                if(hg_field_app_shop(self.canvas.application)){
+                    if(!martSeen){[[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/mart-ui.png" atomically:YES];martSeen=YES;}
+                    hg_field_app_shop_cancel(self.canvas.application);
+                }else if(hg_field_app_menu_pending(self.canvas.application)){
+                    if(martSeen){[self.canvas keyDown:walk];hg_field_app_step(self.canvas.application);[self.canvas keyUp:release];}
+                    [self.canvas keyDown:confirm];
+                }else if(hg_field_app_dialogue(self.canvas.application)[0])[self.canvas keyDown:confirm];
+                if(martSeen&&!hg_field_app_interaction_busy(self.canvas.application)){martDone=YES;break;}
+            }
+            if(!martSeen||!martDone){fprintf(stderr,"Mart UI: seen=%d done=%d text=%s\n",martSeen,martDone,hg_field_app_dialogue(self.canvas.application));field_fail(__LINE__);}
+
+        }
+        [self checkpointBack:nil];if(self.canvas.application!=beforeJump||hg_story_revision(beforeJumpStory)!=beforeJumpRevision)field_fail(__LINE__);
+        }
+        {
+            char phoneError[256];HGFieldApp *previous=self.canvas.application;
+            HGFieldApp *mother=hg_field_app_checkpoint_load("build/checkpoints/158-5.hgcheckpoint",phoneError,sizeof(phoneError));if(!mother)field_fail(__LINE__);
+            self.canvas.application=mother;hg_ui_test_prepare_mother(mother);[self.canvas resetCamera];BOOL seen=NO,done=NO;
+            NSEvent *answer=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@" " charactersIgnoringModifiers:@" " isARepeat:NO keyCode:49];
+            for(unsigned tick=0;tick<4096;tick++){
+                hg_field_app_step(mother);if(hg_field_app_error(mother)[0]||![self.canvas render])field_fail(__LINE__);
+                if(hg_field_app_menu_pending(mother)){
+                    if(!seen){[[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/mother-call-ui.png" atomically:YES];seen=YES;}
+                    [self.canvas keyDown:answer];
+                }else if(hg_field_app_dialogue(mother)[0])[self.canvas keyDown:answer];
+                if(seen&&!hg_field_app_interaction_busy(mother)){done=YES;break;}
+            }
+            if(!seen||!done)field_fail(__LINE__);
+            if(![self.canvas render])field_fail(__LINE__);
+            [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/mother-call-return-ui.png" atomically:YES];
+            self.canvas.application=previous;hg_field_app_free(mother);[self.canvas resetCamera];
+        }
+        [self.canvas display];fprintf(stderr,"Map browser smoke: Elm, breeder and rival conversations, rival shove/jump and original completion, Mom, NPC paging, retained travel/session statistics, map-list/camera synchronization, validated checkpoint/Back, visible rival battle/cutscene return, typed rival naming and Elm Egg handoff, automatic tutorial capture/return and five-Ball checkpoint, original wild loss/home and Center recovery with healing presentation, visible Center entrance and exit doors, normal Nurse Joy healing, original Mart clerk/menu and native shop panel, walk/run, town sign, input, timing, search, exploration/session restoration and AppKit display passed\n");[NSApp terminate:nil];
     });
 }
 @end

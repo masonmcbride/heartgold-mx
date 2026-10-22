@@ -12,7 +12,7 @@
 #include "character_sprites.inc"
 #include <stdarg.h>
 typedef struct {
-    DSModel model;unsigned id,material_base;int material,shape,posed;
+    DSModel model;DSTextureBank bank;unsigned id,material_base;int material,shape,posed;
     DSTransform transform;double chunk[3];size_t first,count;
 } PropGeometry;
 struct HGFieldView {
@@ -20,7 +20,7 @@ struct HGFieldView {
     DSRasterTriangle *triangles;size_t count,capacity;
     DSRasterMaterial materials[4096];unsigned material_count;int failed;
     double min[3],max[3],world_origin[3];
-    DSTexture player_frames[32];
+    DSTexture player_frames[32];unsigned avatar_frames;
     char failure[256];
     double chunk_offset[3];
     unsigned material_base;int prop_materials[550];DSTransform transform;
@@ -57,7 +57,7 @@ static int bind_materials(HGFieldView *view,const DSModel *model,const DSTexture
 }
 static int prop_draw(void *user,unsigned id,const uint8_t *bytes,size_t size,const DSTransform *transform,int material,int shape) {
     HGFieldView *view=user;DSModel model;DSTextureBank bank;DSModelStats stats;
-    if(id>=550 || !ds_model_open(bytes,size,0,&model))return 0;
+    if(id>=550 || !ds_model_open(bytes,size,0,&model)||!ds_texture_bank(bytes,size,&bank))return 0;
     if(view->prop_materials[id]<0) {
         if(!ds_texture_bank(bytes,size,&bank) || !bind_materials(view,&model,&bank,view->material_count)) { fprintf(stderr,"Unsupported prop material: %u\n",id);return 0; }
         view->prop_materials[id]=(int)view->material_count;view->material_count+=model.materials;
@@ -65,13 +65,14 @@ static int prop_draw(void *user,unsigned id,const uint8_t *bytes,size_t size,con
     view->material_base=(unsigned)view->prop_materials[id];view->transform=*transform;
     size_t first=view->count;
     int ok=shape<0?ds_model_scene(&model,collect,view,&stats):ds_model_scene_shape(&model,(unsigned)shape,(unsigned)material,collect,view,&stats);
+    if(!ok)snprintf(view->failure,sizeof(view->failure),"Prop %u material %d shape %d scene rejected",id,material,shape);
     if(ok&&!view->failed) {
         if(view->prop_count==view->prop_capacity) {
             unsigned cap=view->prop_capacity?view->prop_capacity*2:32;if(cap>2048)return 0;
             void *memory=realloc(view->props,cap*sizeof(*view->props));if(!memory)return 0;view->props=memory;view->prop_capacity=cap;
         }
         PropGeometry *record=view->props+view->prop_count++;
-        *record=(PropGeometry){.model=model,.id=id,.material_base=view->material_base,.material=material,.shape=shape,.transform=*transform,.first=first,.count=view->count-first};
+        *record=(PropGeometry){.model=model,.bank=bank,.id=id,.material_base=view->material_base,.material=material,.shape=shape,.transform=*transform,.first=first,.count=view->count-first};
         memcpy(record->chunk,view->chunk_offset,sizeof(record->chunk));
     }
     return ok && !view->failed;
@@ -83,7 +84,7 @@ static int append_props(HGFieldView *view,const HGLandChunk *land,unsigned list_
     unsigned count=bytes[0]|(unsigned)bytes[1]<<8;if(size!=2+2*count || count>=550)goto cleanup;
     int archive=field_type?NARC_a_0_4_0:NARC_a_1_4_8;
     unsigned ids[550];for(unsigned i=0;i<count;i++)ids[i]=bytes[2+2*i]|(unsigned)bytes[3+2*i]<<8;
-    for(unsigned i=0;i<=count;i++) { unsigned id=i<count?ids[i]:0;if(!native_resource_member(archive,0,(int)id,&bytes,&size) || !hg_prop_resources_load(resources,id,bytes,size))goto cleanup; }
+    for(unsigned i=0;i<=count;i++) { unsigned id=i<count?ids[i]:0;if(!native_resource_member(archive,0,(int)id,&bytes,&size) || !hg_prop_resources_load(resources,id,bytes,size)){snprintf(view->failure,sizeof(view->failure),"Cannot load prop model %u",id);goto cleanup;} }
     props=MapPropManager_New(HEAP_ID_FIELD1,resources);if(!props)goto cleanup;
     NARC *stream=native_resource_stream(land->props,land->props_size);if(!stream)goto cleanup;
     MapPropManager_LoadFromNARC(stream,(u32)land->props_size,props,0);NARC_Delete(stream);
@@ -237,18 +238,25 @@ static HGFieldView *character_load(unsigned id,char *error,size_t size,int playe
             hg_field_view_free(view);return load_error(error,size,"Missing follower frame %u",i);
         }
     }
-    if(player==1)for(unsigned i=1;i<=32;i++) {
-        char name[17];snprintf(name,sizeof(name),"hero.%u",i);
-        if(!ds_texture_find(&bank,name,palette_name,&view->player_frames[i-1])||
-           view->player_frames[i-1].width!=view->materials[0].texture.width||
-           view->player_frames[i-1].height!=view->materials[0].texture.height) {
-            hg_field_view_free(view);return load_error(error,size,"Missing hero frame %u",i);
+    if(player==1||player==7) {
+        char prefix[17];snprintf(prefix,sizeof(prefix),"%s",texture_name);
+        char *suffix=strrchr(prefix,'.');
+        if(!suffix){hg_field_view_free(view);return load_error(error,size,"Missing avatar texture prefix");}
+        *suffix=0;
+        unsigned count=player==1?32:12;view->avatar_frames=count;
+        for(unsigned i=1;i<=count;i++) {
+            char name[17];int n=snprintf(name,sizeof(name),"%s.%u",prefix,i);
+            if(n<0||(size_t)n>=sizeof(name)||!ds_texture_find(&bank,name,palette_name,&view->player_frames[i-1])||
+               view->player_frames[i-1].width!=view->materials[0].texture.width||
+               view->player_frames[i-1].height!=view->materials[0].texture.height) {
+                hg_field_view_free(view);return load_error(error,size,"Missing avatar frame %u",i);
+            }
         }
     }
     if(!ds_model_inspection_scene(&model,collect,view,&stats) || view->failed || !view->count) {
         load_error(error,size,"Character mesh/material unsupported: %s",view->failure);hg_field_view_free(view);return NULL;
     }
-    if(player&&player<4) {
+    if((player&&player<4)||player==7) {
         /* The native billboard used to crop type-7 textures to their center
          * 16 columns. Sideways hats/arms extend outside that strip. Expand the
          * horizontal canvas and UV span together: retain texel scale, original
@@ -275,12 +283,22 @@ HGFieldView *hg_character_sprite_load(unsigned sprite,unsigned direction,char *e
     for(unsigned i=0;i<NELEMS(character_sprites);i++)if(character_sprites[i].sprite==sprite)
     {
         unsigned kind=character_sprites[i].kind,flags=character_sprites[i].flags;
-        int mode=kind==21?5:kind==19?3:kind==7?2:flags==0x20?4:0;
-        unsigned frame=kind==21?1:flags==0x20?0:1+4*direction;
+        int mode=kind==13?7:kind==5?6:kind==21?5:kind==19?3:kind==7?2:flags==0x20?4:0;
+        unsigned frame=kind==13?1:kind==21?1:flags==0x20?0:1+4*direction;
         return character_load(character_sprites[i].model,error,size,mode,frame,character_sprites[i].mesh);
     }
     return load_error(error,size,"Event sprite %u requires an unsupported template or graphics variable",sprite);
 }
+HGFieldView *hg_avatar_sprite_load(unsigned sprite,unsigned direction,char *error,size_t size) {
+    if(direction>3)return load_error(error,size,"Invalid avatar direction");
+    for(unsigned i=0;i<NELEMS(character_sprites);i++)if(character_sprites[i].sprite==sprite) {
+        unsigned kind=character_sprites[i].kind;
+        if(kind!=7&&kind!=13)return load_error(error,size,"Avatar sprite %u requires an unsupported template",sprite);
+        return character_load(character_sprites[i].model,error,size,kind==7?1:7,kind==7?1+4*direction:1,character_sprites[i].mesh);
+    }
+    return load_error(error,size,"Unknown avatar sprite %u",sprite);
+}
+unsigned hg_avatar_sprite_frames(const HGFieldView *sprite){return sprite?sprite->avatar_frames:0;}
 int hg_player_sprite_frame(HGFieldView *sprite,unsigned frame) {
     if(!sprite||frame<1||frame>32||!sprite->player_frames[frame-1].texels)return 0;
     for(unsigned i=0;i<sprite->material_count;i++)sprite->materials[i].texture=sprite->player_frames[frame-1];
@@ -299,6 +317,7 @@ int hg_field_view_render_actors(const HGFieldView *v,const HGFieldBillboard *act
         const HGFieldView *sprite=actors[a].sprite;
         if(!sprite||!sprite->count||sprite->max[0]<=sprite->min[0]||sprite->max[1]<=sprite->min[1])return 0;
         for(unsigned j=0;j<3;j++)if(!isfinite(actors[a].world[j]))return 0;
+        if(!isfinite(actors[a].scale)||actors[a].scale<0||actors[a].scale>16)return 0;
         count+=sprite->count;materials+=sprite->material_count;
     }
     DSRasterTriangle *tri=malloc(count*sizeof(*tri));DSRasterMaterial *mat=malloc(materials*sizeof(*mat));
@@ -313,10 +332,11 @@ int hg_field_view_render_actors(const HGFieldView *v,const HGFieldBillboard *act
             if(actors[a].fixed) {
                 vertex.x+=world[0]-v->world_origin[0];vertex.y+=world[1];vertex.z+=world[2]-v->world_origin[2];
             } else {
-            double x=vertex.x-(sprite->min[0]+sprite->max[0])/2;
+            double scale=actors[a].scale?actors[a].scale:1;
+            double x=(vertex.x-(sprite->min[0]+sprite->max[0])/2)*scale;
             vertex.x=world[0]-v->world_origin[0]+cos(camera->yaw)*x;
             vertex.z=world[2]-v->world_origin[2]-sin(camera->yaw)*x;
-            vertex.y=world[1]+vertex.y-sprite->min[1]+0.1;
+            vertex.y=world[1]+(vertex.y-sprite->min[1])*scale+0.1;
             }
             vertex.material+=material_base;tri[triangle_base+i].v[j]=vertex;
         }
@@ -350,25 +370,43 @@ int hg_field_view_prop_poses(HGFieldView *v,const HGPropPose *poses,unsigned cou
     if(!v||count>16||(!poses&&count))return 0;unsigned matched[16]={0};
     typedef struct { PropGeometry *record;DSRasterTriangle *triangles;int posed; } Update;
     Update updates[2048];unsigned pending=0;int ok=0;
+    struct { unsigned index;DSTexture texture; } textures[4096];unsigned texture_count=0;
     for(unsigned i=0;i<v->prop_count;i++) {
-        PropGeometry *r=v->props+i;const DSJointPose *pose=NULL;
+        PropGeometry *r=v->props+i;const DSJointPose *pose=NULL;const HGPropPose *selected=NULL;
         for(unsigned j=0;j<count;j++)if(r->id==poses[j].model &&
             fabs(r->transform.m[3]+r->chunk[0]+v->world_origin[0]-poses[j].world[0])<0.001 &&
             fabs(r->transform.m[7]+r->chunk[1]-poses[j].world[1])<0.001 &&
-            fabs(r->transform.m[11]+r->chunk[2]+v->world_origin[2]-poses[j].world[2])<0.001) { pose=&poses[j].pose;matched[j]=1;break; }
-        if(!pose&&!r->posed)continue;
+            fabs(r->transform.m[11]+r->chunk[2]+v->world_origin[2]-poses[j].world[2])<0.001) { selected=poses+j;pose=selected->pose.mask?&selected->pose:NULL;matched[j]=1;break; }
+        int patterned=selected&&selected->texture.bytes;
+        if(patterned||(r->posed&2))for(unsigned mat=0;mat<r->model.materials;mat++) {
+            if(r->material>=0&&(unsigned)r->material!=mat)continue;
+            DSModelMaterial material;if(!ds_model_material(&r->model,mat,&material))goto cleanup;
+            if(!material.texture[0])continue;char tex[17],pal[17];
+            int changed=patterned?ds_texture_animation_frame(&selected->texture,selected->texture_frame,material.name,tex,pal):0;
+            if(changed<0)goto cleanup;DSTexture texture;
+            if(!ds_texture_find(&r->bank,changed?tex:material.texture,changed?pal:material.palette,&texture))goto cleanup;
+            unsigned index=r->material_base+mat,at=0;
+            for(;at<texture_count;at++)if(textures[at].index==index)break;
+            if(at<texture_count){if(textures[at].texture.texels!=texture.texels||textures[at].texture.palette!=texture.palette)goto cleanup;}
+            else {if(texture_count>=4096)goto cleanup;textures[texture_count].index=index;textures[texture_count++].texture=texture;}
+        }
+        if(!pose&&!(r->posed&1)) {
+            if(patterned||r->posed)updates[pending++]=(Update){r,NULL,patterned?2:0};
+            continue;
+        }
         /* Stage every changed mesh before touching the retained scene. A
          * missing instance or rejected pose cannot leave a half-updated map. */
         DSRasterTriangle *triangles=malloc((r->count?r->count:1)*sizeof(*triangles));
         if(!triangles)goto cleanup;
-        updates[pending++]=(Update){r,triangles,pose!=NULL};
+        updates[pending++]=(Update){r,triangles,(pose?1:0)|(patterned?2:0)};
         PoseWriter writer={triangles,r,0,0};DSModelStats stats;
         if(!ds_model_scene_pose(&r->model,r->shape,r->material,pose,write_pose_triangle,&writer,&stats)||writer.failed||writer.count!=r->count)goto cleanup;
     }
     for(unsigned i=0;i<count;i++)if(!matched[i])goto cleanup;
     for(unsigned i=0;i<pending;i++) {
-        Update *u=updates+i;memcpy(v->triangles+u->record->first,u->triangles,u->record->count*sizeof(*u->triangles));u->record->posed=u->posed;
+        Update *u=updates+i;if(u->triangles)memcpy(v->triangles+u->record->first,u->triangles,u->record->count*sizeof(*u->triangles));u->record->posed=u->posed;
     }
+    for(unsigned i=0;i<texture_count;i++)v->materials[textures[i].index].texture=textures[i].texture;
     ok=1;
 cleanup:
     for(unsigned i=0;i<pending;i++)free(updates[i].triangles);return ok;

@@ -1,4 +1,5 @@
 """Prepare unchanged follower C closure and original metadata; build-local only."""
+from generated_files import write_text_if_changed
 import csv,hashlib,json,pathlib,re,sys
 from narc_tools import pack
 root,out=map(pathlib.Path,sys.argv[1:]);path=root/'src/follow_mon.c';source=path.read_text()
@@ -23,8 +24,8 @@ for name in sorted(selected):
  m=functions[name];line=source[:m.start()].count('\n')+1
  decls.append(m[0].split(' {',1)[0]+';');lines.extend([f'#line {line} "{path}"',m[0]])
  records.append({'function':name,'source':'src/follow_mon.c','slice_sha256':hashlib.sha256(m[0].encode()).hexdigest()})
-(out/'follow_public.inc').write_text(''.join(d+'\n' for d in decls if not d.startswith('static ')))
-(out/'follow_decls.inc').write_text('\n'.join(decls)+'\n');(out/'follow_kernel.inc').write_text('\n'.join(lines)+'\n')
+write_text_if_changed(out/'follow_public.inc', ''.join(d+'\n' for d in decls if not d.startswith('static ')))
+write_text_if_changed(out/'follow_decls.inc', '\n'.join(decls)+'\n');write_text_if_changed(out/'follow_kernel.inc', '\n'.join(lines)+'\n')
 schema=(root/'files/fielddata/tsurepoke/tp_param.csv.txt').read_text().splitlines()
 if schema!=['index:skip:constants/follow_mon_idx.h','unk0:u8','too_tall:u8:bool','unk2_0:u8.4:bool','hover:u8.4:bool','unk3:u8']:raise ValueError('Follower parameter schema changed')
 rows=list(csv.DictReader((root/'files/fielddata/tsurepoke/tp_param.csv').open()))
@@ -33,4 +34,4 @@ def number(v):
  return int(v,0)
 pack(out/'resources/follow_params.narc',[bytes([number(r['unk0']),number(r['too_tall']),number(r['unk2_0'])|(number(r['hover'])<<4),number(r['unk3'])]) for r in rows])
 inputs=['src/follow_mon.c','files/fielddata/tsurepoke/tp_param.csv','files/fielddata/tsurepoke/tp_param.csv.txt','include/constants/follow_mon_idx.h','include/constants/sprites.h','include/constants/species.h','include/constants/pokemon.h','include/follow_mon.h']
-(out/'follow_provenance.json').write_text(json.dumps({'functions':records,'sources':{p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in inputs},'parameter_records':len(rows)},indent=2)+'\n')
+write_text_if_changed(out/'follow_provenance.json', json.dumps({'functions':records,'sources':{p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in inputs},'parameter_records':len(rows)},indent=2)+'\n')

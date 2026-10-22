@@ -9,3 +9,6 @@ int hg_map_object_init_event(LocalMapObject *,MapObjectManager *,unsigned map,co
 void hg_map_object_set_map(LocalMapObject *,unsigned);
 
 void hg_map_object_set_movement(LocalMapObject *,unsigned);
+
+/* Original serialized object fields; native resource ownership is rebuilt. */
+int hg_map_object_restore_record(LocalMapObject *,MapObjectManager *,const SavedMapObject *);

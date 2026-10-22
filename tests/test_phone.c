@@ -13,7 +13,7 @@ static void reach_message(HGFieldScript *script,const char *name) {
     CHECK(ticks<128&&hg_field_script_phone_active(script));const HGScriptMessage *message=hg_field_script_message(script);CHECK(message&&strstr(message->text,name)&&strstr(message->text,"disaster"));
 }
 int main(void) {
-    CHECK(hg_phone_admit(1,2,0)&&hg_phone_admit(1,2,4));CHECK(!hg_phone_admit(0,2,0)&&!hg_phone_admit(1,0,0)&&!hg_phone_admit(1,2,5));
+    CHECK(hg_phone_admit(1,2,0)&&hg_phone_admit(1,2,4));CHECK(hg_phone_admit(0,2,0)&&!hg_phone_admit(0,2,1)&&!hg_phone_admit(1,0,0)&&!hg_phone_admit(1,2,5));
     for(unsigned gender=0;gender<2;gender++) {
         HGStoryState *owner=hg_story_new();CHECK(owner);CHECK(hg_story_profile_set(owner,gender?"Kris":"Ethan",gender));unsigned long long revision=hg_story_revision(owner);char error[256];
         HGFieldScript *script=hg_field_script_bytes(owner,call,sizeof(call),0,0,error,sizeof(error));CHECK(script&&!flag(owner));reach_message(script,gender?"Kris":"Ethan");

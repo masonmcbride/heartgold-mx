@@ -37,7 +37,7 @@ int hg_props_validate(const uint8_t *p,size_t n) {
 }
 void MI_CpuClearFast(void *p,u32 n) { memset(p,0,n); }
 static void unsupported(const char *name) { fprintf(stderr,"Unsupported prop boundary: %s\n",name);abort(); }
-void GetSafariObjectConfig(SafariObjectConfig *p,int i,int gender) { (void)p;(void)i;(void)gender;unsupported("Safari placement"); }
+__attribute__((weak)) void GetSafariObjectConfig(SafariObjectConfig *p,int i,int gender) { (void)p;(void)i;(void)gender;unsupported("Safari placement"); }
 BOOL sub_0201F990(NNSG3dResMdl *a,const VecFx32 *b,const MtxFx33 *c,VecFx32 *d) { (void)a;(void)b;(void)c;(void)d;unsupported("original view culling");return FALSE; }
 struct AreaDataManager_Sub8AC { u16 (*models)[2],(*shapes)[2];unsigned model_count,shape_count; };
 struct AreaDataManager { AreaDataManager_Sub8AC attributes; };
@@ -84,9 +84,11 @@ void GF3dRender_DrawModel(NNSG3dRenderObj *obj,const VecFx32 *t,const MtxFx33 *r
 }
 void NNS_G3dDraw1Mat1Shp(const NNSG3dResMdl *model,int material,int shape,BOOL send) {
     if(!model || material<0 || (unsigned)material>=model->model.materials || shape<0 || (unsigned)shape>=model->model.shapes) { draw.failed=1;return; }
-    DSTransform node,identity=ds_transform_identity();
+    DSTransform node;
     if(model->model.nodes!=1 || !ds_model_node(&model->model,0,&node)) { draw.failed=1;return; }
-    for(unsigned i=0;i<12;i++)if(node.m[i]!=identity.m[i]) { draw.failed=1;return; }
+    /* The native shape renderer evaluates the single root's SBC transform.
+     * Parent scale compensation and transformed multi-node draws stay refused. */
+    for(unsigned r=0;r<3;r++)for(unsigned c=0;c<4;c++)if(c!=r&&node.m[4*r+c]){draw.failed=1;return;}
     if(send) { draw.material_valid=1;draw.material_id=material;draw.material_model=model; }
     else if(!draw.material_valid || draw.material_id!=material || draw.material_model!=model) { draw.failed=1;return; }
     submit(model,material,shape);

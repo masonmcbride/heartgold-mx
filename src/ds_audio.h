@@ -12,6 +12,8 @@ DSAudio *ds_audio_new(void);
 DSAudio *ds_audio_clone(const DSAudio *);
 void ds_audio_free(DSAudio *);
 int ds_audio_play(DSAudio *,unsigned kind,unsigned sequence);
+/* Original StartSeqEx bank selection, used by normal Pokémon cries. */
+int ds_audio_play_bank(DSAudio *,unsigned kind,unsigned sequence,unsigned bank);
 void ds_audio_stop(DSAudio *,unsigned kind,unsigned sequence);
 void ds_audio_fade(DSAudio *,unsigned volume,unsigned ticks);
 unsigned ds_audio_bgm(const DSAudio *);

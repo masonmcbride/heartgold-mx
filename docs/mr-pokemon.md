@@ -1,5 +1,11 @@
 # Mr. Pokemon checkpoint
 
+Current continuation: the first rival now runs as a visible field battle and
+finishes its original post-battle departure for all three starters. Both win and
+allowed loss resume. See [checkpoints](checkpoints.md) and the latest
+[battle checkpoint](battle-runtime.md#rival-fieldscript-application-connection).
+Earlier limits below record the preceding checkpoint.
+
 This checkpoint is extended by [Elm's phone call](elm-phone.md): the panic call
 now completes, and the next rejection is the rival's TrainerBattle command.
 

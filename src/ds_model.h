@@ -23,7 +23,7 @@ typedef struct { double x,y,z,u,v;uint32_t color;unsigned material; } DSSceneVer
 typedef void (*DSSceneTriangle)(void *,const DSSceneVertex[3]);
 int ds_model_scene(const DSModel *,DSSceneTriangle,void *,DSModelStats *);
 
-typedef struct { char texture[17],palette[17];uint32_t texture_params,polygon_attrs,diffuse;unsigned width,height;int identity_uv,translation_uv;double uv_u,uv_v; } DSModelMaterial;
+typedef struct { char name[17],texture[17],palette[17];uint32_t texture_params,polygon_attrs,diffuse;unsigned width,height;int identity_uv,translation_uv;double uv_u,uv_v; } DSModelMaterial;
 int ds_model_material(const DSModel *,unsigned,DSModelMaterial *);
 
 int ds_model_scene_shape(const DSModel *,unsigned shape,unsigned material,DSSceneTriangle,void *,DSModelStats *);

@@ -26,11 +26,12 @@ void PlayerProfile_SetVersion(PlayerProfile *,u8);
 void SetLCRNGSeed(u32);
 u32 GetLCRNGSeed(void);
 u16 LCRandom(void);
-/* Explicit native save-owner handle, not a full original SaveData. */
+/* Bind the canonical original table-owned save records. */
 void hg_story_bind_field(HGStoryState *,FieldSystem *);
 /* Native scene services clone their objects for both preflight and replay.
  * The script owner never mutates the source scene during validation. */
 typedef struct {
+    u16 launch_args[4];unsigned launch_arg_count;int incoming_phone;
     const void *source;
     void *(*clone)(const void *);
     void (*destroy)(void *);
@@ -41,6 +42,10 @@ typedef struct {
     int (*busy)(const void *);
     int (*command)(void *,ScriptContext *,unsigned,BOOL *);
     int (*face_player)(void *);
+    struct BugContest *(*contest_new)(void *,FieldSystem *,unsigned);
+    void (*contest_end)(void *,FieldSystem *);
+    void (*pc_full)(void *);
+    int (*restore)(void *);
 } HGScriptSceneServices;
 HGFieldScript *hg_field_script_scene_new(HGStoryState *,unsigned map,unsigned entry,const HGScriptSceneServices *,char *,size_t);
 const void *hg_field_script_scene(const HGFieldScript *);
@@ -59,7 +64,10 @@ struct Bag;struct Bag *hg_story_save_bag(SaveData *);
 struct SavePokegear;struct SavePokegear *hg_story_save_pokegear(SaveData *);
 
 SysInfo *hg_story_save_sys_info(SaveData *);
-u16 *hg_story_save_blackout_spawn(SaveData *);
+u16 hg_story_blackout_spawn(SaveData *);
+void hg_story_set_blackout_spawn(SaveData *,u16);
 u32 hg_story_rng_get(const HGStoryState *);
 void hg_story_rng_set(HGStoryState *,u32);
 void hg_story_touch(HGStoryState *);
+
+HGStoryState *hg_story_from_save_records(const SaveData *);

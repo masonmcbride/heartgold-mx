@@ -14,7 +14,7 @@
 #include "FATSection.h"
 #include "convert.h"
 
-SDAT::SDAT(PseudoFile &file, uint32_t sseqToLoad) : sseq(), sbnk()
+SDAT::SDAT(PseudoFile &file, uint32_t sseqToLoad, uint32_t bankOverride) : sseq(), sbnk()
 {
 	// Read sections
 	NDSStdHeader header;
@@ -60,7 +60,9 @@ SDAT::SDAT(PseudoFile &file, uint32_t sseqToLoad) : sseq(), sbnk()
 		
 
 		// Read SBNK for this SSEQ
-		uint16_t bank = newSSEQ->info.bank;
+		uint32_t bank = bankOverride == UINT32_MAX ? newSSEQ->info.bank : bankOverride;
+		if (bank > UINT16_MAX) throw std::range_error("Invalid bank override");
+		newSSEQ->info.bank = static_cast<uint16_t>(bank);
 		fileID = infoSection.BANKrecord.entries.at(bank).fileID;
 		name = "SBNK" + NumToHexString(fileID).substr(2);
 		if (SYMBOffset)

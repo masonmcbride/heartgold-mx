@@ -1,6 +1,8 @@
 #pragma once
 #include "compat/pokemon.h"
 #include "bag.h"
+#include "bag_cursor.h"
+#include "pokemon_storage_system.h"
 #include "constants/battle_menu.h"
 #include "constants/battle_subscript.h"
 #include "constants/move_effects.h"
@@ -11,6 +13,7 @@
 #include "trainer_data.h"
 #include "sys_task.h"
 #include "wild_encounter.h"
+#include "bug_contest_internal.h"
 #include "constants/abilities.h"
 #include "constants/weather.h"
 
@@ -18,14 +21,13 @@
 #include "encounter_records.inc"
 u32 PlayerAvatar_GetUnk8(PlayerAvatar *);
 /* Native-only setup view consumed by unchanged trainer party generation. */
-struct BattleSetup {u32 battleType;Party *party[4];Trainer trainer[4];u32 trainerId[4];};
+
 /* Native-only opaque presentation handles; never serialized or passed to ARM. */
 typedef struct BgConfig BgConfig;
 typedef struct BattleHpBar BattleHpBar;
 typedef struct MessageFormat MessageFormat;
 typedef struct PaletteData PaletteData;
 typedef struct BagCursor BagCursor;
-typedef struct PCStorage PCStorage;
 typedef struct SOUND_CHATOT SOUND_CHATOT;
 typedef struct PokepicManager PokepicManager;
 typedef struct SpriteSystem SpriteSystem;
@@ -55,6 +57,11 @@ typedef int PaletteBufferId;
 #define GF_BG_LYR_MAIN_1 1
 #define GF_BG_LYR_MAIN_2 2
 #include "battle_records.inc"
+typedef struct SaveWiFiHistory SaveWiFiHistory;
+typedef struct SavePalPad SavePalPad;
+typedef struct EvolutionTaskData EvolutionTaskData;
+#include "tutorial_setup_record.inc"
+
 #include "dex_measure_ids.inc"
 #define TRAINER_MALE 0
 
@@ -78,3 +85,8 @@ void MI_CpuClear32(void *,u32);
 void sub_02074F9C(BattleSystem *,int,int,void *,u8);
 
 void G2_SetBG0Priority(int);
+
+#undef OFFSET_OF
+#define OFFSET_OF(type,field) offsetof(__typeof__(*((type)0)),field)
+u8 ov10_0221BF44(BattleSystem *,BattleContext *);
+u8 ov10_0221C038(BattleSystem *,BattleContext *);

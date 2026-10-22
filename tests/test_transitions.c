@@ -96,7 +96,19 @@ int main(void) {
     }
     char error[256];HGFieldApp *app=hg_field_app_new(60,error,sizeof(error));CHECK(app);
     hg_test_walk_to(app,695,397);unsigned steps=hg_field_app_steps(app);const HGFieldView *town=hg_field_app_view(app);
+    /* The door animation is observable in the rendered field, not only in state:
+     * the fade darkens toward black while active and returns to neutral after. */
+    CHECK(hg_field_app_brightness(app)==0);
     hg_field_app_input(app,0x40);hg_field_app_step(app);hg_field_app_input(app,0);
+    int dimmed=0;
+    for(unsigned tick=0;tick<32&&hg_field_app_transition_active(app);tick++) {
+        unsigned char frame[256*192*4];DSCamera view;hg_field_app_camera(app,&view,256,192);
+        CHECK(hg_field_app_render(app,&view,frame,256,192));
+        if(hg_field_app_brightness(app)<0)dimmed++;
+        hg_field_app_step(app);
+    }
+    CHECK(dimmed&&hg_field_app_brightness(app)==0&&!hg_field_app_transition_active(app));
+    hg_test_travel(app,63,32);
     CHECK(hg_field_app_map(app)==63&&hg_field_app_view(app)!=town&&hg_field_app_steps(app)==steps);
     int x,z;CHECK(hg_field_app_player(app,&x,&z)&&x==3&&z==10);
     unsigned char pixels[256*192*4];DSCamera camera;hg_field_app_camera(app,&camera,256,192);
@@ -105,13 +117,14 @@ int main(void) {
     CHECK(hg_field_app_map(app)==63);
     hg_test_walk_to(app,3,10);steps=hg_field_app_steps(app);
     hg_field_app_input(app,0x80);hg_field_app_step(app);hg_field_app_input(app,0);
+    hg_test_travel(app,60,32);
     CHECK(hg_field_app_map(app)==60&&hg_field_app_steps(app)==steps);
-    CHECK(hg_field_app_player(app,&x,&z)&&x==695&&z==396);
+    CHECK(hg_field_app_player(app,&x,&z)&&x==695&&z==397);
     hg_test_settle(app);
     hg_field_app_input(app,0x82);hg_field_app_step(app);hg_field_app_input(app,0);
     for(unsigned i=0;i<3;i++)hg_field_app_step(app);
     CHECK(hg_field_app_map(app)==60&&hg_field_app_steps(app)==steps+1);
-    CHECK(hg_field_app_player(app,&x,&z)&&x==695&&z==397);
+    CHECK(hg_field_app_player(app,&x,&z)&&x==695&&z==398);
     hg_field_app_free(app);
     /* Actual application stairs, through collision-checked walking and the
      * original selector, preserve the same owner and statistic across floors. */
@@ -119,10 +132,12 @@ int main(void) {
     HGFieldLocation upstairs=approaches[3][1],downstairs=approaches[4][0];
     hg_test_walk_to(app,upstairs.x,upstairs.z);steps=hg_field_app_steps(app);
     hg_field_app_input(app,keys[upstairs.direction]);hg_field_app_step(app);hg_field_app_input(app,0);
+    hg_test_travel(app,64,32);
     CHECK(hg_field_app_map(app)==64&&hg_field_app_steps(app)==steps);
     hg_field_app_camera(app,&camera,256,192);CHECK(hg_field_app_render(app,&camera,pixels,256,192));
     hg_test_walk_to(app,downstairs.x,downstairs.z);steps=hg_field_app_steps(app);
     hg_field_app_input(app,keys[downstairs.direction]);hg_field_app_step(app);hg_field_app_input(app,0);
+    hg_test_travel(app,63,32);
     CHECK(hg_field_app_map(app)==63&&hg_field_app_steps(app)==steps);hg_field_app_free(app);
     CHECK(hg_transition_supported(33)&&!hg_transition_supported(540));
     /* Component scenario: exercise the movement/zone owner directly, without
@@ -142,6 +157,6 @@ int main(void) {
     CHECK(zone_steps==17&&hg_field_player_pending_map(zone_player)==-1&&hg_field_player_steps(zone_player)==17);
     CHECK(hg_field_player_position(zone_player,&x,&z,NULL)&&x==671&&z==398);
     hg_field_player_free(zone_player);
-    printf("Original warp kernel: %u portals across %u maps, original anchors/local-field records, staged commit/rejection; app town-house-town round trip and retained running/statistics passed\n",portals,selected_maps);
+    printf("Original warp kernel: %u portals across %u maps, original anchors/local-field records, staged commit/rejection; app town-house-town round trip with rendered fade, retained running/statistics passed\n",portals,selected_maps);
     return 0;
 }

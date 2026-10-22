@@ -129,3 +129,5 @@ int hg_field_resources_height_at(HGFieldResources *f,int32_t x,int32_t z,unsigne
     return hg_collision_height(tile.land.collision,tile.land.collision_size,mode,
                                reference,local_x,local_z,height);
 }
+
+unsigned hg_field_resources_matrix_width(const HGFieldResources *f){return f?f->width:0;}

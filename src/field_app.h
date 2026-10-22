@@ -39,6 +39,10 @@ void hg_field_app_clear_input(HGFieldApp *);
 /* Original in-memory step statistic; no disk save is loaded or written. */
 unsigned hg_field_app_steps(const HGFieldApp *);
 unsigned hg_field_app_map(const HGFieldApp *);
+/* Door/stair travel is a multi-frame fade; the destination map is installed
+ * before the fade-in completes, so callers that must not act mid-animation wait
+ * on this rather than on the map identity alone. */
+int hg_field_app_transition_active(const HGFieldApp *);
 /* Borrowed session owner, retained through native door/stair travel. */
 HGStoryState *hg_field_app_story(HGFieldApp *);
 
@@ -74,3 +78,32 @@ int hg_field_app_battle_choose(HGFieldApp *,unsigned);
 int hg_field_app_inspect(HGFieldApp *,int kind);
 int hg_field_app_inspect_kind(const HGFieldApp *);
 void hg_field_app_inspect_text(HGFieldApp *,char *,size_t);
+
+int hg_field_app_battle_trainer(const HGFieldApp *);
+
+/* Curated original-route checkpoints; writes require an idle, stable session. */
+int hg_field_app_checkpoint_write(HGFieldApp *,const char *path,unsigned stage,char *,size_t);
+HGFieldApp *hg_field_app_checkpoint_load(const char *path,char *,size_t);
+
+int hg_field_app_name_pending(const HGFieldApp *);
+const char *hg_field_app_name_text(const HGFieldApp *);
+int hg_field_app_name_edit(HGFieldApp *,const char *);
+int hg_field_app_name_submit(HGFieldApp *,const char *,int cancel);
+
+int hg_field_app_battle_tutorial(const HGFieldApp *);
+unsigned hg_field_app_capture_phase(const HGFieldApp *);
+
+/* Original cartridge save manager, distinct from development checkpoints. */
+int hg_field_app_save(HGFieldApp *,const char *path,char *,size_t);
+HGFieldApp *hg_field_app_continue(const char *path,char *,size_t);
+const char *hg_field_app_save_path(const HGFieldApp *);
+
+int hg_field_app_save_unlocked(HGFieldApp *);
+
+unsigned hg_field_app_battle_command_count(const HGFieldApp *);
+
+struct HGShop *hg_field_app_shop(HGFieldApp *);
+void hg_field_app_shop_cancel(HGFieldApp *);
+unsigned hg_field_app_menu_count(const HGFieldApp *);
+
+int hg_field_app_battle_cancel(HGFieldApp *);

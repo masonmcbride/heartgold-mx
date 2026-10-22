@@ -60,6 +60,12 @@ static int test_scene(void) {
     DSTransform translation=ds_transform_identity();translation.m[3]=1;translation.m[7]=2;translation.m[11]=3;
     DSTransform composed=ds_transform_multiply(translation,pivot);double x,y,z;ds_transform_point(&composed,4,5,6,&x,&y,&z);CHECK(x==-5 && y==7 && z==7);
     composed=ds_transform_multiply(pivot,translation);ds_transform_point(&composed,4,5,6,&x,&y,&z);CHECK(x==-9 && y==7 && z==5);
+    /* Explicit one-root scale and its reciprocal, as used by shop props. */
+    word(data+4,144);data[104]=3;data[105]=0;
+    const int scales[]={2048,8192,4096,8192,2048,4096};for(unsigned i=0;i<6;i++)word(data+108+4*i,(uint32_t)scales[i]);
+    CHECK(ds_model_node(&model,0,&full));CHECK(full.m[0]==0.5&&full.m[5]==2&&full.m[10]==1);
+    word(data+120,0);CHECK(!ds_model_node(&model,0,&full));word(data+120,8192);
+    word(data+4,131);CHECK(!ds_model_node(&model,0,&full));word(data+4,144);
     CHECK(!ds_model_scene(NULL,NULL,NULL,&stats));CHECK(!ds_model_scene(&model,NULL,NULL,NULL));
     return 0;
 }

@@ -2,7 +2,11 @@
 
 The field viewer now supports walking, running and door/stair travel through **New Bark and its seven interiors**. Approach a door and move into it; use the original direction indicated by a stair tile. Selecting one of these eight maps directly also creates an inspection player at its first warp, except New Bark which retains its existing town-center spawn. Other maps remain inspection-only scenes.
 
-The player, running-shoe state, original step-statistics record and native application owner survive travel. The camera resets around the destination, the map list follows the player, and map-list synchronization does not recreate the session. The native host clears held/pending input after travel to prevent an immediate repeat. Scene replacement is immediate; original door animations, fades, sound and full NPC reconciliation are not executed. Admitted story transition hooks and the lab’s resume script run through the separate staged story boundary.
+The player, running-shoe state, original step-statistics record and native application owner survive travel. The camera resets around the destination, the map list follows the player, and map-list synchronization does not recreate the session. The native host clears held/pending input after travel to prevent an immediate repeat. Travel is choreographed with the original presentation sequence: the field fades to black through the player's own original `FadeWork` (`FadeFunc_00`), the destination scene is installed while the screen is dark, the door/stair sound `SEQ_SE_DP_KAIDAN2` plays once at the exit, and the field fades back in (`FadeFunc_01`). The destination view is prepared before the fade begins, so a refused travel leaves the current scene untouched instead of fading back to an unchanged map. Interaction is reported busy for the whole fade so menus, scripts and tests wait for the animation. North-facing entrance props now open visibly through shared original one-shot
+playback and the original door-sound selector before fading. South-facing door
+arrivals now open during fade-in, execute the original threshold step, reposition
+the follower and close before returning control. The host schedules these phases;
+full per-kind original task execution and special camera paths remain incomplete; see [prop animation](prop-animation.md). Admitted story transition hooks and the lab's resume script run through the separate staged story boundary.
 
 ## Original code executed
 

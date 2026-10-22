@@ -33,6 +33,8 @@ HGPokemonServices hg_pokemon_services_exchange(HGPokemonServices next) { HGPokem
 static BOOL native_location(unsigned location) { GF_ASSERT(services.location_compatible);return services.location_compatible(services.owner,location); }
 static int native_map_location(unsigned type,unsigned index) { GF_ASSERT(services.map_location);return services.map_location(services.owner,type,index); }
 static void native_date(RTCDate *date) { GF_ASSERT(services.date);services.date(services.owner,date); }
+static BOOL native_night(void){GF_ASSERT(services.is_night);return services.is_night(services.owner);}
+#define IsNighttime native_night
 #define GF_RTC_CopyDate native_date
 #define sub_02017FE4 native_map_location
 #define ReadWholeNarcMemberByIdPair native_mon_read_whole

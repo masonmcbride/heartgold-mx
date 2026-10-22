@@ -64,6 +64,23 @@ DSThumbResult ds_thumb_run(DSThumb *c,size_t budget) {
             switch((ins>>6)&15) {
             case 0:c->r[d]=a&b;nz(c,c->r[d]);break;
             case 1:c->r[d]=a^b;nz(c,c->r[d]);break;
+            case 2: case 3: case 4: {
+                unsigned op=(ins>>6)&15,shift=b&255;
+                r=a;
+                if(shift) {
+                    if(op==2) {
+                        c->c=shift<=32?(a>>(32-shift))&1:0;
+                        r=shift<32?a<<shift:0;
+                    } else if(op==3) {
+                        c->c=shift<=32?(a>>(shift-1))&1:0;
+                        r=shift<32?a>>shift:0;
+                    } else {
+                        c->c=(a>>(shift<32?shift-1:31))&1;
+                        r=shift<32?(a>>shift)|((a&0x80000000u)?(~0u<<(32-shift)):0):0u-(a>>31);
+                    }
+                }
+                c->r[d]=r;nz(c,r);break;
+            }
             case 8:nz(c,a&b);break;
             case 14:c->r[d]=a&~b;nz(c,c->r[d]);break;
             case 15:c->r[d]=~b;nz(c,c->r[d]);break;

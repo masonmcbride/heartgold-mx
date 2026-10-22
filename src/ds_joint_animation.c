@@ -19,6 +19,22 @@ static int pivot(const DSJointAnimation *a,unsigned ref,DSTransform *out) {
     t.m[4*rows[0]+cols[1]]=(flags&32)?-y:y;
     t.m[4*rows[1]+cols[1]]=(flags&64)?-x:x;*out=t;return 1;
 }
+/* Constant or every-frame signed Q12 scalar curves. Scale stores a paired
+ * reciprocal for DS hierarchy compensation; the host admits scaled poses only
+ * on single-node models, where that reciprocal has no child to affect. */
+static int scalar(const DSJointAnimation *a,size_t *at,unsigned frame,int constant,int scale,double *out) {
+    unsigned width=4;size_t sample=*at;
+    if(constant){if(!span(a->size,*at,scale?8:4))return 0;*at+=scale?8:4;}
+    else {
+        if(!span(a->size,*at,8))return 0;uint32_t info=r32(a->bytes+*at);unsigned begin=info&65535,end=(info>>16)&4095,format=(info>>28)&3;
+        if((info>>30)||format>1||begin||end!=a->frames)return 0;
+        width=format?2:4;sample=r32(a->bytes+*at+4);*at+=8;
+        unsigned stride=width*(scale?2:1);if(!span(a->size,sample,(size_t)stride*a->frames))return 0;sample+=(size_t)frame*stride;
+    }
+    if(width==4){uint32_t bits=r32(a->bytes+sample);int32_t value;memcpy(&value,&bits,4);*out=value/4096.0;}
+    else *out=q12(r16(a->bytes+sample));
+    return 1;
+}
 int ds_joint_animation_pose(const DSJointAnimation *a,unsigned frame,DSJointPose *out) {
     if(!a||!a->bytes||!out||a->size<20||!a->frames||a->frames>4096||frame>=a->frames||!a->nodes||a->nodes>32||!span(a->size,20,2*a->nodes))return 0;
     DSJointPose pose={0};
@@ -27,20 +43,29 @@ int ds_joint_animation_pose(const DSJointAnimation *a,unsigned frame,DSJointPose
         const uint8_t *p=a->bytes+at;unsigned flags=r16(p),node=p[3];at+=4;
         if(node>=32||p[2]||(pose.mask&(1u<<node)))return 0;
         if(flags&1)continue;
-        /* Require explicit identity translation and scale, no model fallback.
-         * This keeps unsupported translations/scale compensation visible. */
-        if((flags&6)!=2||(flags&0x600)!=0x200||(flags&0xc0)||flags&0xc000)return 0;
-        unsigned ref;
-        if(flags&0x100){if(!span(a->size,at,4)||r16(a->bytes+at+2))return 0;ref=r16(a->bytes+at);}
-        else {
-            if(!span(a->size,at,8))return 0;uint32_t info=r32(a->bytes+at);unsigned begin=info&65535,end=(info>>16)&4095;
-            /* Reject interpolation/rate formats until the SDK curve semantics
-             * are implemented; every frame must have an explicit sample. */
-            if((info>>28)||begin||end!=a->frames)return 0;
-            size_t samples=r32(a->bytes+at+4);if(!span(a->size,samples,2*a->frames))return 0;
-            ref=r16(a->bytes+samples+2*frame);
+        if((flags&6)==4||(flags&0xc0)==0x80||(flags&0x600)==0x400||flags&0xc000)return 0;
+        if((flags&6)!=0&&(flags&6)!=2)return 0;
+        if((flags&0xc0)!=0&&(flags&0xc0)!=0x40)return 0;
+        if((flags&0x600)!=0&&(flags&0x600)!=0x200)return 0;
+        double translation[3]={0},scale[3]={1,1,1};DSTransform transform=ds_transform_identity();
+        if(!(flags&6))for(unsigned k=0;k<3;k++)if(!scalar(a,&at,frame,flags&(8u<<k),0,translation+k))return 0;
+        if(!(flags&0xc0)) {
+            unsigned ref;
+            if(flags&0x100){if(!span(a->size,at,4)||r16(a->bytes+at+2))return 0;ref=r16(a->bytes+at);at+=4;}
+            else {
+                if(!span(a->size,at,8))return 0;uint32_t info=r32(a->bytes+at);unsigned begin=info&65535,end=(info>>16)&4095;
+                if((info>>28)||begin||end!=a->frames)return 0;
+                size_t samples=r32(a->bytes+at+4);at+=8;if(!span(a->size,samples,2*a->frames))return 0;
+                ref=r16(a->bytes+samples+2*frame);
+            }
+            if(!pivot(a,ref,&transform))return 0;
         }
-        if(!pivot(a,ref,pose.nodes+node))return 0;pose.mask|=1u<<node;
+        if(!(flags&0x600)) {
+            for(unsigned k=0;k<3;k++)if(!scalar(a,&at,frame,flags&(0x800u<<k),1,scale+k))return 0;
+            if(scale[0]!=1||scale[1]!=1||scale[2]!=1)pose.scale_mask|=1u<<node;
+        }
+        for(unsigned k=0;k<3;k++){transform.m[4*k+3]=translation[k];for(unsigned row=0;row<3;row++)transform.m[4*row+k]*=scale[k];}
+        pose.nodes[node]=transform;pose.mask|=1u<<node;
     }
     *out=pose;return 1;
 }

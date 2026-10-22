@@ -14,6 +14,12 @@ int main(void) {
         printf("Sequence %u: %u frames, %u nonzero samples\n",ids[k],ticks,nonzero);
         CHECK(ticks>1&&ticks<1200&&nonzero);
     }
+    for(unsigned species=152;species<=183;species+=31){
+        CHECK(ds_audio_play_bank(a,DS_AUDIO_EFFECT,2,species));unsigned ticks=0,nonzero=0;
+        do{CHECK(ds_audio_tick(a));nonzero+=energy(ds_audio_pcm(a));ticks++;}while(ds_audio_playing(a,DS_AUDIO_EFFECT,2)&&ticks<600);
+        CHECK(ticks>1&&ticks<600&&nonzero);printf("Cry bank %u: %u frames, %u nonzero samples\n",species,ticks,nonzero);
+    }
+    CHECK(!ds_audio_play_bank(a,DS_AUDIO_EFFECT,2,999999));
     CHECK(!ds_audio_play(a,DS_AUDIO_EFFECT,999999));CHECK(ds_audio_error(a)[0]);
     CHECK(ds_audio_play(a,DS_AUDIO_BGM,1018));
     for(unsigned i=0;i<60;i++)CHECK(ds_audio_tick(a));

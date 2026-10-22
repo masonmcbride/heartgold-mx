@@ -1,4 +1,5 @@
 """Shared cached ARM data assembler and ELF section reader."""
+from generated_files import write_text_if_changed
 import hashlib,json,pathlib,struct,subprocess,shlex
 def sections(data,allow_relocations=False):
  assert data[:6]==b'\x7fELF\x01\x01'
@@ -22,6 +23,6 @@ def assemble(root,out,cc,source,target):
  result=subprocess.run(command+['-MMD','-MF',str(depfile)],capture_output=True,text=True)
  if result.returncode:raise ValueError(result.stderr)
  dependencies=shlex.split(depfile.read_text().replace('\\\n','').split(':',1)[1])
- stamp.write_text(json.dumps({'compiler':identity,'inputs':{p:digest(p) for p in dependencies}})+'\n')
+ write_text_if_changed(stamp, json.dumps({'compiler':identity,'inputs':{p:digest(p) for p in dependencies}})+'\n')
  return target.read_bytes()
 

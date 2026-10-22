@@ -70,6 +70,8 @@ int hg_motion_coordinate_event(FieldSystem *,PlayerAvatar *,const uint8_t *,unsi
 unsigned hg_field_guest_mom_spawn(void);
 
 int hg_motion_sync_previous(LocalMapObject *);
+/* Execute original height refresh; no surface is a valid original result. */
+int hg_motion_update_height(HGFieldResources *,LocalMapObject *);
 int hg_motion_settle(HGFieldResources *,LocalMapObject *);
 
 /* Native effect allocation/presentation; original Thumb update owns the arc,
@@ -81,6 +83,8 @@ int hg_motion_location_compatible(unsigned,int *);
 int hg_motion_map_location(unsigned,unsigned,unsigned *);
 
 int hg_motion_follow_tick(HGFieldResources *,PlayerAvatar *,LocalMapObject *,HGMotionSession *,int init,unsigned movement);
+
+int hg_motion_follow_height(LocalMapObject *,int32_t *);
 
 int hg_motion_follow_position(HGFieldResources *,PlayerAvatar *,LocalMapObject *,unsigned offset_direction,unsigned facing);
 
@@ -94,3 +98,19 @@ int hg_motion_apricorn_sprite(unsigned kind,int available,unsigned *out);
 typedef struct HGMotionFade { uint8_t work[48],environment[28];int brightness,active;unsigned type; } HGMotionFade;
 int hg_motion_fade_begin(HGMotionFade *,unsigned type,unsigned color,unsigned steps,unsigned frames_per_step);
 int hg_motion_fade_tick(HGMotionFade *);
+
+int hg_motion_position_center(int x,int z,VecFx32 *);
+
+/* Original death/special spawn routines; output is unchanged on failure. */
+int hg_field_guest_spawn(unsigned spawn,int special,int output[5]);
+
+/* Original bounded pose dispatcher; unsupported flags leave state unchanged. */
+int hg_motion_avatar_transition(PlayerAvatar *);
+
+int hg_motion_door_sound(const uint8_t list[24],int opening,unsigned *sound);
+
+/* Copyable continuation for original follower field tasks. Guest pointers stay
+ * inside the arena; only the original callback and owned environment persist. */
+typedef struct HGMotionTask { uint8_t environment[72];uint32_t callback;int active,retract; } HGMotionTask;
+int hg_motion_handoff_begin(FieldSystem *,HGMotionTask *);
+int hg_motion_task_tick(FieldSystem *,HGMotionTask *);

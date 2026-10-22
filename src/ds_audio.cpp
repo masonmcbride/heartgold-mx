@@ -14,17 +14,18 @@ thread_local const uint8_t *sequence_begin,*sequence_end;
 uint64_t epoch;
 struct Archive {
     std::vector<uint8_t> bytes;
-    std::map<unsigned,std::shared_ptr<SDAT>> sequences;
+    std::map<uint64_t,std::shared_ptr<SDAT>> sequences;
     Archive() {
         std::ifstream input(HG_SOUND_ARCHIVE,std::ios::binary);
         if(!input)throw std::runtime_error("Cannot open original sound archive");
         bytes.assign(std::istreambuf_iterator<char>(input),{});
         if(bytes.size()<64||bytes.size()>32*1024*1024)throw std::runtime_error("Invalid sound archive size");
     }
-    std::shared_ptr<SDAT> get(unsigned id) {
-        auto found=sequences.find(id);if(found!=sequences.end())return found->second;
-        PseudoFile file;file.data=&bytes;auto result=std::make_shared<SDAT>(file,id);
-        sequences.emplace(id,result);return result;
+    std::shared_ptr<SDAT> get(unsigned id,unsigned bank=UINT32_MAX) {
+        uint64_t key=(uint64_t(bank)<<32)|id;
+        auto found=sequences.find(key);if(found!=sequences.end())return found->second;
+        PseudoFile file;file.data=&bytes;auto result=std::make_shared<SDAT>(file,id,bank);
+        sequences.emplace(key,result);return result;
     }
 };
 std::shared_ptr<Archive> archive() { static auto cache=std::make_shared<Archive>();return cache; }
@@ -69,11 +70,11 @@ extern "C" DSAudio *ds_audio_clone(const DSAudio *source) {
     }catch(...){return nullptr;}
 }
 extern "C" void ds_audio_free(DSAudio *audio){delete audio;}
-extern "C" int ds_audio_play(DSAudio *audio,unsigned kind,unsigned id) {
+static int audio_play_bank(DSAudio *audio,unsigned kind,unsigned id,unsigned bank) {
     if(!audio||kind>DS_AUDIO_EFFECT)return 0;
     try {
-        if(kind==DS_AUDIO_BGM&&audio->voices[0]&&audio->voices[0]->id==id)return 1;
-        auto voice=std::make_unique<Voice>();voice->asset=audio->archive->get(id);voice->id=id;voice->rng=id+1;
+        if(kind==DS_AUDIO_BGM&&audio->voices[0]&&audio->voices[0]->id==id&&(bank==UINT32_MAX||audio->voices[0]->asset->sseq->info.bank==bank))return 1;
+        auto voice=std::make_unique<Voice>();voice->asset=audio->archive->get(id,bank);voice->id=id;voice->rng=id+1;
         voice->player.sampleRate=DS_AUDIO_RATE;voice->player.interpolation=INTERPOLATION_LINEAR;
         if(!voice->player.Setup(voice->asset->sseq.get()))throw std::runtime_error("No SSEQ track available");
         voice->player.sseqVol=Cnv_Sust(voice->asset->sseq->info.vol);
@@ -89,6 +90,8 @@ extern "C" int ds_audio_play(DSAudio *audio,unsigned kind,unsigned id) {
         audio->error[0]=0;return 1;
     }catch(const std::exception &error){snprintf(audio->error,sizeof(audio->error),"Sequence %u: %s",id,error.what());return 0;}
 }
+extern "C" int ds_audio_play(DSAudio *audio,unsigned kind,unsigned id){return audio_play_bank(audio,kind,id,UINT32_MAX);}
+extern "C" int ds_audio_play_bank(DSAudio *audio,unsigned kind,unsigned id,unsigned bank){return audio_play_bank(audio,kind,id,bank);}
 extern "C" void ds_audio_stop(DSAudio *audio,unsigned kind,unsigned id) {
     if(!audio)return;
     if(kind==DS_AUDIO_FANFARE)audio->fanfare_tail=0;

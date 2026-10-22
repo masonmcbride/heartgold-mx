@@ -18,13 +18,19 @@ int main(void){
         CHECK(GetMonData(mon,MON_DATA_SPECIES,NULL)==opponents[i]);CHECK(GetMonData(mon,MON_DATA_LEVEL,NULL)==5);
         CHECK(GetMonData(mon,MON_DATA_HP_IV,NULL)==0);CHECK(GetMonData(mon,MON_DATA_FRIENDSHIP,NULL)==255);
         CHECK(!hg_battle_commit(battle,&party,&profile,&bag,&dex,&stats));
-        int stopped=0,introduction=0;for(unsigned frame=0;frame<2000;frame++){
-            int state=hg_battle_tick(battle);if(state==HG_BATTLE_FAILED){CHECK(strstr(hg_battle_error(battle),"original trainer AI"));stopped=1;break;}
-            CHECK(state!=HG_BATTLE_FINISHED);
+        HGBattle *twin=hg_battle_new_setup(&setup,error,sizeof(error));CHECK(twin);
+        int finished=0,introduction=0;for(unsigned frame=0;frame<4000;frame++){
+            u32 host_rng=GetLCRNGSeed();int state=hg_battle_tick(battle);CHECK(GetLCRNGSeed()==host_rng);int twin_state=hg_battle_tick(twin);CHECK(twin_state==state&&GetLCRNGSeed()==host_rng);CHECK(!strcmp(hg_battle_message(battle),hg_battle_message(twin)));if(state==HG_BATTLE_FAILED)fprintf(stderr,"Trainer stopped: %s\n",hg_battle_error(battle));CHECK(state!=HG_BATTLE_FAILED);
+            if(state==HG_BATTLE_FINISHED){finished=1;break;}
             if(state==HG_BATTLE_MESSAGE){CHECK(!strstr(hg_battle_message(battle),"wild"));if(strstr(hg_battle_message(battle),"Boy"))introduction=1;}
-            if(state==HG_BATTLE_MESSAGE||state==HG_BATTLE_COMMAND||state==HG_BATTLE_MOVES)hg_battle_input(battle,1);
+            if(state==HG_BATTLE_MESSAGE||state==HG_BATTLE_COMMAND||state==HG_BATTLE_MOVES){CHECK(hg_battle_input(battle,1));CHECK(hg_battle_input(twin,1));}
         }
-        CHECK(stopped&&introduction);CHECK(!hg_battle_commit(battle,&party,&profile,&bag,&dex,&stats));hg_battle_free(battle);CHECK(!memcmp(&party,&initial,sizeof(party)));
+        CHECK(!memcmp(hg_battle_party(battle),hg_battle_party(twin),sizeof(party)));CHECK(hg_battle_ai_steps(battle)==hg_battle_ai_steps(twin));hg_battle_free(twin);
+        CHECK(finished&&introduction);CHECK(hg_battle_result(battle)==BATTLE_OUTCOME_WIN);CHECK(hg_battle_ai_calls(battle)>0&&hg_battle_ai_steps(battle)>0);
+        CHECK(!memcmp(&party,&initial,sizeof(party)));
+        printf("Original rival %u: victory, %u original AI command/move calls, %zu Thumb instructions\n",trainer_ids[i],hg_battle_ai_calls(battle),hg_battle_ai_steps(battle));
+        CHECK(hg_battle_commit(battle,&party,&profile,&bag,&dex,&stats));CHECK(GetMonData(Party_GetMonByIndex(&party,0),MON_DATA_EXPERIENCE,NULL)>GetMonData(Party_GetMonByIndex(&initial,0),MON_DATA_EXPERIENCE,NULL));
+        hg_battle_free(battle);
         battle=hg_battle_new_setup(&setup,error,sizeof(error));CHECK(battle);CHECK(!memcmp(&enemy,hg_battle_opponent(battle),sizeof(enemy)));hg_battle_free(battle);
         printf("Original rival %u: correct level-5 opposing starter, IVs and deterministic party\n",trainer_ids[i]);
     }

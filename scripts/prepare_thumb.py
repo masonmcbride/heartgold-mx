@@ -2,6 +2,7 @@
 """Assemble original Thumb with spelling-only GNU-to-LLVM compatibility.
 Generated code and original-derived bytes remain in the ignored build tree.
 """
+from generated_files import write_text_if_changed
 import hashlib, json, pathlib, re, struct, subprocess, sys
 upstream, output, compiler = map(pathlib.Path, sys.argv[1:])
 source = upstream / 'asm/overlay_01_021FAD1C.s'
@@ -29,7 +30,7 @@ for line in text.splitlines():
 output.mkdir(parents=True, exist_ok=True)
 assembly = output / 'terrain_thumb.s'
 obj = output / 'terrain_thumb.o'
-assembly.write_text('\n'.join(lines)+'\n')
+write_text_if_changed(assembly, '\n'.join(lines)+'\n')
 subprocess.run([str(compiler), '-target', 'arm-none-eabi', '-c', str(assembly), '-o', str(obj)], check=True)
 data = obj.read_bytes()
 assert data[:6] == b'\x7fELF\x01\x01'
@@ -87,12 +88,12 @@ provenance={
     'enabled_functions':{name:value for name,value in symbols.items() if value<end and (name.startswith('ov01_') or name.startswith('sub_'))},
     'relocations':relocations, 'native_arithmetic_boundaries':bridges,
 }
-(output/'terrain_thumb_provenance.json').write_text(json.dumps(provenance,indent=2)+'\n')
+write_text_if_changed(output/'terrain_thumb_provenance.json', json.dumps(provenance,indent=2)+'\n')
 header=['/* Generated from unchanged original assembly; do not distribute. */',
         'static const unsigned char hg_terrain_thumb[] = {',
         ','.join(str(b) for b in code), '};']
 for name,address in bridges.items():header.append(f'#define HG_THUMB_BOUNDARY_{name} {address}u')
 for name,value in symbols.items():
     if value<end and (name.startswith('ov01_') or name.startswith('sub_')):header.append(f'#define HG_THUMB_{name} {value}u')
-(output/'terrain_thumb.inc').write_text('\n'.join(header)+'\n')
+write_text_if_changed(output/'terrain_thumb.inc', '\n'.join(header)+'\n')
 print(f'Original terrain Thumb: {len(code)} bytes, terrain solver and helpers assembled/relocated')

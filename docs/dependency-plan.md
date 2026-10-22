@@ -1,13 +1,93 @@
 # Shared dependency plan
 
-Measured 2026-10-20. Target: original bedroom start through the first rival battle
-and catching tutorial. This is an implementation order, not a completion estimate.
+## Refreshed status, 2026-10-21
 
-Current checkpoint: live grass encounters now enter a visible wild battle and
-return EXP/party changes to the same field owner. Original trainer AI and
-blackout recovery are the next battle bottlenecks. See
-[battle runtime](battle-runtime.md#live-grass-encounters-and-field-return).
-Historical measurements below describe earlier admission stages.
+Target: continuous original new game through eight Johto badges, Lance, Hall of
+Fame and first credits, before postgame Kanto exploration. The persistence kernel
+is implemented and verified for the admitted gameplay. Do not list missing disk
+saving, record initialization, wild capture, normal Nurse Joy, Mart transactions,
+blackouts or the catching tutorial as future work: those paths now execute.
+Broader application/field resume is an integration obligation as later systems
+are admitted, not a reason to rebuild the save manager.
+
+| Root owner | Implemented and verified | Remaining acceptance work |
+| --- | --- | --- |
+| Persistence | All 42 normal + six extra records; original initialization, mirrored/journaled save lifecycle, failure/corruption recovery, native/ARM record layouts, durable reopen and process restart; IGT and offline time | Prove later admitted object/puzzle/application reconstruction through actual saved chapter boundaries; dispatch or reject any newly required save callbacks. Retail-save interoperability is unverified, not an established blocker to native chapter work. |
+| Field | Walking/running, ledges, followers, collision, portals, doors, original script movement and opening-route objects | Field moves and badge permissions, puzzle/object controllers and broader map/resource support on actual chapter routes |
+| Scripts/applications | Private save candidates, original opening/rival/Elm/tutorial scripts, phone trigger application, healing, three-item standard menus and Mart application boundary | Resolve event IDs/header/dynamic calls; admit required opcode operands and applications by real route; generic phone/PC/naming and later story services remain incomplete |
+| Battles/Pokemon | Wild encounters, first rival and AI, Fight/Run, ordinary Poke Ball and Sport Ball capture, party/PC publication, breakout restoration, battle medicines, voluntary/forced switches, original Falkner team/AI/replacement/rewards, EXP and home/Center blackouts | Trainer-used medicines, broader trainer paths, move learning/evolution and relevant battle branches |
+| Menus | Field and battle Bag medicine targets/effects, battle party/replacement menus, party inspection, ordinary Mart buy/sell, normal Nurse Joy | PC management, naming and required field applications; specialized shops remain rejected |
+| Presentation/platform | Original resources/sprites/fonts/audio through native adapters, area fades, sliding doors, healing-machine and capture presentation | Missing battle action/move/return animations and remaining character/effect presentation; verify failure/cancel/retry visuals alongside success |
+
+These are six ownership groups, not six tasks or a completion estimate. A record
+being saved does not implement its gameplay producer; a selected original handler
+does not establish every operand or presentation path.
+
+Violet continuation update: all three post-tutorial starters now reach Violet
+through the original Route 30 Mother savings call and gatehouse Vs. Recorder
+scene. Both savings responses and durable Route 30/gatehouse/Violet reopen run;
+the gatehouse scene retains offstage actor positions through original height
+status handling. The probe reaches Sprout Tower 2F and rejects Sage Nico's shared
+standard trainer script at `GetTrainerNum` (212, byte 2970, bank 953). This is city
+arrival evidence, not a first badge. `test_violet --probe` reproduces that boundary.
+The next original closure includes trainer identity, phonebook lookup, actor
+metadata, defeat flags, encounter music, trainer text and ordinary battle return.
+Chapter feature rosters are in [chapter-test-teams.md](chapter-test-teams.md).
+
+## Refreshed partition and dispatch decision
+
+`python3 scripts/audit_chapters.py --require-assigned` regenerates
+`build/audit/chapters.json` and `.md`. It now joins each owner’s transitive handler
+references to the configured original script/scene/Mart selections. Per-handler
+lists and hashes are in the JSON. Unselected handlers require contract review:
+some have native adapters, while selected handlers can still reject operands.
+The conservative standard-script closure includes all declared standard banks;
+these lists are not exact reachable chapter requirements or missing-function counts.
+
+The regenerated source partition contains 5,321 nodes, 316 included map headers
+and 224 explicitly excluded headers. Every map has an assignment or explicit
+exclusion. Thirteen included maps still carry unresolved scope classifications.
+There are nine chapter packages: eight Gym narratives and League/ending, plus
+one shared root. Multi-phase New Bark, Goldenrod and Ecruteak content currently
+has a single root owner pending exact entry splits; a small child map count does
+not mean its gym or city was intentionally omitted.
+
+Chapter scenario preparation can proceed in isolated paths now. Independent
+playthrough implementation is not ready: exact event-entry ownership, original
+progression predicates and gameplay-produced predecessor saves are not accepted.
+In particular, the Olivine/Cianwood medicine exchange and Radio Tower trigger
+remain explicit cross-chapter contracts, not guessed badge dependencies.
+Shared runtime/build files keep one owner; do not merge independently edited
+copies of the save or battle subsystems.
+
+## Next implementation order
+
+1. Battle Bag medicine targeting/turn costs and voluntary/forced replacement now
+   pass with a six-Pokemon roster, cancellation and durable publication. Original
+   Falkner team/AI/replacement/rewards also pass at the engine boundary. Trainer
+   medicine decisions still reject explicitly; broader items remain unconnected.
+2. Next, exercise the Violet continuation through real Route 30/31, Sprout Tower and
+   gym events. Extract its exact event/predicate worklist and resolve each shared
+   service on the connected path; add original trainer/reward, move-learning or
+   field services where reached. Keep opening-route regression evidence.
+3. Save/exit/reload at each new meaningful state, especially moved objects and
+   puzzles. Expand Continue reconstruction when those scenarios expose a gap.
+   Do not reopen already passed record/flash/ABI work without new evidence.
+4. Admit each child against its actual required root contracts and predecessor
+   save. Compose legal branch orders and medicine exchange before claiming the
+   nine child scenarios form a complete Johto playthrough.
+
+Verification for this refresh: 15 relevant persistence/time/phone/Mart/capture/
+healing CTests pass; all five partition checks pass; independent ABI audit again
+reports 35 C payloads and 104 recursive layouts matching ARM, with 13 opaque
+original ARM payload rows explicitly classified. No new gameplay behavior is
+claimed by this inventory refresh. Existing sanitizer limitations remain in
+[save acceptance](save-acceptance.md) and [battle runtime](battle-runtime.md).
+
+## Historical investigation below
+
+The following compiler/battle measurements and service table describe earlier
+stages. Their missing-feature statements are historical, not the current backlog.
 
 ## What the measurements mean
 

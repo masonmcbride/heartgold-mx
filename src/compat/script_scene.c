@@ -7,6 +7,7 @@
 #include "compat/map_objects.h"
 #include "motion_guest.h"
 #include "field_events.h"
+#include "field_view.h"
 static HGEventView scene_events(FieldSystem *field) {
     HGEventView events;GF_ASSERT(field&&field->location&&hg_event_load(field->location->mapId,&events));return events;
 }
@@ -38,7 +39,7 @@ static void native_follow_reset(LocalMapObject *object) {
     GF_ASSERT(hg_motion_follow_tick(field->native_scene_resources,field->playerAvatar,object,field->native_follow_session,2,48));
 }
 static void native_follow_change(LocalMapObject *object,u32 movement) {
-    FieldSystem *field=MapObject_GetFieldSystem(object);GF_ASSERT(movement==48||movement==55);
+    FieldSystem *field=MapObject_GetFieldSystem(object);GF_ASSERT(movement==48||movement==55||movement==56);
     hg_map_object_set_movement(object,movement);
     GF_ASSERT(hg_motion_follow_tick(field->native_scene_resources,field->playerAvatar,object,field->native_follow_session,1,movement));
 }
@@ -70,6 +71,12 @@ static void native_follow_appear(LocalMapObject *object) {
 #define ResetVisibleHardwareWindows(screen) ((void)(screen))
 #define BeginNormalPaletteFade(mode,main,sub,color,steps,speed,heap) GF_ASSERT(hg_motion_fade_begin(ctx->fieldSystem->native_fade,main,color,steps,speed))
 #define IsPaletteFadeFinished() (!ctx->fieldSystem->native_fade->active)
+#define Field_PlayerAvatar_ApplyTransitionFlags(avatar) GF_ASSERT(hg_motion_avatar_transition(avatar))
+#include "compat/healing.h"
+static void native_handoff(FieldSystem *field){GF_ASSERT(hg_motion_handoff_begin(field,field->native_motion_task));}
+#define ov01_02205AEC native_handoff
+#define CallTask_LeaveOverworld(task) (ctx->fieldSystem->native_field_suspended=TRUE)
+#define PokecenterAnimCreate(field,count) ((field)->native_healing=hg_healing_new(field,count))
 #include "script_scene_decls.inc"
 #include "script_scene_kernel.inc"
 static const ScrCmdFunc scene_commands[1024]={
@@ -105,9 +112,22 @@ int hg_script_scene_command(ScriptContext *context,unsigned op,BOOL *yielded) {
         HGFieldTile tile;int32_t height;
         if(!object||v[1]>32767||v[2]>32767||v[3]>32767||v[4]>3||!field->native_scene_resources||
            !hg_field_resources_tile(field->native_scene_resources,v[1],v[3],&tile)||(!hg_transition_supported(tile.map_header)||(object==PlayerAvatar_GetMapObject(field->playerAvatar)&&tile.map_header!=MapObject_GetMapID(object)))||
-           hg_field_resources_height(field->native_scene_resources,v[1],v[3],0,(int32_t)v[2]*32768,&height)!=1)return 0;
+           (object==PlayerAvatar_GetMapObject(field->playerAvatar)&&hg_field_resources_height(field->native_scene_resources,v[1],v[3],0,(int32_t)v[2]*32768,&height)!=1))return 0;
     }
 
+    if(op==436&&(!context->fieldSystem->native_fade||context->fieldSystem->native_fade->active||!context->fieldSystem->native_fade->brightness))return 0;
+    if(op==188) {
+        unsigned flags=context->script_ptr[0]|(unsigned)context->script_ptr[1]<<8;
+        if(flags&~((1u<<0)|(1u<<8)|(1u<<10)|(1u<<11)))return 0;
+    }
+    if(op==189) {
+        PlayerAvatar avatar=*context->fieldSystem->playerAvatar;
+        LocalMapObject object=*avatar.mapObject;PlayerSaveData save;avatar.mapObject=&object;
+        if(avatar.playerSaveData){save=*avatar.playerSaveData;avatar.playerSaveData=&save;}
+        if(!hg_motion_avatar_transition(&avatar))return 0;
+        HGFieldView *sprite=hg_avatar_sprite_load(MapObject_GetSpriteID(&object),MapObject_GetFacingDirection(&object),NULL,0);
+        if(!sprite)return 0;hg_field_view_free(sprite);
+    }
     if(op==621&&!context->fieldSystem->mapPropManager)return 0;
     *yielded=scene_commands[op](context);return 1;
 }

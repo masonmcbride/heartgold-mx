@@ -130,8 +130,19 @@ static int node_transform(const uint8_t *dict,size_t n,unsigned index,DSTransfor
         for(unsigned i=1;i<9;i++)v[i]=signed_bits(u16(p+at+2*(i-1)),16)/4096.0;
         for(unsigned row=0;row<3;row++)for(unsigned col=0;col<3;col++)t.m[row*4+col]=v[col*3+row];at+=16;
     }
-    /* Non-unit node scale needs scale-compensation semantics; fail explicitly. */
-    if(!(flags&4))return 0;*out=t;return 1;
+    if(!(flags&4)) {
+        if(!span(limit-off,at,24))return 0;double scale[3];int nonunit=0;
+        for(unsigned i=0;i<3;i++){
+            scale[i]=s32(p+at+4*i)/4096.0;double inverse=s32(p+at+12+4*i)/4096.0;
+            if(!scale[i]||!inverse||fabs(scale[i]*inverse-1)>1.0/128)return 0;
+            nonunit|=scale[i]!=1;
+        }
+        /* Root-only scale has no parent compensation. Keep articulated model
+         * scale explicit until its inverse-scale propagation is implemented. */
+        if(nonunit&&dict[1]!=1)return 0;
+        ds_transform_scale(&t,scale[0],scale[1],scale[2]);
+    }
+    *out=t;return 1;
 }
 int ds_model_node(const DSModel *model,unsigned node,DSTransform *out) {
     if(!model || !model->bytes || model->size<72 || !out || node>=model->nodes)return 0;
@@ -144,6 +155,7 @@ static int scene(const DSModel *model,int selected_shape,int selected_material,D
     if(p[65]!=model->nodes || sbc<72 || end<=sbc || end>model->size)return 0;
     LandTransform nodes[32],stack[32];unsigned valid[32]={0};
     for(unsigned i=0;i<model->nodes;i++)if(!node_transform(p+64,sbc-64,i,nodes+i))return 0;
+    if(pose&&pose->scale_mask&&model->nodes!=1)return 0;
     if(pose)for(unsigned i=0;i<32;i++)if(pose->mask&(1u<<i)){if(i>=model->nodes)return 0;nodes[i]=pose->nodes[i];}
     SceneEmit state={ds_transform_identity(),emit,user,1,0};
     DSModelStats total={0};int visible=1;size_t pos=sbc;
@@ -214,7 +226,7 @@ int ds_model_material(const DSModel *model,unsigned index,DSModelMaterial *out) 
     if(end>model->size || start>=end || end-start<12)return 0;
     const uint8_t *p=model->bytes+start;size_t n=end-start;uint32_t off;
     if(!entry(p+4,n-4,index,&off,NULL) || off<4+u16(p+6) || !span(n,off,44) || u16(p+off+2)<44 || !span(n,off,u16(p+off+2)))return 0;
-    DSModelMaterial v={0};v.diffuse=u32(p+off+4);v.polygon_attrs=u32(p+off+12);v.texture_params=u32(p+off+20);v.width=u16(p+off+32);v.height=u16(p+off+34);v.identity_uv=u16(p+off+2)==44 && u32(p+off+36)==4096 && u32(p+off+40)==4096;
+    DSModelMaterial v={0};if(!entry(p+4,n-4,index,&off,v.name))return 0;v.diffuse=u32(p+off+4);v.polygon_attrs=u32(p+off+12);v.texture_params=u32(p+off+20);v.width=u16(p+off+32);v.height=u16(p+off+34);v.identity_uv=u16(p+off+2)==44 && u32(p+off+36)==4096 && u32(p+off+40)==4096;
     unsigned uv_flags=u16(p+off+30);
     if(model->bytes[22]==0 && u16(p+off+2)==52 && (uv_flags&7)==7 && !(uv_flags&8) && u32(p+off+36)==4096 && u32(p+off+40)==4096) {
         v.translation_uv=1;v.uv_u=-s32(p+off+44)/4096.0*v.width;v.uv_v=s32(p+off+48)/4096.0*v.height;

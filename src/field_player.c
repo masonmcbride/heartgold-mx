@@ -8,27 +8,33 @@
 #include "field_data.h"
 #include "field_player.h"
 #include "field_events.h"
+#include "compat/bug_contest.h"
 #include "map_matrix.h"
 #include "prop_runtime.h"
 #include "compat/starter.h"
 #include "compat/prop_animation.h"
+#include "compat/healing.h"
 #include "compat/pokemon.h"
 #include "compat/follow.h"
 #include "compat/field_control.h"
 #include "constants/init_script_types.h"
 #include "save_local_field_data.h"
+#include "metatile_behavior.h"
 typedef struct PreparedActors PreparedActors;
 typedef struct {
     const uint8_t *bytes;size_t size,offset;unsigned remaining,command;int active;HGMotionEffect effect;
 } ScriptMovement;
 typedef struct {
+    BugContest *contest;int pc_full;HGHealing *healing;HGMotionTask task;
     LocalMapObject objects[64];PlayerAvatar avatar;PlayerSaveData player_save;MapObjectManager manager;
     DSAudio *audio;HGMotionFade fade;LocalFieldData *local_field;HGFieldResources *resources;HGFieldProps *props;HGStarter *starter;HGPropAnimations *prop_animations;Location location;int preview,props_changed;HGMotionSession follow;ScriptMovement movement[64];unsigned count,map,target;
 } ScriptScene;
 struct HGFieldPlayer {
+    BugContest *contest;int pc_full;
     DSAudio *audio;int exploring;HGMotionFade fade;
+    Location runtime_location;
     FieldSystem field;MapObjectManager manager;LocalMapObject objects[64];
-    HGFieldView *actor_sprites[63];HGFieldActorCounts actors;
+    HGFieldView *actor_sprites[63];HGFieldActorCounts actors;HGPropAnimations *travel_animations;int door_exit_phase;unsigned door_exit_sound;
     PlayerSaveData save;PlayerAvatar *avatar;HGFieldResources *resources;
     LocalMapObject step_start,step_objects[64];int walking;unsigned animation_tick;
     HGMotionSession session;
@@ -45,11 +51,12 @@ struct HGFieldPlayer {
     unsigned step_map;int step_valid,coordinate_blocked,coordinate_x,coordinate_z;
 };
 struct PreparedActors {
+    BugContest *contest;int pc_full;
     LocalMapObject objects[63];HGFieldView *sprites[63];HGFieldActorCounts counts;
     LocalMapObject player;PlayerAvatar avatar;PlayerSaveData player_save;int resume_prepared;
 };
 static void free_prepared(PreparedActors *actors) {
-    if(!actors)return;for(unsigned i=0;i<actors->counts.active;i++)hg_field_view_free(actors->sprites[i]);free(actors);
+    if(!actors)return;hg_bug_contest_discard(actors->contest);for(unsigned i=0;i<actors->counts.active;i++)hg_field_view_free(actors->sprites[i]);free(actors);
 }
 static void discard_zone(HGFieldPlayer *p) {
     if(p->story){FieldSystem live={0};hg_story_bind_field(p->story,&live);p->session.stats=hg_story_save_stats(live.saveData);}
@@ -79,10 +86,13 @@ static PreparedActors *prepare_actors(HGFieldPlayer *p,HGFieldResources *resourc
         if(!hg_story_flag_get(story,event.eventFlag,&hidden)){actors->counts.unsupported++;continue;}
         if(hidden){actors->counts.conditional++;continue;}
         HGFieldTile tile;int32_t height;
+        int settled=event.x<=32767&&event.z<=32767&&hg_field_resources_height(resources,event.x,event.z,0,event.y,&height)==1;
+        /* Movement zero actors may be staged outside the walkable scene. The
+         * original initializer owns their event height until MovePersonFacing. */
         if(event.x>32767||event.z>32767||event.facingDirection<0||event.facingDirection>3||
            !hg_field_resources_tile(resources,event.x,event.z,&tile)||tile.map_header!=map||
-           hg_field_resources_height(resources,event.x,event.z,0,event.y,&height)!=1) {
-            actors->counts.unsupported++;continue;
+           (!settled&&event.movement!=0)) {
+            actors->counts.unsupported++;if(!p->script_error[0])snprintf(p->script_error,sizeof(p->script_error),"Map %u actor %u has no settled event surface at %u,%u",map,event.id,event.x,event.z);continue;
         }
         unsigned sprite_id=event.spriteId;
         if(sprite_id>=101&&sprite_id<=117)sprite_id=FieldSystem_VarGetObjectEventGraphicsId(&p->field,(u16)(sprite_id-101));
@@ -101,9 +111,9 @@ static PreparedActors *prepare_actors(HGFieldPlayer *p,HGFieldResources *resourc
         }
         /* Original initializer supplies event metadata/grid placement. The
          * admitted static BDHC provider resolves the settled surface height. */
-        VecFx32 position;MapObject_CopyPositionVector(object,&position);position.y=height;
-        MapObject_SetPositionVector(object,&position);MapObject_SetCurrentY(object,(height>>3)/4096);
-        MapObject_SetPreviousY(object,(height>>3)/4096);
+        VecFx32 position;MapObject_CopyPositionVector(object,&position);if(settled)position.y=height;
+        MapObject_SetPositionVector(object,&position);MapObject_SetCurrentY(object,(position.y>>3)/4096);
+        MapObject_SetPreviousY(object,(position.y>>3)/4096);
         if(existing)*object=*existing;
         actors->sprites[actors->counts.active++]=sprite;
     }
@@ -137,6 +147,8 @@ static void install_actors(HGFieldPlayer *p,PreparedActors *actors) {
     memcpy(p->actor_sprites,actors->sprites,actors->counts.active*sizeof(*actors->sprites));
     p->actors=actors->counts;p->manager.objectCount=1+p->actors.active;
     if(actors->resume_prepared) {
+        hg_bug_contest_discard(p->contest);p->contest=actors->contest;actors->contest=NULL;p->pc_full|=actors->pc_full;
+        FieldSystem live={0};hg_story_bind_field(p->story,&live);hg_bug_contest_rebind(p->contest,live.saveData);p->field.bugContest=p->contest;
         PlayerSaveData *save=PlayerAvatar_GetPlayerSaveData(p->avatar);
         p->objects[0]=actors->player;p->objects[0].manager=&p->manager;
         *p->avatar=actors->avatar;p->avatar->mapObject=p->objects;p->avatar->playerSaveData=save;*save=actors->player_save;
@@ -148,9 +160,10 @@ static void install_actors(HGFieldPlayer *p,PreparedActors *actors) {
  * resource notification through the original map-object callback accessor. */
 static void movement_finished(LocalMapObject *object) { (void)object; }
 static unsigned scene_half(const uint8_t *p) { return p[0]|(unsigned)p[1]<<8; }
+static void scene_destroy(void *);
 static void *scene_clone(const void *source) {
     ScriptScene *scene=malloc(sizeof(*scene));if(!scene)return NULL;*scene=*(const ScriptScene *)source;
-    scene->audio=NULL;scene->starter=NULL;scene->props=NULL;scene->prop_animations=NULL;scene->local_field=NULL;
+    scene->healing=NULL;scene->audio=NULL;scene->starter=NULL;scene->props=NULL;scene->prop_animations=NULL;scene->local_field=NULL;
     if(((const ScriptScene *)source)->local_field) {
         scene->local_field=malloc(Save_LocalFieldData_sizeof());if(!scene->local_field){free(scene);return NULL;}
         memcpy(scene->local_field,((const ScriptScene *)source)->local_field,Save_LocalFieldData_sizeof());
@@ -165,17 +178,41 @@ static void *scene_clone(const void *source) {
     scene->manager.objects=scene->objects;scene->manager.objectCount=scene->count;scene->avatar.mapObject=scene->objects;
     scene->player_save=*(((const ScriptScene *)source)->avatar.playerSaveData);scene->avatar.playerSaveData=&scene->player_save;
     for(unsigned i=0;i<scene->count;i++){scene->objects[i].manager=&scene->manager;sub_0205F47C(scene->objects+i,movement_finished);}
+    scene->contest=NULL;
+    if(((const ScriptScene *)source)->contest){scene->contest=hg_bug_contest_clone(((const ScriptScene *)source)->contest);if(!scene->contest){ds_audio_free(scene->audio);free(scene->local_field);hg_prop_animations_free(scene->prop_animations);hg_field_props_free(scene->props);free(scene);return NULL;}}
+    if(((const ScriptScene *)source)->healing){scene->healing=hg_healing_clone(((const ScriptScene *)source)->healing);if(!scene->healing){scene_destroy(scene);return NULL;}}
     return scene;
 }
 static void scene_destroy(void *opaque) {
-    ScriptScene *scene=opaque;if(scene){ds_audio_free(scene->audio);free(scene->local_field);hg_prop_animations_free(scene->prop_animations);hg_starter_free(scene->starter);hg_field_props_free(scene->props);}free(scene);
+    ScriptScene *scene=opaque;if(scene){hg_healing_free(scene->healing);hg_bug_contest_discard(scene->contest);ds_audio_free(scene->audio);free(scene->local_field);hg_prop_animations_free(scene->prop_animations);hg_starter_free(scene->starter);hg_field_props_free(scene->props);}free(scene);
 }
 static void scene_bind(void *opaque,FieldSystem *field,int preview) {
-    ScriptScene *scene=opaque;scene->preview=preview;field->native_audio=scene->audio;field->native_fade=&scene->fade;field->native_local_field=scene->local_field;field->native_prop_animations=scene->prop_animations;scene->location.mapId=scene->map;field->location=&scene->location;scene->manager.fieldSystem=field;field->mapObjectManager=&scene->manager;field->playerAvatar=&scene->avatar;field->native_scene_resources=scene->resources;field->mapPropManager=hg_field_props_manager(scene->props);scene->follow.stats=hg_story_save_stats(field->saveData);field->native_follow_session=&scene->follow;
+    ScriptScene *scene=opaque;
+    if(!scene->local_field)scene->local_field=malloc(Save_LocalFieldData_sizeof());
+    GF_ASSERT(scene->local_field);
+    memcpy(scene->local_field,SaveArray_Get(field->saveData,SAVE_LOCAL_FIELD_DATA),Save_LocalFieldData_sizeof());
+    field->bugContest=scene->contest;if(scene->contest)hg_bug_contest_rebind(scene->contest,field->saveData);
+    field->native_motion_task=&scene->task;field->native_healing=scene->healing;scene->preview=preview;field->native_audio=scene->audio;field->native_fade=&scene->fade;field->native_local_field=scene->local_field;field->native_prop_animations=scene->prop_animations;scene->location.mapId=scene->map;field->location=&scene->location;scene->manager.fieldSystem=field;field->mapObjectManager=&scene->manager;field->playerAvatar=&scene->avatar;field->native_scene_resources=scene->resources;field->mapPropManager=hg_field_props_manager(scene->props);scene->follow.stats=hg_story_save_stats(field->saveData);field->native_follow_session=&scene->follow;
 }
+static BugContest *scene_contest_new(void *opaque,FieldSystem *field,unsigned day) {
+    ScriptScene *scene=opaque;if(scene->contest)return NULL;
+    scene->contest=hg_bug_contest_new(field->saveData,day,NULL,0);return scene->contest;
+}
+static void scene_contest_end(void *opaque,FieldSystem *field) {
+    ScriptScene *scene=opaque;GF_ASSERT(scene->contest&&field->bugContest==scene->contest);
+    hg_bug_contest_rebind(scene->contest,field->saveData);hg_bug_contest_delete(scene->contest);scene->contest=NULL;
+}
+static void scene_pc_full(void *opaque) { ((ScriptScene *)opaque)->pc_full=1; }
 static int scene_command(void *opaque,ScriptContext *context,unsigned op,BOOL *yielded) {
     ScriptScene *scene=opaque;
     if(context->fieldSystem->playerAvatar!=&scene->avatar)return 0;
+    if(op==487) {
+        if(hg_healing_busy(scene->healing))return 0;
+        hg_healing_free(scene->healing);scene->healing=NULL;context->fieldSystem->native_healing=NULL;
+        if(!scene->prop_animations)scene->prop_animations=hg_prop_animations_new(scene->map);
+        context->fieldSystem->native_prop_animations=scene->prop_animations;
+        if(!scene->prop_animations)return 0;
+    }
     if(op>=307&&op<=311) {
         if(!scene->prop_animations)scene->prop_animations=hg_prop_animations_new(scene->map);
         context->fieldSystem->native_prop_animations=scene->prop_animations;
@@ -199,11 +236,13 @@ static int scene_command(void *opaque,ScriptContext *context,unsigned op,BOOL *y
         if(!scene->local_field){scene->local_field=calloc(1,Save_LocalFieldData_sizeof());if(!scene->local_field)return 0;Save_LocalFieldData_Init(scene->local_field);}
         context->fieldSystem->native_local_field=scene->local_field;
         *LocalFieldData_GetPlayer(scene->local_field)=scene->player_save;
-        LocalFieldData_SetBlackoutSpawn(scene->local_field,*hg_story_save_blackout_spawn(context->fieldSystem->saveData));
+        LocalFieldData_SetBlackoutSpawn(scene->local_field,hg_story_blackout_spawn(context->fieldSystem->saveData));
     }
     if(!hg_script_scene_command(context,op,yielded))return 0;
+    if(op==487){scene->healing=context->fieldSystem->native_healing;if(!scene->healing)return 0;}
+    memcpy(SaveArray_Get(context->fieldSystem->saveData,SAVE_LOCAL_FIELD_DATA),scene->local_field,Save_LocalFieldData_sizeof());
     if(op==293)scene->player_save=*LocalFieldData_GetPlayer(scene->local_field);
-    if(op==280)*hg_story_save_blackout_spawn(context->fieldSystem->saveData)=LocalFieldData_GetBlackoutSpawn(scene->local_field);
+    if(op==280)hg_story_set_blackout_spawn(context->fieldSystem->saveData,LocalFieldData_GetBlackoutSpawn(scene->local_field));
     if(op==100||op==101) {
         unsigned count=1,target=64;
         for(unsigned i=1;i<scene->manager.objectCount;i++)if(MapObject_CheckActive(scene->objects+i)) {
@@ -225,7 +264,7 @@ static int scene_face_player(void *opaque) {
     unsigned facing=PlayerAvatar_GetFacingDirection(&scene->avatar)^1u;LocalMapObject *object=scene->objects+scene->target;
     MapObject_SetFacingDirectionDirect(object,facing);MapObject_SetNextFacingDirection(object,facing);return 1;
 }
-static int scene_busy(const void *opaque) { if(((const ScriptScene *)opaque)->fade.active)return 1;if(hg_prop_animations_busy(((const ScriptScene *)opaque)->prop_animations))return 1;const HGStarter *s=((const ScriptScene *)opaque)->starter;return hg_starter_pending(s)?2:hg_starter_busy(s); }
+static int scene_busy(const void *opaque) { if(((const ScriptScene *)opaque)->task.active)return 1; if(hg_healing_busy(((const ScriptScene *)opaque)->healing))return 1; if(((const ScriptScene *)opaque)->fade.active)return 1;if(hg_prop_animations_busy(((const ScriptScene *)opaque)->prop_animations))return 1;const HGStarter *s=((const ScriptScene *)opaque)->starter;return hg_starter_pending(s)?2:hg_starter_busy(s); }
 static unsigned scene_active(const void *opaque) {
     const ScriptScene *scene=opaque;unsigned active=0;for(unsigned i=0;i<scene->count;i++)active+=scene->movement[i].active!=0;return active;
 }
@@ -255,9 +294,19 @@ static LocalMapObject *add_follower(LocalMapObject *slot,MapObjectManager *manag
     if(!hg_motion_settle(resources,object))return NULL;
     return object;
 }
+static int scene_restore(void *opaque){
+    ScriptScene *scene=opaque;LocalMapObject *follower=MapObjectManager_GetFirstActiveObjectByID(&scene->manager,obj_partner_poke);
+    Party *party=hg_story_save_party(scene->manager.fieldSystem->saveData);
+    if(!Party_GetCount(party))return follower==NULL;
+    if(!follower){if(scene->count>=64)return 0;follower=scene->objects+scene->count++;scene->manager.objectCount=scene->count;}
+    if(!add_follower(follower,&scene->manager,scene->resources,scene->map,party,MapObject_GetXCoord(scene->objects),MapObject_GetZCoord(scene->objects),MapObject_GetFacingDirection(scene->objects)))return 0;
+    memset(scene->follow.follower,0,sizeof(scene->follow.follower));scene->task.retract=0;
+    return hg_motion_follow_tick(scene->resources,&scene->avatar,follower,&scene->follow,1,48);
+}
 static int scene_tick(void *opaque) {
     ScriptScene *scene=opaque;
-    if(!hg_prop_animations_tick(scene->prop_animations))return 0;
+    if(!hg_motion_task_tick(scene->manager.fieldSystem,&scene->task))return 0;
+    if(!hg_prop_animations_tick(scene->prop_animations)||!hg_healing_tick(scene->healing,scene->manager.fieldSystem))return 0;
     if(scene->starter&&hg_starter_busy(scene->starter)) { if(!hg_starter_tick(scene->starter))return 0; }
     else if(!hg_motion_fade_tick(&scene->fade))return 0;
     if(scene->starter&&!hg_starter_busy(scene->starter)&&!MapObjectManager_GetFirstActiveObjectByID(&scene->manager,obj_partner_poke)) {
@@ -273,7 +322,10 @@ static int scene_tick(void *opaque) {
         if(!hg_motion_follow_tick(scene->resources,&scene->avatar,object,&scene->follow,1,48))return 0;
     }
     for(unsigned i=1;i<scene->count;i++)if(MapObject_GetID(scene->objects+i)==obj_partner_poke&&!MapObject_CheckMovementPaused(scene->objects+i)) {
-        if(!hg_motion_follow_tick(scene->resources,&scene->avatar,scene->objects+i,&scene->follow,0,MapObject_GetMovement(scene->objects+i)))return 0;
+        if(scene->task.active) {
+            LocalMapObject *object=scene->objects+i;
+            if(MapObject_TestFlagsBits(object,0x10)&&MapObject_GetMovementCommand(object)!=255){int done;if(!hg_motion_script_tick(scene->resources,object,&done))return 0;}
+        } else if(!hg_motion_follow_tick(scene->resources,&scene->avatar,scene->objects+i,&scene->follow,0,MapObject_GetMovement(scene->objects+i)))return 0;
     }
     for(unsigned i=0;i<scene->count;i++) {
         ScriptMovement *job=scene->movement+i;if(!job->active)continue;LocalMapObject *object=scene->objects+i;
@@ -282,6 +334,7 @@ static int scene_tick(void *opaque) {
             job->command=scene_half(job->bytes+job->offset);job->remaining=scene_half(job->bytes+job->offset+2);job->offset+=4;
             if(job->command==254){job->active=0;continue;}
             MapObject_SetMovementCommand(object,job->command);MapObject_SetMovementStep(object,0);MapObject_ClearFlagsBits(object,0x20);
+            if(!i&&job->command==104&&scene->task.retract)scene->task.retract=2;
         } else if(MapObject_GetMovementCommand(object)==255) {
             MapObject_SetMovementCommand(object,job->command);MapObject_SetMovementStep(object,0);MapObject_ClearFlagsBits(object,0x20);
         }
@@ -335,11 +388,11 @@ static int prepare_resume(HGFieldPlayer *p,PreparedActors *actors,HGStoryState *
     *props=NULL;*view=NULL;unsigned entry;
     if(!hg_story_map_script(story,map,INIT_SCRIPT_ON_RESUME,&entry))return 0;
     if(entry==65535)return 1;
-    ScriptScene source={.audio=p->audio,.manager=p->manager,.avatar=*p->avatar,.resources=resources,.count=actors->counts.active+1,.map=map,.target=64};
+    ScriptScene source={.contest=p->contest,.audio=p->audio,.manager=p->manager,.avatar=*p->avatar,.resources=resources,.count=actors->counts.active+1,.map=map,.target=64};
     source.objects[0]=p->objects[0];hg_map_object_set_map(source.objects,map);place_object(source.objects,x,z,height,direction);
     memcpy(source.objects+1,actors->objects,actors->counts.active*sizeof(*actors->objects));
     HGScriptSceneServices services={.source=&source,.clone=scene_clone,.destroy=scene_destroy,.bind=scene_bind,.apply=scene_apply,
-        .tick=scene_tick,.active=scene_active,.busy=scene_busy,.command=scene_command,.face_player=scene_face_player};
+        .tick=scene_tick,.active=scene_active,.busy=scene_busy,.command=scene_command,.face_player=scene_face_player,.contest_new=scene_contest_new,.contest_end=scene_contest_end,.pc_full=scene_pc_full,.restore=scene_restore};
     HGFieldScript *script=hg_field_script_scene_new(story,map,entry,&services,p->script_error,sizeof(p->script_error));
     if(!script)return 0;
     int status;unsigned ticks=0;
@@ -357,6 +410,7 @@ static int prepare_resume(HGFieldPlayer *p,PreparedActors *actors,HGStoryState *
         if(!sprites[i]){for(unsigned n=0;n<63;n++)hg_field_view_free(sprites[n]);hg_field_view_free(ready);hg_field_script_free(script);return 0;}
     }
     if(!hg_field_script_commit(script)){for(unsigned n=0;n<63;n++)hg_field_view_free(sprites[n]);hg_field_view_free(ready);hg_field_script_free(script);return 0;}
+    actors->contest=result->contest;result->contest=NULL;actors->pc_full=result->pc_full;
     actors->player=result->objects[0];actors->avatar=result->avatar;actors->player_save=result->player_save;actors->resume_prepared=1;
     for(unsigned i=0;i<actors->counts.active;i++)hg_field_view_free(actors->sprites[i]);
     memcpy(actors->sprites,sprites,sizeof(sprites));actors->counts.active=result->count-1;
@@ -365,20 +419,20 @@ static int prepare_resume(HGFieldPlayer *p,PreparedActors *actors,HGStoryState *
     *props=result->props;result->props=NULL;*view=ready;hg_field_script_free(script);return 1;
 }
 void hg_field_player_free(HGFieldPlayer *p) {
-    if(!p)return;discard_zone(p);hg_field_script_free(p->script);free(p->script_start);hg_story_free(p->story);hg_transition_free(p->transitions);if(p->avatar)PlayerAvatar_FreeToHeap(p->avatar);
+    if(!p)return;hg_prop_animations_free(p->travel_animations);hg_bug_contest_discard(p->contest);p->contest=NULL;discard_zone(p);hg_field_script_free(p->script);free(p->script_start);hg_story_free(p->story);hg_transition_free(p->transitions);if(p->avatar)PlayerAvatar_FreeToHeap(p->avatar);
     for(unsigned i=0;i<p->actors.active;i++)release_live_sprite(p,i);
     for(unsigned i=0;i<63;i++)hg_field_view_free(p->script_sprites[i]);
     hg_field_props_free(p->props);hg_field_view_free(p->props_view);
     hg_field_resources_free(p->resources);ds_audio_free(p->audio);free(p->stats_start);free(p);
 }
 HGFieldPlayer *hg_field_player_new(void) { return hg_field_player_new_map(60); }
-static HGFieldPlayer *player_new_map(unsigned map,const HGFieldLocation *start,int exploring) {
+static HGFieldPlayer *player_new_map(unsigned map,const HGFieldLocation *start,int exploring,const HGStoryState *resume,char *error,size_t size) {
     if(!hg_transition_supported(map))return NULL;
     HGFieldPlayer *p=calloc(1,sizeof(*p));if(!p)return NULL;
     p->audio=ds_audio_new();if(!p->audio)goto fail;
     if(!ds_audio_play(p->audio,DS_AUDIO_BGM,MapHeader_GetDayMusicId(map)))goto fail;
     p->field.native_audio=p->audio;p->exploring=exploring;p->map=map;p->resources=hg_field_resources_new(map);if(!p->resources)goto fail;
-    p->story=hg_story_new();if(!p->story||(!exploring&&!hg_story_enter_map(p->story,map,p->script_error,sizeof(p->script_error))))goto fail;
+    p->story=resume?hg_story_clone(resume):hg_story_new();if(!p->story||(!exploring&&!hg_story_enter_map(p->story,map,p->script_error,sizeof(p->script_error))))goto fail;
     hg_story_bind_field(p->story,&p->field);
     p->session.stats=hg_story_save_stats(p->field.saveData);p->stats_start=malloc(GameStats_sizeof());
     if(!p->session.stats||!p->stats_start)goto fail;
@@ -393,6 +447,9 @@ static HGFieldPlayer *player_new_map(unsigned map,const HGFieldLocation *start,i
     MapObject_SetMovementCommand(&p->objects[0],255);sub_0205F47C(&p->objects[0],movement_finished);
     MapObject_SetXRange(&p->objects[0],-1);MapObject_SetYRange(&p->objects[0],-1);
     p->transitions=hg_transition_new(map,p->avatar);if(!p->transitions)goto fail;
+    if(resume)hg_transition_restore_local(p->transitions,SaveArray_Get(p->field.saveData,SAVE_LOCAL_FIELD_DATA));
+
+    if(resume&&start){int32_t height;HGMotionTile tile;if(!hg_motion_tile(p->resources,start->x,start->z,&tile)||tile.wall||hg_field_resources_height(p->resources,start->x,start->z,0,0,&height)!=1)goto fail;place_player(p,start->x,start->z,height,(unsigned)start->direction);}
     PreparedActors *actors=prepare_actors(p,p->resources,map,p->story,0);if(!actors)goto fail;
     if(actors->counts.unsupported){free_prepared(actors);goto fail;}
     if(exploring) {
@@ -414,7 +471,7 @@ static HGFieldPlayer *player_new_map(unsigned map,const HGFieldLocation *start,i
         MapMatrix_Free(matrix);if(!found){free_prepared(actors);goto fail;}
         install_actors(p,actors);hg_transition_sync_player(p->transitions);return p;
     }
-    if(map!=60) {
+    if(map!=60||start) {
         HGEventView events;if(!hg_event_load(map,&events)||!events.warp_count){free_prepared(actors);goto fail;}
         int x=start?start->x:events.warps[0]|events.warps[1]<<8,z=start?start->z:events.warps[2]|events.warps[3]<<8;unsigned direction=start?(unsigned)start->direction:0;int32_t height;HGFieldTile tile;
         if(!hg_field_resources_tile(p->resources,x,z,&tile)||tile.map_header!=map||hg_field_resources_height(p->resources,x,z,0,0,&height)!=1){free_prepared(actors);goto fail;}
@@ -436,12 +493,12 @@ static HGFieldPlayer *player_new_map(unsigned map,const HGFieldLocation *start,i
         }}
     }
     free_prepared(actors);
-fail:hg_field_player_free(p);return NULL;
+fail:if(error&&size)snprintf(error,size,"Map %u: %s",map,p->script_error[0]?p->script_error:"field initialization failed");hg_field_player_free(p);return NULL;
 }
-HGFieldPlayer *hg_field_player_new_map(unsigned map) { return player_new_map(map,NULL,0); }
-HGFieldPlayer *hg_field_player_new_game(void) { HGFieldLocation start=hg_field_new_game_location();return player_new_map((unsigned)start.map,&start,0); }
+HGFieldPlayer *hg_field_player_new_map(unsigned map) { return player_new_map(map,NULL,0,NULL,NULL,0); }
+HGFieldPlayer *hg_field_player_new_game(void) { HGFieldLocation start=hg_field_new_game_location();return player_new_map((unsigned)start.map,&start,0,NULL,NULL,0); }
 int hg_field_player_move(HGFieldPlayer *p,uint16_t keys) {
-    if(!p||p->walking||p->script||p->zone_story)return 0;HGMotionMove move;
+    if(!p||p->walking||p->script||p->zone_story||p->travel_animations)return 0;HGMotionMove move;
     if(p->coordinate_blocked) {
         int direction;LocalMapObject probe=p->objects[0];
         if(!hg_motion_direction(p->avatar,keys,&direction)||direction<0||!hg_motion_grid_step(&probe,(unsigned)direction)||
@@ -518,6 +575,13 @@ static int tick_followers(HGFieldPlayer *p) {
     for(unsigned i=1;i<p->manager.objectCount;i++)if(MapObject_GetID(p->objects+i)==obj_partner_poke) {
         LocalMapObject *object=p->objects+i;
         LocalMapObject before=*object;
+        /* Field entry/Continue and recovery can place the follower on the
+         * player's tile. It remains recalled there until ordinary walking
+         * separates them; the original handoff task must observe that hidden
+         * state instead of treating it as an adjacent follower. */
+        int together=MapObject_GetXCoord(object)==MapObject_GetXCoord(p->objects)&&MapObject_GetZCoord(object)==MapObject_GetZCoord(p->objects);
+        if(together&&!p->walking)MapObject_SetVisible(object,TRUE);
+        else if(p->walking&&!together)MapObject_SetVisible(object,FALSE);
         if(!MapObject_CheckMovementPaused(object)&&!hg_motion_follow_tick(p->resources,p->avatar,object,&p->session,0,48))return -1;
         unsigned command=MapObject_GetMovementCommand(object),frame=1+4*MapObject_GetFacingDirection(object);
         if(command!=255)frame+=(p->animation_tick/4)%2;
@@ -579,20 +643,25 @@ int hg_field_player_interaction_begin(HGFieldPlayer *p) {
     }
     return hg_field_player_start_script(p,script,target?(int)MapObject_GetID(target):-1);
 }
-int hg_field_player_start_script(HGFieldPlayer *p,unsigned entry,int actor_id) {
+static int start_script(HGFieldPlayer *p,unsigned entry,int actor_id,const u16 *args,unsigned count,const u8 *bytes,size_t length,unsigned bank) {
+    if(count>4||(!args&&count))return 0;
     if(p&&p->exploring)return 0;
     if(!p||p->walking||p->script)return 0;p->script_error[0]=0;p->script_actor=p->actors.active;
     if(actor_id>=0) {
         for(unsigned i=0;i<p->actors.active;i++)if(MapObject_GetID(p->objects+i+1)==(unsigned)actor_id){p->script_actor=i;break;}
         if(p->script_actor==p->actors.active)return 0;
     }
+    hg_transition_sync_player(p->transitions);
+    hg_transition_export_local(p->transitions,SaveArray_Get(p->field.saveData,SAVE_LOCAL_FIELD_DATA));
     p->script_start=calloc(1,sizeof(*p->script_start));if(!p->script_start)return 0;
     ScriptScene *scene=p->script_start;scene->count=p->manager.objectCount;scene->manager=p->manager;scene->avatar=*p->avatar;
     scene->player_save=*PlayerAvatar_GetPlayerSaveData(p->avatar);scene->avatar.playerSaveData=&scene->player_save;
-    scene->audio=p->audio;scene->fade=p->fade;scene->follow=p->session;scene->resources=p->resources;scene->props=p->props;scene->map=p->map;scene->target=p->script_actor<p->actors.active?p->script_actor+1:64;
+    scene->contest=p->contest;scene->pc_full=0;scene->audio=p->audio;scene->fade=p->fade;scene->follow=p->session;scene->resources=p->resources;scene->props=p->props;scene->map=p->map;scene->target=p->script_actor<p->actors.active?p->script_actor+1:64;
     memcpy(scene->objects,p->objects,scene->count*sizeof(*scene->objects));
-    HGScriptSceneServices services={.source=scene,.clone=scene_clone,.destroy=scene_destroy,.bind=scene_bind,.apply=scene_apply,.tick=scene_tick,.active=scene_active,.busy=scene_busy,.command=scene_command,.face_player=scene_face_player};
-    p->script=hg_field_script_scene_new(p->story,p->map,entry,&services,p->script_error,sizeof(p->script_error));
+    HGScriptSceneServices services={.source=scene,.clone=scene_clone,.destroy=scene_destroy,.bind=scene_bind,.apply=scene_apply,.tick=scene_tick,.active=scene_active,.busy=scene_busy,.command=scene_command,.face_player=scene_face_player,.contest_new=scene_contest_new,.contest_end=scene_contest_end,.pc_full=scene_pc_full,.restore=scene_restore};
+    services.incoming_phone=entry==2047&&count==4;services.launch_arg_count=count;for(unsigned i=0;i<count;i++)services.launch_args[i]=args[i];
+    p->script=bytes?hg_field_script_scene_bytes(p->story,bytes,length,bank,&services,p->script_error,sizeof(p->script_error)):
+        hg_field_script_scene_new(p->story,p->map,entry,&services,p->script_error,sizeof(p->script_error));
     if(!p->script){free(p->script_start);p->script_start=NULL;if(!p->script_error[0])snprintf(p->script_error,sizeof(p->script_error),"No admitted script for this interaction");}
     else memcpy(p->script_sprites,p->actor_sprites,sizeof(p->script_sprites));return p->script!=NULL;
 }
@@ -630,7 +699,11 @@ int hg_field_player_interaction_tick(HGFieldPlayer *p,char *message,size_t capac
             hg_field_view_free(props_view);
             free_prepared(actors);snprintf(p->script_error,sizeof(p->script_error),"Cannot publish script state/population");status=HG_SCRIPT_ERROR;
         } else {
+            hg_bug_contest_discard(p->contest);p->contest=scene->contest;scene->contest=NULL;
+            if(p->contest)hg_bug_contest_rebind(p->contest,p->field.saveData);
+            p->field.bugContest=p->contest;p->pc_full|=scene->pc_full;
             ds_audio_free(p->audio);p->audio=scene->audio;scene->audio=NULL;p->field.native_audio=p->audio;
+            hg_transition_restore_local(p->transitions,SaveArray_Get(p->field.saveData,SAVE_LOCAL_FIELD_DATA));
             p->fade=scene->fade;*PlayerAvatar_GetPlayerSaveData(p->avatar)=scene->player_save;
             if(actors)install_actors(p,actors);
             if(scene->props_changed) {
@@ -690,20 +763,29 @@ int hg_field_player_transition(HGFieldPlayer *p,const HGWarpDestination *destina
        hg_field_resources_height(next,destination->x,destination->z,0,0,&height)!=1) {
         hg_field_resources_free(next);return 0;
     }
+    HGPropAnimations *exit_door=NULL;unsigned exit_sound=0;
+    if(destination->direction==1&&MetatileBehavior_IsDoor((u8)tile.attribute)) {
+        exit_door=hg_prop_animations_new((unsigned)destination->map);
+        int found=exit_door?hg_prop_animation_door_begin(exit_door,next,destination->x,destination->z,1,1,&exit_sound):-1;
+        if(found<0){hg_prop_animations_free(exit_door);hg_field_resources_free(next);return 0;}
+        if(!found){hg_prop_animations_free(exit_door);exit_door=NULL;}
+    }
     unsigned long long revision=hg_story_revision(p->story);HGStoryState *story=hg_story_clone(p->story);
-    if(!story||(!p->exploring&&!hg_story_enter_map(story,(unsigned)destination->map,p->script_error,sizeof(p->script_error)))){hg_story_free(story);hg_field_resources_free(next);return 0;}
+    if(!story||(!p->exploring&&!hg_story_enter_map(story,(unsigned)destination->map,p->script_error,sizeof(p->script_error)))){hg_prop_animations_free(exit_door);hg_story_free(story);hg_field_resources_free(next);return 0;}
     PreparedActors *actors=prepare_actors(p,next,(unsigned)destination->map,story,0);
     HGFieldProps *props=NULL;HGFieldView *props_view=NULL;
     if(actors)for(unsigned i=0;i<actors->counts.active;i++)if(MapObject_GetID(actors->objects+i)==obj_partner_poke)
         place_object(actors->objects+i,destination->x,destination->z,height,(unsigned)destination->direction);
     if(!actors||actors->counts.unsupported||!prepare_resume(p,actors,story,next,(unsigned)destination->map,destination->x,destination->z,height,(unsigned)destination->direction,&props,&props_view)||hg_story_revision(p->story)!=revision||!hg_transition_commit(p->transitions,destination)) {
-        hg_field_props_free(props);hg_field_view_free(props_view);free_prepared(actors);hg_story_free(story);hg_field_resources_free(next);return 0;
+        hg_prop_animations_free(exit_door);hg_field_props_free(props);hg_field_view_free(props_view);free_prepared(actors);hg_story_free(story);hg_field_resources_free(next);return 0;
     }
     GF_ASSERT(hg_story_commit(p->story,story,revision));hg_story_free(story);
+    hg_field_player_door_end(p);p->travel_animations=exit_door;p->door_exit_phase=exit_door?1:0;p->door_exit_sound=exit_sound;
     int resumed=actors->resume_prepared;install_actors(p,actors);
     hg_field_props_free(p->props);hg_field_view_free(p->props_view);p->props=props;p->props_view=props_view;
     hg_field_resources_free(p->resources);p->resources=next;p->field.native_scene_resources=next;p->map=(unsigned)destination->map;hg_map_object_set_map(p->objects,p->map);
     if(!resumed)place_player(p,destination->x,destination->z,height,(unsigned)destination->direction);
+    if(exit_door)MapObject_SetVisible(p->objects,TRUE);
     hg_transition_sync_player(p->transitions);
     PlayerAvatar_SetUnk28Unk2C(p->avatar,-1,-1);memset(p->session.follower,0,sizeof(p->session.follower));p->rejected_frame=0;p->automatic=0;p->coordinate_blocked=0;return 1;
 }
@@ -715,8 +797,22 @@ int hg_field_player_actor(const HGFieldPlayer *p,unsigned index,HGFieldActor *ou
         .hidden=MapObject_CheckVisible(object),.script=MapObject_GetScriptID(object),.direction=MapObject_GetFacingDirection(object),
         .x=(int)MapObject_GetXCoord(object),.z=(int)MapObject_GetZCoord(object),
         .billboard={.sprite=p->actor_sprites[index],.world={(position.x+(double)shift.x)/4096.0,(position.y+(double)shift.y)/4096.0,(position.z+(double)shift.z)/4096.0}}};
+    if(out->id==obj_partner_poke) {
+        int32_t arc;
+        if(!hg_motion_follow_height(object,&arc))return 0;
+        out->billboard.world[1]+=arc/4096.0;
+    }
     if(p->script) {
         const ScriptScene *scene=hg_field_script_scene(p->script);
+        if(scene&&out->id==obj_partner_poke&&scene->task.retract) {
+            /* Native retraction adapter; the original task and Receive command
+             * supply both clocks. Original DS NNS effect rendering is unported. */
+            if(scene->task.retract==1){unsigned elapsed=scene->task.environment[2];out->hidden|=elapsed>=20;out->billboard.scale=elapsed<20?(20-elapsed)/20.0:0.05;}
+            else {
+                const ScriptMovement *receive=scene->movement;
+                if(receive->active&&receive->command==104){u32 elapsed=0;memcpy(&elapsed,sub_0205F3E4((LocalMapObject *)scene->objects),4);out->billboard.scale=(elapsed<20?elapsed+1:21)/21.0;}
+            }
+        }
         if(scene&&index+1<scene->count) {
             const HGMotionEffect *effect=&scene->movement[index+1].effect;
             out->emote=effect->active&&effect->visible;out->emote_offset=(int32_t)effect->state[7]/4096.0;
@@ -725,7 +821,10 @@ int hg_field_player_actor(const HGFieldPlayer *p,unsigned index,HGFieldActor *ou
     return 1;
 }
 
-const HGFieldView *hg_field_player_props(const HGFieldPlayer *p) { return p?p->props_view:NULL; }
+const HGFieldView *hg_field_player_props(const HGFieldPlayer *p) {
+    if(p&&p->script){const ScriptScene *scene=hg_field_script_scene(p->script);if(scene&&scene->healing)return hg_healing_view(scene->healing,scene->prop_animations);}
+    return p?p->props_view:NULL;
+}
 unsigned hg_field_player_prop_count(const HGFieldPlayer *p) { return p?hg_field_props_count(p->props):0; }
 
 int hg_field_player_coordinate_begin(HGFieldPlayer *p) {
@@ -774,17 +873,32 @@ int hg_field_player_follower(const HGFieldPlayer *p,unsigned *species,int *x,int
 
 int hg_field_player_present_props(const HGFieldPlayer *p,HGFieldView *view) {
     HGPropPose poses[16];unsigned count=0;
-    if(p&&p->script){const ScriptScene *scene=hg_field_script_scene(p->script);if(scene)count=hg_prop_animations_poses(scene->prop_animations,poses);}
+    if(p&&p->travel_animations)count=hg_prop_animations_poses(p->travel_animations,poses);
+    else if(p&&p->script){const ScriptScene *scene=hg_field_script_scene(p->script);if(scene){if(scene->healing)return hg_healing_present(scene->healing,scene->prop_animations,view);count=hg_prop_animations_poses(scene->prop_animations,poses);}}
     return hg_field_view_prop_poses(view,poses,count);
 }
 
 int hg_field_player_running_shoes(const HGFieldPlayer *p) { return p&&PlayerSaveData_CheckRunningShoes(PlayerAvatar_GetPlayerSaveData(p->avatar)); }
 
-HGFieldPlayer *hg_field_player_new_explore(unsigned map) { return player_new_map(map,NULL,1); }
+HGFieldPlayer *hg_field_player_new_explore(unsigned map) { return player_new_map(map,NULL,1,NULL,NULL,0); }
 
 int hg_field_player_brightness(const HGFieldPlayer *p) {
     if(!p)return 0;const ScriptScene *scene=p->script?hg_field_script_scene(p->script):NULL;
     return scene?scene->fade.brightness:p->fade.brightness;
+}
+/* Field-owned original FadeWork for door/stair travel. A live script scene
+ * borrows the presentation, so its own fade must be idle or travel is refused. */
+int hg_field_player_fade_active(const HGFieldPlayer *p) {
+    if(!p)return 0;const ScriptScene *scene=p->script?hg_field_script_scene(p->script):NULL;
+    return scene?scene->fade.active:p->fade.active;
+}
+int hg_field_player_fade_begin(HGFieldPlayer *p,unsigned type,unsigned color,unsigned steps,unsigned speed) {
+    if(!p)return 0;if(p->script&&hg_field_script_scene(p->script))return 0;
+    return hg_motion_fade_begin(&p->fade,type,color,steps,speed);
+}
+int hg_field_player_fade_tick(HGFieldPlayer *p) {
+    if(!p)return 0;ScriptScene *scene=p->script?hg_field_script_scene(p->script):NULL;
+    if(scene)return 1;return hg_motion_fade_tick(&p->fade);
 }
 
 int hg_field_player_phone_active(const HGFieldPlayer *p) { return p&&hg_field_script_phone_active(p->script); }
@@ -794,4 +908,125 @@ DSAudio *hg_field_player_audio(HGFieldPlayer *p) {
     if(!p)return NULL;const ScriptScene *scene=hg_field_script_scene(p->script);
     return scene?scene->audio:p->audio;
 }
-void hg_field_player_bind_runtime(HGFieldPlayer *p,FieldSystem *field){if(p&&field){hg_story_bind_field(p->story,field);field->playerAvatar=p->avatar;}}
+void hg_field_player_bind_runtime(HGFieldPlayer *p,FieldSystem *field){if(p&&field){hg_story_bind_field(p->story,field);p->runtime_location=(Location){.mapId=p->map,.x=MapObject_GetXCoord(p->objects),.y=MapObject_GetZCoord(p->objects)};field->location=&p->runtime_location;field->playerAvatar=p->avatar;hg_bug_contest_rebind(p->contest,field->saveData);field->bugContest=p->contest;}}
+
+int hg_field_player_battle_request(HGFieldPlayer *p,unsigned *trainer,FieldSystem *field){return p&&hg_field_script_battle_request(p->script,trainer,field);}
+int hg_field_player_battle_complete(HGFieldPlayer *p,unsigned result){return p&&hg_field_script_battle_complete(p->script,result);}
+
+HGFieldPlayer *hg_field_player_resume_checked(const HGStoryState *story,const HGFieldLocation *where,int shoes,char *error,size_t size){
+    if(!story||!where||where->direction<0||where->direction>3||shoes<0||shoes>1)return NULL;
+    HGFieldPlayer *p=player_new_map((unsigned)where->map,where,0,story,error,size);
+    if(p)PlayerSaveData_SetRunningShoesFlag(PlayerAvatar_GetPlayerSaveData(p->avatar),shoes);return p;
+}
+
+int hg_field_player_name_pending(const HGFieldPlayer *p) { return p?hg_field_script_name_pending(p->script):0; }
+
+const char * hg_field_player_name_text(const HGFieldPlayer *p) { return p?hg_field_script_name_text(p->script):""; }
+
+int hg_field_player_name_edit(HGFieldPlayer *p,const char *text) { return p?hg_field_script_name_edit(p->script,text):0; }
+
+int hg_field_player_name_submit(HGFieldPlayer *p,const char *text,int cancel) { return p?hg_field_script_name_submit(p->script,text,cancel):0; }
+
+int hg_field_player_prepare_relocation(HGFieldPlayer *p,HGStoryState *candidate) {
+    if(!p||p->contest||!candidate||p->walking||p->script||p->zone_story||p->travel_animations)return 0;
+    FieldSystem field={0};hg_story_bind_field(candidate,&field);
+    hg_transition_sync_player(p->transitions);
+    hg_transition_export_local(p->transitions,SaveArray_Get(field.saveData,SAVE_LOCAL_FIELD_DATA));
+    LocalFieldData *local=SaveArray_Get(field.saveData,SAVE_LOCAL_FIELD_DATA);
+    LocalFieldData_GetCurrentPosition(local)->warpId=-1;
+    LocalFieldData_SetBlackoutSpawn(local,hg_story_blackout_spawn(p->field.saveData));
+    return 1;
+}
+int hg_field_player_prepare_save(HGFieldPlayer *p,HGStoryState *candidate) {
+    if(!p||p->contest||!candidate||p->walking||p->script||p->zone_story||p->coordinate_blocked||p->travel_animations)return 0;
+    if(p->manager.objectCount>=64)return 0;
+    for(unsigned i=0;i<p->manager.objectCount;i++)if(MapObject_GetMovementCommand(p->objects+i)!=255)return 0;
+    FieldSystem field={0};hg_story_bind_field(candidate,&field);
+    field.playerAvatar=p->avatar;field.mapObjectManager=&p->manager;field.native_scene_resources=p->resources;
+    FieldSystem_SyncMapObjectsToSave(&field);
+    return hg_field_player_prepare_relocation(p,candidate);
+}
+
+int hg_field_player_restore_save_objects(HGFieldPlayer *p) {
+    if(!p||p->walking||p->script)return 0;
+    const SavedMapObject *records=SaveArray_Get(p->field.saveData,SAVE_MAP_OBJECTS);
+    LocalMapObject objects[64];HGFieldView *sprites[63]={0};unsigned count=0;
+    for(unsigned i=0;i<64;i++)if(records[i].flags&MAPOBJECTFLAG_ACTIVE) {
+        if(count>=64||(!count&&records[i].objId!=obj_player)||
+           (count&&records[i].objId==obj_player)||!hg_map_object_restore_record(objects+count,&p->manager,records+i))goto fail;
+        if(count) {
+            sprites[count-1]=hg_character_sprite_load(records[i].spriteId,records[i].currentFacing,NULL,0);
+            if(!sprites[count-1])goto fail;
+        }
+        sub_0205F47C(objects+count,movement_finished);count++;
+    }
+    if(!count)return 0;
+    for(unsigned i=0;i<p->actors.active;i++)release_live_sprite(p,i);
+    memcpy(p->objects,objects,count*sizeof(*objects));
+    memcpy(p->actor_sprites,sprites,sizeof(sprites));p->manager.objectCount=count;p->actors.active=count-1;
+    hg_transition_sync_player(p->transitions);return 1;
+fail:
+    for(unsigned i=0;i<63;i++)hg_field_view_free(sprites[i]);return 0;
+}
+
+int hg_field_player_start_script(HGFieldPlayer *p,unsigned entry,int actor_id) { return hg_field_player_start_script_args(p,entry,actor_id,NULL,0); }
+
+BugContest *hg_field_player_contest(HGFieldPlayer *p) { return p?p->contest:NULL; }
+int hg_field_player_pc_full_event(const HGFieldPlayer *p) { return p&&p->pc_full; }
+void hg_field_player_pc_full_ack(HGFieldPlayer *p) { if(p)p->pc_full=0; }
+
+int hg_field_player_start_script_args(HGFieldPlayer *p,unsigned entry,int actor_id,const u16 *args,unsigned count) { return start_script(p,entry,actor_id,args,count,NULL,0,0); }
+int hg_field_player_start_bytes(HGFieldPlayer *p,const u8 *bytes,size_t length,unsigned bank) { return bytes&&length&&start_script(p,0,-1,NULL,0,bytes,length,bank); }
+
+HGFieldPlayer *hg_field_player_resume(const HGStoryState *story,const HGFieldLocation *where,int shoes){return hg_field_player_resume_checked(story,where,shoes,NULL,0);}
+
+unsigned hg_field_player_sprite(const HGFieldPlayer *p) { return p?MapObject_GetSpriteID(p->avatar->mapObject):0; }
+
+void hg_field_player_door_end(HGFieldPlayer *p){if(p){hg_prop_animations_free(p->travel_animations);p->travel_animations=NULL;p->door_exit_phase=0;MapObject_SetVisible(p->objects,FALSE);}}
+int hg_field_player_door_begin(HGFieldPlayer *p,unsigned direction) {
+    if(!p||p->walking||p->script||p->travel_animations)return -1;
+    if(direction!=0)return 0;
+    HGPropAnimations *owner=hg_prop_animations_new(p->map);if(!owner)return -1;unsigned sound;
+    int result=hg_prop_animation_open_door(owner,p->resources,MapObject_GetXCoord(p->objects),MapObject_GetZCoord(p->objects),1,&sound);
+    if(result!=1){hg_prop_animations_free(owner);return result;}
+    if(sound&&!ds_audio_play(p->audio,DS_AUDIO_EFFECT,sound)){hg_prop_animations_free(owner);return -1;}
+    p->travel_animations=owner;return 1;
+}
+int hg_field_player_door_tick(HGFieldPlayer *p) {
+    if(!p||!p->travel_animations||!hg_prop_animations_tick(p->travel_animations))return -1;
+    return hg_prop_animation_finished(p->travel_animations,1);
+}
+
+int hg_field_player_hidden(const HGFieldPlayer *p){return p&&MapObject_CheckVisible((LocalMapObject *)p->objects);}
+int hg_field_player_exit_active(const HGFieldPlayer *p){return p&&p->door_exit_phase;}
+/* Destination half of ov01_021E9374's choreography. The host schedules the
+ * phases; original animation controllers and movement command 13 own timing. */
+int hg_field_player_exit_tick(HGFieldPlayer *p) {
+    if(!p||!p->door_exit_phase)return 1;
+    if(p->door_exit_phase==1) {
+        if(p->door_exit_sound&&!ds_audio_play(p->audio,DS_AUDIO_EFFECT,p->door_exit_sound))return -1;
+        p->door_exit_sound=0;p->door_exit_phase=2;
+    }
+    if(p->door_exit_phase==2) {
+        int done=hg_field_player_door_tick(p);if(done<=0)return done;
+        MapObject_SetVisible(p->objects,FALSE);
+        MapObject_SetMovementCommand(p->objects,13);MapObject_SetMovementStep(p->objects,0);MapObject_ClearFlagsBits(p->objects,0x20);
+        p->door_exit_phase=3;return 0;
+    }
+    if(p->door_exit_phase==3) {
+        int done;if(!hg_motion_script_tick(p->resources,p->objects,&done))return -1;
+        if(!done)return 0;
+        VecFx32 position;MapObject_CopyPositionVector(p->objects,&position);
+        for(unsigned i=1;i<=p->actors.active;i++)if(MapObject_GetID(p->objects+i)==obj_partner_poke)
+            MapObject_SetPositionFromVectorAndDirection(p->objects+i,&position,1);
+        unsigned sound;if(!hg_prop_animation_close_door(p->travel_animations,1,&sound)||
+            (sound&&!ds_audio_play(p->audio,DS_AUDIO_EFFECT,sound)))return -1;
+        hg_transition_sync_player(p->transitions);p->door_exit_phase=4;return 0;
+    }
+    int done=hg_field_player_door_tick(p);if(done<=0)return done;
+    hg_field_player_door_end(p);return 1;
+}
+
+unsigned hg_field_player_menu_count(const HGFieldPlayer *p){return p?hg_field_script_menu_count(p->script):0;}
+const char *hg_field_player_menu_label(const HGFieldPlayer *p,unsigned i){return p?hg_field_script_menu_label(p->script,i):"";}
+struct HGShop *hg_field_player_shop(HGFieldPlayer *p){return p?hg_field_script_shop(p->script):NULL;}

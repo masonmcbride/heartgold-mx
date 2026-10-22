@@ -1,4 +1,5 @@
 """Compile original event constants/script macros into build-local resources."""
+from generated_files import write_bytes_if_changed, write_text_if_changed
 import hashlib,json,pathlib,re,struct,subprocess,sys,shlex,concurrent.futures
 root,out,cc=map(pathlib.Path,sys.argv[1:]);resources=out/'resources'
 # Existing archive writer remains the sole writer used by these two tools.
@@ -14,7 +15,7 @@ signature=hashlib.sha256(str(cc).encode()+b''.join(p.read_bytes() for p in sorte
 stamp=out/'jsonproc.sha256'
 if not tool.is_file() or not stamp.is_file() or stamp.read_text()!=signature:
  subprocess.run([str(cc),'-x','c++','-std=c++17','-O1','-I'+str(tool_source.parent),'-lc++',str(tool_source),'-o',str(tool)],check=True)
- stamp.write_text(signature)
+ write_text_if_changed(stamp, signature)
 
 template=root/'files/fielddata/eventdata/zone_event.json.txt'
 lines=[]
@@ -25,7 +26,7 @@ for index,path in enumerate(inputs):
  # Put the label after the original template's section directive.
  section=rendered.index('.section .rodata')+len('.section .rodata')
  lines.extend([rendered[:section],f'.global hg_event_{index}',f'hg_event_{index}:',rendered[section:],f'.size hg_event_{index}, .-hg_event_{index}'])
-source=out/'events.S';source.write_text('\n'.join(lines)+'\n')
+source=out/'events.S';write_text_if_changed(source, '\n'.join(lines)+'\n')
 data=assemble(source,out/'events.o');table,content,name=sections(data,True)
 symtab=next(s for s in table if s[1]==2);strings=content(table[symtab[6]]);members={}
 for offset in range(symtab[4],symtab[4]+symtab[5],symtab[9]):
@@ -57,14 +58,14 @@ body=re.sub(r'//[^\n]*','',mapping[2])
 rows=re.findall(r'\{\s*(_std_\w+|\d+),\s*scr_seq_(\d+)_bin,\s*msg_(\d+)\s*\},',body)
 if len(rows)!=int(mapping[1]) or re.sub(r'\{\s*(_std_\w+|\d+),\s*scr_seq_(\d+)_bin,\s*msg_(\d+)\s*\},','',body).strip():
  raise ValueError('Ambiguous original standard-script mapping')
-(out/'script_standard_banks.inc').write_text('static const struct { unsigned first,bank,messages; } standard_script_banks[] = {\n'+''.join(f'{{{base},{int(bank)},{int(msg)}}},\n' for base,bank,msg in rows)+'};\n')
+write_text_if_changed(out/'script_standard_banks.inc', 'static const struct { unsigned first,bank,messages; } standard_script_banks[] = {\n'+''.join(f'{{{base},{int(bank)},{int(msg)}}},\n' for base,bank,msg in rows)+'};\n')
 def compiled(script):
  bank=int(script.stem.split('_')[2]);target=out/f'field_script_{bank:04}.o'
  try:
   data=assemble(script,target);table,content,name=sections(data)
   return content(next(s for s in table if name(s[0])=='.text')),None
  except (ValueError,AssertionError,StopIteration) as error:
-  log=out/f'field_script_{bank:04}.error.txt';log.write_text(str(error)+'\n')
+  log=out/f'field_script_{bank:04}.error.txt';write_text_if_changed(log, str(error)+'\n')
   return None,str(log)
 with concurrent.futures.ThreadPoolExecutor(max_workers=8) as workers:
  compiled_scripts=list(workers.map(compiled,scripts))
@@ -81,16 +82,16 @@ for script,(bytecode,error) in zip(scripts,compiled_scripts):
  if not message_names:raise ValueError(('Missing script message bank',script))
  group=int(message_names[0].split('_')[1])
  script_members[bank]=bytecode
- (resources/f'field_script_{bank:04}.bin').write_bytes(bytecode)
+ write_bytes_if_changed(resources/f'field_script_{bank:04}.bin', bytecode)
  banks.append({'bank':bank,'entries':len(re.findall(r'^\s*ScrDef\s+\w+',source,re.M)),
   'script_source':str(script),'script_source_sha256':hashlib.sha256(script.read_bytes()).hexdigest(),
   'script_sha256':hashlib.sha256(bytecode).hexdigest(),'bytes':len(bytecode),'message_bank':group})
-(out/'field_script_banks.inc').write_text('static const struct { unsigned bank,entries; } field_script_banks[] = {\n'+''.join(f'{{{b["bank"]},{b["entries"]}}},\n' for b in banks)+'};\n')
+write_text_if_changed(out/'field_script_banks.inc', 'static const struct { unsigned bank,entries; } field_script_banks[] = {\n'+''.join(f'{{{b["bank"]},{b["entries"]}}},\n' for b in banks)+'};\n')
 pack(resources/'field_scripts.narc',[script_members.get(i,b'') for i in range(len(scripts))])
 # Keep original ScriptContext declaration/API without unrelated SDK headers.
 text=(root/'include/script.h').read_text()
 context=re.search(r'struct ScriptContext \{.*?\n\};',text,re.S)[0]
 prototypes=text[text.index('void InitScriptContext'):text.index('\n#endif',text.index('void InitScriptContext'))]
-(out/'script_types.inc').write_text('typedef struct ScriptContext ScriptContext;\ntypedef BOOL (*ScrCmdFunc)(ScriptContext *);\n'+context+'\n'+prototypes+'\n')
-(out/'interaction_provenance.json').write_text(json.dumps({'event_members':len(inputs),'unsupported_event_members':[i for i,m in members.items() if not m],'event_sources':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs},'script_banks':banks,'header_banks':headers,'unsupported_script_banks':unsupported,'script_manifest':str(script_folder/'meson.build'),'standard_mapping':{'source':str(manager),'source_sha256':hashlib.sha256(manager.read_bytes()).hexdigest(),'rows':[{'first':base,'bank':int(bank),'messages':int(msg)} for base,bank,msg in rows]}},indent=2)+'\n')
+write_text_if_changed(out/'script_types.inc', 'typedef struct ScriptContext ScriptContext;\ntypedef BOOL (*ScrCmdFunc)(ScriptContext *);\n'+context+'\n'+prototypes+'\n')
+write_text_if_changed(out/'interaction_provenance.json', json.dumps({'event_members':len(inputs),'unsupported_event_members':[i for i,m in members.items() if not m],'event_sources':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs},'script_banks':banks,'header_banks':headers,'unsupported_script_banks':unsupported,'script_manifest':str(script_folder/'meson.build'),'standard_mapping':{'source':str(manager),'source_sha256':hashlib.sha256(manager.read_bytes()).hexdigest(),'rows':[{'first':base,'bank':int(bank),'messages':int(msg)} for base,bank,msg in rows]}},indent=2)+'\n')
 print(f'Original event data: {len(inputs)} members; {len(banks)} script banks; {len(headers)} headers; {len(unsupported)} unsupported banks; {len(rows)} original standard routes')

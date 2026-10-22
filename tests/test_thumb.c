@@ -27,6 +27,22 @@ static void run(DSThumb *c) {
     for(unsigned i=4;i<=11;i++)CHECK(c->r[i]==0xa0000000+i);
 }
 int main(void) {
+    /* Register shifts use the low eight count bits and preserve V; edge
+     * counts differ from immediate shifts and from native C shift rules. */
+    const unsigned ops[]={2,3,4},counts[]={0,1,31,32,33,255,256};
+    const uint32_t values[]={0,1,0x80000000u,0x80000001u,0xffffffffu};
+    for(unsigned op=0;op<3;op++)for(unsigned k=0;k<7;k++)for(unsigned v=0;v<5;v++)for(unsigned carry=0;carry<2;carry++) {
+        unsigned instruction=0x4000|(ops[op]<<6)|(1<<3);
+        ram[0]=(uint8_t)instruction;ram[1]=(uint8_t)(instruction>>8);ram[2]=0x70;ram[3]=0x47;
+        DSThumb shift=cpu(0);shift.code_size=4;shift.r[0]=values[v];shift.r[1]=counts[k];shift.c=carry;shift.v=1;
+        uint32_t expected=values[v];unsigned expected_carry=carry;
+        for(unsigned bit=0;bit<(counts[k]&255);bit++) {
+            if(ops[op]==2){expected_carry=expected>>31;expected<<=1;}
+            else {expected_carry=expected&1;expected=(expected>>1)|((ops[op]==4)?expected&0x80000000u:0);}
+        }
+        run(&shift);CHECK(shift.r[0]==expected&&shift.c==expected_carry&&shift.v==1);
+        CHECK(shift.z==(expected==0)&&shift.n==(expected>>31));
+    }
     memcpy(ram,hg_terrain_thumb,sizeof(hg_terrain_thumb));
     /* Signed rectangle membership, inclusive edges, both endpoint orders. */
     for(unsigned reverse=0;reverse<2;reverse++)for(int x=-5;x<=5;x++)for(int z=-6;z<=6;z++) {

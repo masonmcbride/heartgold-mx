@@ -21,7 +21,7 @@ struct SDAT
 	std::unique_ptr<SBNK> sbnk;
 	std::unique_ptr<SWAR> swar[4];
 
-	SDAT(PseudoFile &file, uint32_t sseqToLoad);
+	SDAT(PseudoFile &file, uint32_t sseqToLoad, uint32_t bankOverride = UINT32_MAX);
 private:
 	SDAT(const SDAT &);
 	SDAT &operator=(const SDAT &);

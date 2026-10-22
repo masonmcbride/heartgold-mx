@@ -24,12 +24,13 @@ void *AllocAndReadFromNarcMemberByIdPair(int a, int m, enum HeapID h, u32 offset
     void *p = Heap_Alloc(h, size); memcpy(p, (const u8 *)native_items+offset, size); return p;
 }
 /* Unported entry points fail explicitly. */
-void *SaveArray_Get(SaveData *s, int i) { (void)s; (void)i; unavailable("SaveArray_Get"); return NULL; }
+__attribute__((weak)) void *SaveArray_Get(SaveData *s, int i) { (void)s; (void)i; unavailable("SaveArray_Get"); return NULL; }
 BagView *BagView_New(u8 h) { (void)h; unavailable("BagView_New"); return NULL; }
 void BagView_SetItem(BagView *b, struct ItemSlot *s, u8 p, u8 i) { (void)b; (void)s; (void)p; (void)i; unavailable("BagView_SetItem"); }
 /* UTF-8 boundary adapter over the upstream JSON messages, not a DS String ABI. */
 struct String { char *utf8; };
 struct MsgData { int archive,group; };
+int native_message_bank(const MsgData *m){GF_ASSERT(m&&m->archive==NARC_msgdata_msg);return m->group;}
 String *native_string_new(void) { String *s=Heap_Alloc(HEAP_ID_DEFAULT,sizeof(*s));s->utf8=NULL;return s; }
 void native_string_free(String *s) { if(s) { free(s->utf8);free(s); } }
 const char *native_string_utf8(const String *s) { return s->utf8?s->utf8:""; }

@@ -80,7 +80,43 @@ int main(void) {
     unsigned stat=GameStats_GetCapped(session.stats,0);HGMotionMove untouched={.moved=77};
     PlayerAvatar_SetState(avatar,1);CHECK(!hg_motion_locomotion_begin(resources,avatar,0x42,&session,&untouched));
     CHECK(untouched.moved==77 && GameStats_GetCapped(session.stats,0)==stat);
+    /* Ilex Forest has a real directional jump ledge: standing at (38,19) facing
+     * south the collision mask carries the original jump bit (0x4) and the
+     * controller must pick command 56+direction instead of an ordinary step.
+     * The original arc runs sixteen ticks and lands two tiles away, skipping the
+     * intervening ledge tile. This checks the motion boundary; follower integration is tested separately. */
+    HGFieldResources *ilex=hg_field_resources_new(117);CHECK(ilex);
+    int32_t height;CHECK(hg_field_resources_height(ilex,38,19,0,0,&height)==1);
+    MapObject_SetCurrentX(&object,38);MapObject_SetCurrentZ(&object,19);MapObject_SetCurrentY(&object,(height>>3)/4096);
+    MapObject_SetPreviousX(&object,38);MapObject_SetPreviousZ(&object,19);MapObject_SetPreviousY(&object,(height>>3)/4096);
+    VecFx32 start={38*65536+32768,height,19*65536+32768};MapObject_SetPositionVector(&object,&start);
+    MapObject_SetMovementCommand(&object,255);MapObject_SetMovementStep(&object,0);
+    unsigned jump_mask;CHECK(hg_motion_player_collision(ilex,avatar,1,&jump_mask)&&(jump_mask&0x4));
+    PlayerAvatar_SetState(avatar,0);notifications=0;HGMotionMove jump;
+    CHECK(hg_motion_locomotion_begin(ilex,avatar,0x80,&session,&jump)&&jump.moved);
+    CHECK(jump.direction==1&&MapObject_GetMovementCommand(&object)==57);
+    CHECK(PlayerAvatar_GetUnk8(avatar)==57);
+    CHECK(word(session.follower+4)==57);
+    CHECK(word(session.follower+8)==38&&word(session.follower+12)==19);
+    CHECK(!MapObject_GetFlagsBitsMask(&object,0x20)&&MapObject_GetFlagsBitsMask(&object,0x10));
+    unsigned landed=0;
+    for(unsigned tick=1;tick<=24;tick++) {
+        int done=0;CHECK(hg_motion_player_tick(ilex,&object,&done));
+        /* The arc's jump-away and fall phases pass over the ledge tile before
+         * settling two tiles south at the sixteenth tick. */
+        if(done){CHECK(tick==16);landed=tick;CHECK(MapObject_GetXCoord(&object)==38&&MapObject_GetZCoord(&object)==21);CHECK(notifications==1);break;}
+    }
+    CHECK(landed==16);
+    /* The player-input path defers the held-command reset to the caller, exactly
+     * as the original controller does; the field app clears it on completion. */
+    CHECK(hg_motion_clear_held(&object));
+    CHECK(MapObject_GetMovementCommand(&object)==255&&MapObject_GetMovementStep(&object)==0);
+    /* A blocked facing tile still steps/denies normally: standing on the ledge
+     * tile facing north must not select a jump command. */
+    place(ilex,&object,38,19);MapObject_SetMovementCommand(&object,255);
+    unsigned north_mask;CHECK(hg_motion_player_collision(ilex,avatar,0,&north_mask)&&!(north_mask&0x4));
+    hg_field_resources_free(ilex);
     free(session.stats);hg_field_resources_free(resources);PlayerAvatar_FreeToHeap(avatar);
-    printf("Original locomotion branch: %u running edges / %u denied; shoes/B gating, four directions, follower notifications, one step statistic per command and stateful diagonal input passed\n",walked,denied);
+    printf("Original locomotion branch: %u running edges / %u denied; shoes/B gating, four directions, follower notifications, one step statistic per command, stateful diagonal input and the Ilex ledge jump (command 57 over 16 ticks, two tiles, held reset) passed\n",walked,denied);
     return 0;
 }

@@ -1,5 +1,6 @@
 #pragma once
 #include "compat/motion.h"
+#include "metatile_behavior.h"
 #include "field_player.h"
 #include "field_app.h"
 #include "field_data.h"
@@ -10,7 +11,7 @@
  * scenario verifies fighting and EXP. No healing or outcome flags are injected. */
 static void hg_test_battle_input(HGFieldApp *app){
     int state=hg_field_app_battle_state(app);HGBattleMonView mon;
-    if(state==HG_BATTLE_COMMAND&&hg_field_app_battle_mon(app,0,&mon))CHECK(hg_field_app_battle_choose(app,1));
+    if(state==HG_BATTLE_COMMAND&&hg_field_app_battle_mon(app,0,&mon))CHECK(hg_field_app_battle_choose(app,hg_field_app_battle_trainer(app)?0:hg_field_app_battle_command_count(app)-1));
     else if(state==HG_BATTLE_MOVES){for(unsigned i=0;i<4;i++)if(hg_field_app_battle_choose(app,i))return;CHECK(0);}
     else hg_field_app_interact(app);
 }
@@ -35,12 +36,24 @@ static unsigned hg_test_settle_observe(HGFieldApp *app,unsigned choice,void (*ob
 }
 static unsigned hg_test_settle_choice(HGFieldApp *app,unsigned choice) { return hg_test_settle_observe(app,choice,NULL,NULL); }
 static unsigned hg_test_settle(HGFieldApp *app) { return hg_test_settle_choice(app,1); }
+/* Staged door/stair travel fades out, swaps the scene, then fades back in. A
+ * single input step now only begins that animation; advance application ticks
+ * until the destination map is installed and the fade finishes (or the bounded
+ * budget expires). Left mid-fade, the next input would be swallowed. */
+static unsigned hg_test_travel(HGFieldApp *app,unsigned expect,unsigned budget) {
+    unsigned ticks=0;
+    for(;ticks<budget&&(hg_field_app_map(app)!=expect||hg_field_app_transition_active(app));ticks++)hg_field_app_step(app);
+    return ticks;
+}
 /* Reusable scenario routing: discover with original collision/targeting, then
  * play every step through actual application input. Only the current 32x32
  * map header footprint is searched, including its connected chunks. This is test automation, not runtime pathfinding. */
 static void hg_test_route_impl(HGFieldApp *app,int goalx,int goalz,int target_script,unsigned replans) {
     CHECK(replans<8);
-    unsigned map=hg_field_app_map(app);HGFieldPlayer *reference=hg_field_app_is_exploring(app)?hg_field_player_new_explore(map):hg_field_player_new_map(map);CHECK(reference);
+    unsigned map=hg_field_app_map(app);
+    int currentx,currentz;CHECK(hg_field_app_player(app,&currentx,&currentz));
+    HGFieldLocation current={.map=(int)map,.x=currentx,.z=currentz,.direction=0};
+    HGFieldPlayer *reference=hg_field_app_is_exploring(app)?hg_field_player_new_explore(map):hg_field_player_resume(hg_field_app_story(app),&current,hg_field_app_running_shoes(app));CHECK(reference);
     LocalMapObject objects[64]={0};FieldSystem field={0};MapObjectManager manager={.objects=objects,.objectCount=1,.fieldSystem=&field};
     objects[0].manager=&manager;objects[0].movement=1;MapObject_SetFlagsBits(objects,MAPOBJECTFLAG_ACTIVE);
     MapObject_SetXRange(objects,-1);MapObject_SetYRange(objects,-1);PlayerSaveData save;PlayerSaveData_Init(&save);
@@ -114,14 +127,7 @@ static void hg_test_route_impl(HGFieldApp *app,int goalx,int goalz,int target_sc
         for(unsigned tick=1;tick<8;tick++)hg_field_app_step(app);CHECK(hg_field_app_map(app)==map);
         if(hg_field_app_interaction_busy(app)) {
             int battle_interruption=hg_field_app_battle_active(app);int battle_x,battle_z;hg_field_app_player(app,&battle_x,&battle_z);
-            unsigned ticks=0;
-            while(hg_field_app_interaction_busy(app)&&ticks++<2048) {
-                if(strstr(hg_field_app_dialogue(app),"isn’t available yet")||strstr(hg_field_app_dialogue(app),"Battle stopped"))fprintf(stderr,"Route interaction failed: %s\n",hg_field_app_error(app));
-                CHECK(!strstr(hg_field_app_dialogue(app),"isn’t available yet"));CHECK(!strstr(hg_field_app_dialogue(app),"Battle stopped"));
-                if(hg_field_app_battle_active(app))hg_test_battle_input(app);else if(hg_field_app_dialogue(app)[0])hg_field_app_interact(app);
-                hg_field_app_step(app);
-            }
-            CHECK(ticks<2048);
+            hg_test_settle(app);
             int after_battle_x,after_battle_z;if(battle_interruption&&hg_field_app_map(app)==map&&hg_field_app_player(app,&after_battle_x,&after_battle_z)&&after_battle_x==battle_x&&after_battle_z==battle_z)continue;
             hg_transition_free(transitions);PlayerAvatar_FreeToHeap(avatar);hg_field_resources_free(terrain);hg_field_player_free(reference);
             free(previous);free(direction);free(queue);free(route);
@@ -133,7 +139,7 @@ static void hg_test_route_impl(HGFieldApp *app,int goalx,int goalz,int target_sc
         hg_field_app_input(app,(uint16_t)keys[face]);hg_field_app_step(app);hg_field_app_clear_input(app);
         int afterx,afterz;
         if(target_script<=-2) {
-            for(unsigned tick=0;tick<16&&hg_field_app_map(app)==map;tick++)hg_field_app_step(app);
+            hg_test_travel(app,(unsigned)(-target_script-2),32);
             if(hg_field_app_map(app)!=(unsigned)(-target_script-2))fprintf(stderr,"Portal/header crossing failed: %s\n",hg_field_app_error(app));
             CHECK(hg_field_app_map(app)==(unsigned)(-target_script-2));
         }
@@ -145,3 +151,5 @@ static void hg_test_route_impl(HGFieldApp *app,int goalx,int goalz,int target_sc
 static void hg_test_walk_to(HGFieldApp *app,int x,int z) { hg_test_route_impl(app,x,z,-1,0); }
 static void hg_test_portal(HGFieldApp *app,unsigned map) { hg_test_route_impl(app,0,0,-(int)map-2,0); }
 static void hg_test_approach(HGFieldApp *app,unsigned script) { hg_test_route_impl(app,0,0,(int)script,0); }
+
+void hg_test_prepare_defeat(HGFieldApp *);
