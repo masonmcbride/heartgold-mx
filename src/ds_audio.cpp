@@ -52,6 +52,7 @@ uint32_t sseq_random() { if(!sound_rng)return 0;*sound_rng=*sound_rng*1664525u+1
 struct DSAudio {
     std::shared_ptr<Archive> archive;
     std::array<std::unique_ptr<Voice>,10> voices;
+    std::unique_ptr<Voice> saved_bgm;float saved_volume=1;
     std::array<int16_t,DS_AUDIO_FRAMES*2> pcm{};
     std::vector<uint8_t> scratch=std::vector<uint8_t>(DS_AUDIO_FRAMES*4);
     uint64_t last_epoch=0;float volume=1,target=1;unsigned fade=0,next=2,fanfare_tail=0;
@@ -64,6 +65,8 @@ extern "C" DSAudio *ds_audio_clone(const DSAudio *source) {
     if(!source)return ds_audio_new();
     try {
         auto result=std::make_unique<DSAudio>();result->archive=source->archive;result->pcm=source->pcm;result->last_epoch=source->last_epoch;
+        if(source->saved_bgm)result->saved_bgm=std::make_unique<Voice>(*source->saved_bgm);
+        result->saved_volume=source->saved_volume;
         result->volume=source->volume;result->target=source->target;result->fade=source->fade;result->next=source->next;result->fanfare_tail=source->fanfare_tail;
         for(size_t i=0;i<source->voices.size();i++)if(source->voices[i])result->voices[i]=std::make_unique<Voice>(*source->voices[i]);
         return result.release();
@@ -92,6 +95,22 @@ static int audio_play_bank(DSAudio *audio,unsigned kind,unsigned id,unsigned ban
 }
 extern "C" int ds_audio_play(DSAudio *audio,unsigned kind,unsigned id){return audio_play_bank(audio,kind,id,UINT32_MAX);}
 extern "C" int ds_audio_play_bank(DSAudio *audio,unsigned kind,unsigned id,unsigned bank){return audio_play_bank(audio,kind,id,bank);}
+extern "C" int ds_audio_play_temporary_bgm(DSAudio *audio,unsigned id) {
+    if(!audio)return 0;
+    try {
+        // Original field sound stops instead of preserving a fading/no-sequence
+        // player. Native voices own the same paused sequence/track state.
+        auto saved=(!audio->fade&&audio->voices[0]&&audio->voices[0]->active())?std::make_unique<Voice>(*audio->voices[0]):nullptr;
+        float volume=audio->volume;
+        if(!audio_play_bank(audio,DS_AUDIO_BGM,id,UINT32_MAX))return 0;
+        audio->saved_bgm=std::move(saved);audio->saved_volume=volume;return 1;
+    }catch(const std::exception &error){snprintf(audio->error,sizeof(audio->error),"Temporary BGM: %s",error.what());return 0;}
+}
+extern "C" int ds_audio_restore_bgm(DSAudio *audio) {
+    if(!audio||!audio->saved_bgm)return 0;
+    audio->voices[0]=std::move(audio->saved_bgm);audio->volume=audio->target=audio->saved_volume;audio->fade=0;return 1;
+}
+extern "C" void ds_audio_discard_saved_bgm(DSAudio *audio) { if(audio)audio->saved_bgm.reset(); }
 extern "C" void ds_audio_stop(DSAudio *audio,unsigned kind,unsigned id) {
     if(!audio)return;
     if(kind==DS_AUDIO_FANFARE)audio->fanfare_tail=0;

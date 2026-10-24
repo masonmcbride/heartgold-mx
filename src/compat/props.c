@@ -1,12 +1,43 @@
+#include "compat/native_video.h"
 #include "prop_runtime.h"
 #include <mach-o/ldsyms.h>
 #include "ds_model.h"
+#include "ds_texture_animation.h"
 #include <math.h>
-struct HGPropModel { const uint8_t *bytes;size_t size;DSModel model;unsigned id; };
-struct Field3dRenderObjManager { struct HGPropModel models[550];Field3dRenderObj *handles[128];unsigned live; };
+struct HGPropModel { const uint8_t *bytes;size_t size;DSModel model;unsigned id;DSTextureBank textures; };
+/* Only decoded resource ownership is native. Original C owns object allocation,
+ * lookup and pool lifetime through the unmodified manager declaration. */
+typedef struct PropResources {
+    Field3dRenderObjManager *manager;
+    struct HGPropModel models[550];
+    NNSG3dResFileHeader *headers[550];
+    struct PropResources *next;
+} PropResources;
+static PropResources *resources;
+static NNSG3dResMdlSet *NNS_G3dGetMdlSet(NNSG3dResFileHeader *file) {
+    GF_ASSERT(file&&file->bytes);return file;
+}
+static NNSG3dResMdl *NNS_G3dGetMdlByIdx(NNSG3dResMdlSet *set,unsigned index) {
+    GF_ASSERT(set&&set->bytes&&index==0);return set;
+}
+static void NNS_G3dRenderObjInit(NNSG3dRenderObj *object,NNSG3dResMdl *model) {
+    GF_ASSERT(object&&model&&model->bytes);*object=(NNSG3dRenderObj){.model=model};
+}
+#include "render_object_manager.inc"
+static PropResources *resource_owner(Field3dRenderObjManager *manager) {
+    for(PropResources *p=resources;p;p=p->next)if(p->manager==manager||(!p->manager&&p->headers==manager->resFileHeaders)){p->manager=manager;return p;}
+    GF_ASSERT(!"unknown native model resource owner");abort();
+}
 static unsigned r16(const uint8_t *p) { return p[0]|(unsigned)p[1]<<8; }
 static uint32_t r32(const uint8_t *p) { return r16(p)|(uint32_t)r16(p+2)<<16; }
-Field3dRenderObjManager *hg_prop_resources_new(void) { return calloc(1,sizeof(Field3dRenderObjManager)); }
+NNSG3dResFileHeader **hg_prop_resources_headers_new(void){
+    PropResources *p=calloc(1,sizeof(*p));if(!p)return NULL;p->next=resources;resources=p;return p->headers;
+}
+Field3dRenderObjManager *hg_prop_resources_new(void) {
+    NNSG3dResFileHeader **headers=hg_prop_resources_headers_new();if(!headers)return NULL;
+    Field3dRenderObjManager *manager=Field3dRenderObjManager_New(HEAP_ID_FIELD1,550,128,headers);
+    (void)resource_owner(manager);return manager;
+}
 int hg_prop_resources_load(Field3dRenderObjManager *r,unsigned id,const uint8_t *p,size_t n) {
     if(!r || id>=550 || !p || n<20 || memcmp(p,"BMD0",4) || r16(p+4)!=0xfeff || r32(p+8)!=n || r16(p+12)!=16)return 0;
     unsigned blocks=r16(p+14);if(!blocks || blocks>2 || n<16+4*blocks)return 0;
@@ -16,21 +47,40 @@ int hg_prop_resources_load(Field3dRenderObjManager *r,unsigned id,const uint8_t 
         size_t size=r32(p+start+4);if(size<8 || size>n-start)return 0;
         if(memcmp(p+start,i?"TEX0":"MDL0",4))return 0;offset=start+size;
     }
-    if(offset!=n)return 0;DSModel model;if(!ds_model_open(p,n,0,&model))return 0;r->models[id]=(struct HGPropModel){p,n,model,id};return 1;
+    if(offset!=n)return 0;DSModel model;if(!ds_model_open(p,n,0,&model))return 0;
+    PropResources *owner=resource_owner(r);
+    /* Existing resource bytes remain borrowed from the scene's archive cache. */
+    owner->models[id]=(struct HGPropModel){p,n,model,id};owner->headers[id]=&owner->models[id];return 1;
 }
-void hg_prop_resources_free(Field3dRenderObjManager *r) { if(!r)return;if(r->live)abort();free(r); }
-unsigned hg_prop_resources_live(const Field3dRenderObjManager *r) { return r->live; }
-BOOL Field3dRenderObjManager_IsResFileHeaderLoadedByIndex(Field3dRenderObjManager *r,int id) { return id>=0 && id<550 && r->models[id].bytes!=NULL; }
-Field3dRenderObj *Field3dRenderObjManager_GetOrAllocRenderObjByID(Field3dRenderObjManager *r,int id) {
-    if(!Field3dRenderObjManager_IsResFileHeaderLoadedByIndex(r,id))abort();
-    for(unsigned i=0;i<128;i++)if(!r->handles[i]) {
-        Field3dRenderObj *obj=calloc(1,sizeof(*obj));if(!obj)abort();obj->index=id;obj->model=&r->models[id];obj->renderObj.model=obj->model;r->handles[i]=obj;r->live++;return obj;
+static void free_resources(Field3dRenderObjManager *r) {
+    PropResources *owner=resource_owner(r);PropResources **at=&resources;
+    while(*at!=owner)at=&(*at)->next;
+    *at=owner->next;Field3dRenderObjManager_Delete(r);free(owner);
+}
+void hg_prop_resources_free(Field3dRenderObjManager *r) {
+    if(!r)return;GF_ASSERT(!r->numObjects);free_resources(r);
+}
+void hg_prop_resources_free_preloaded(Field3dRenderObjManager *r) {
+    if(!r)return;
+    for(unsigned i=0;i<r->numObjects;i++)GF_ASSERT(r->modelNumToLoadedSlot[r->objects[i]->index]!=0xff);
+    free_resources(r);
+}
+int hg_prop_resources_bind(Field3dRenderObjManager *r,unsigned id,const DSTextureBank *bank) {
+    if(id>=550||!bank||!bank->bytes)return 0;
+    struct HGPropModel *m=&resource_owner(r)->models[id];if(!m->bytes)return 0;
+    for(unsigned i=0;i<m->model.materials;i++) {
+        DSModelMaterial mat;DSTexture texture;
+        if(!ds_model_material(&m->model,i,&mat))return 0;
+        if(mat.texture[0]&&!ds_texture_find(bank,mat.texture,mat.palette,&texture))return 0;
     }
-    abort();
+    m->textures=*bank;return 1;
 }
-BOOL Field3dRenderObjManager_FreeRenderObj(Field3dRenderObjManager *r,Field3dRenderObj *obj) {
-    if(!obj)return FALSE;for(unsigned i=0;i<128;i++)if(r->handles[i]==obj) { free(obj);r->handles[i]=NULL;r->live--;return TRUE; }abort();
+int hg_prop_resources_material(Field3dRenderObjManager *r,unsigned id,unsigned index,DSModelMaterial *mat,DSTexture *tex) {
+    if(id>=550)return 0;struct HGPropModel *m=&resource_owner(r)->models[id];
+    return m->bytes&&m->textures.bytes&&ds_model_material(&m->model,index,mat)&&
+        mat->texture[0]&&ds_texture_find(&m->textures,mat->texture,mat->palette,tex);
 }
+unsigned hg_prop_resources_live(const Field3dRenderObjManager *r) { return r->numObjects; }
 int hg_props_validate(const uint8_t *p,size_t n) {
     if((!p && n) || n%48 || n/48>MAP_PROP_MAX)return 0;
     for(size_t i=0;i<n;i+=48)if(r32(p+i)>=550)return 0;return 1;
@@ -64,6 +114,12 @@ void ov01_021EA7F8(int id,AreaDataManager_Sub8AC *a,u16 *count) { if(!a || id<0 
 void ov01_021EA804(int id,AreaDataManager_Sub8AC *a,u16 *count,u16 *start) { ov01_021EA7F8(id,a,count);if(!start)abort();*start=a->models[id][1]; }
 u16 (*ov01_021EA81C(int start,AreaDataManager_Sub8AC *a))[2] { if(!a || start<0 || (unsigned)start>=a->shape_count)abort();return a->shapes+start; }
 static struct { HGPropDraw callback;void *user;VecFx32 translation,scale;MtxFx33 rotation;DSTransform transform;unsigned count;const NNSG3dResMdl *material_model;int material_id,material_valid;int failed,active,ready; } draw;
+void hg_prop_renderer_reset_matrices(void){
+    GF_ASSERT(!draw.active);draw.translation=(VecFx32){0};memset(&draw.rotation,0,sizeof(draw.rotation));
+    draw.rotation.m[0]=draw.rotation.m[4]=draw.rotation.m[8]=4096;draw.scale=(VecFx32){4096,4096,4096};
+    draw.transform=ds_transform_identity();hg_native_matrix_init();
+}
+void hg_prop_renderer_initialize(void){GF_ASSERT(!draw.active);memset(&draw,0,sizeof(draw));hg_native_geometry_init();hg_prop_renderer_reset_matrices();}
 void hg_prop_draw_begin(HGPropDraw callback,void *user) { if(draw.active || !callback)abort();memset(&draw,0,sizeof(draw));draw.callback=callback;draw.user=user;draw.active=1; }
 int hg_prop_draw_end(unsigned *submissions) { if(!draw.active)return 0;if(submissions)*submissions=draw.count;int ok=!draw.failed;memset(&draw,0,sizeof(draw));return ok; }
 void NNS_G3dGlbSetBaseTrans(const VecFx32 *p) { if(!draw.active || !p)abort();draw.translation=*p;draw.ready=0; }
@@ -117,4 +173,41 @@ int hg_prop_trace_write(FILE *out) {
     tracing=0;if(overflow)return 0;for(size_t i=0;i<event_count;i++) {
         if(events[i].enter==2) { fprintf(out,"{\"kind\":\"phase\",\"name\":\"%s\",\"live\":%llu}\n",events[i].phase,(unsigned long long)events[i].offset);continue; }
         fprintf(out,"{\"kind\":\"%s\",\"offset\":%llu}\n",events[i].enter?"enter":"exit",(unsigned long long)events[i].offset); }return !ferror(out);
+}
+
+int hg_prop_model_uv_compatible(const NNSG3dResMdl *m,const DSTextureAnimation *a) {
+    if(!m||!m->bytes||m->model.bytes[22])return 0;
+    for(unsigned i=0;i<a->materials;i++) {
+        char name[17];memcpy(name,a->bytes+a->names+16*i,16);name[16]=0;unsigned matched=0;
+        for(unsigned j=0;j<m->model.materials;j++){DSModelMaterial mat;if(!ds_model_material(&m->model,j,&mat))return 0;if(!strcmp(mat.name,name))matched++;}
+        if(matched!=1)return 0;
+    }
+    return 1;
+}
+
+/* Borrowed buffer resources use the same native model/material representation
+ * as archive props. The caller retires render references before deleting a view. */
+NNSG3dResMdl *hg_prop_model_view_new(const uint8_t *bytes,size_t size,const DSTextureBank *bank) {
+    DSModel model;if(!bank||!ds_model_open(bytes,size,0,&model))return NULL;
+    for(unsigned i=0;i<model.materials;i++) {
+        DSModelMaterial material;DSTexture texture;
+        if(!ds_model_material(&model,i,&material)||(material.texture[0]&&!ds_texture_find(bank,material.texture,material.palette,&texture)))return NULL;
+    }
+    struct HGPropModel *m=Heap_Alloc(HEAP_ID_FIELD1,sizeof(*m));
+    *m=(struct HGPropModel){bytes,size,model,0,*bank};return m;
+}
+void hg_prop_model_view_delete(NNSG3dResMdl *m){Heap_Free(m);}
+int hg_prop_model_view_scene(const NNSG3dResMdl *m,DSSceneTriangle callback,void *user,DSModelStats *stats) {
+    return m&&ds_model_scene(&m->model,callback,user,stats);
+}
+
+int hg_prop_model_animation_compatible(const NNSG3dResMdl *model,const DSAnimationResource *a){
+    if(!model||!a)return 0;
+    if(a->kind==DS_ANIMATION_JOINT){for(unsigned i=0;i<a->nodes;i++){unsigned at=a->record[20+2*i]|(unsigned)a->record[21+2*i]<<8;if(a->record[at+3]>=model->model.nodes)return 0;}return 1;}
+    DSTextureAnimation names={.bytes=a->record,.size=a->record_size,.materials=a->materials,.names=a->names};
+    for(unsigned i=0;i<names.materials;i++){
+        char name[17];memcpy(name,names.bytes+names.names+16*i,16);name[16]=0;unsigned matched=0;
+        for(unsigned j=0;j<model->model.materials;j++){DSModelMaterial mat;if(!ds_model_material(&model->model,j,&mat))return 0;matched+=!strcmp(mat.name,name);}
+        if(matched!=1)return 0;
+    }return 1;
 }

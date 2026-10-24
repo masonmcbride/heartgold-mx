@@ -16,6 +16,7 @@
 #include "compat/healing.h"
 #include "compat/pokemon.h"
 #include "compat/follow.h"
+#include "script_pokemon_util.h"
 #include "compat/field_control.h"
 #include "constants/init_script_types.h"
 #include "save_local_field_data.h"
@@ -188,6 +189,7 @@ static void scene_destroy(void *opaque) {
 }
 static void scene_bind(void *opaque,FieldSystem *field,int preview) {
     ScriptScene *scene=opaque;
+    GF_ASSERT(FieldSystem_VarSet(field,VAR_SPECIAL_LAST_TALKED,(u16)(scene->target<scene->count?MapObject_GetID(scene->objects+scene->target):65535)));
     if(!scene->local_field)scene->local_field=malloc(Save_LocalFieldData_sizeof());
     GF_ASSERT(scene->local_field);
     memcpy(scene->local_field,SaveArray_Get(field->saveData,SAVE_LOCAL_FIELD_DATA),Save_LocalFieldData_sizeof());
@@ -287,7 +289,8 @@ static int scene_apply(void *opaque,unsigned person,const uint8_t *bytes,size_t 
 }
 static LocalMapObject *add_follower(LocalMapObject *slot,MapObjectManager *manager,HGFieldResources *resources,unsigned map,Party *party,int x,int z,unsigned facing) {
     if(!party||!Party_GetCount(party))return NULL;
-    Pokemon *mon=Party_GetMonByIndex(party,0);
+    Pokemon *mon=CountAlivePokemon(party)?GetFirstAliveMonInParty_CrashIfNone(party):GetFirstNonEggInParty(party);
+    if(!mon)return NULL;
     MapObjectManager allocation=*manager;allocation.objects=slot;allocation.objectCount=1;
     memset(slot,0,sizeof(*slot));LocalMapObject *object=hg_follow_create(&allocation,GetMonData(mon,MON_DATA_SPECIES,NULL),GetMonData(mon,MON_DATA_FORM,NULL),GetMonData(mon,MON_DATA_GENDER,NULL),facing,x,z,MonIsShiny(mon));
     if(!object)return NULL;object->manager=manager;hg_map_object_set_map(object,map);sub_0205F47C(object,movement_finished);
@@ -669,6 +672,31 @@ int hg_field_player_refresh_actors(HGFieldPlayer *p) {
     if(!p||p->walking||p->script)return 0;PreparedActors *actors=prepare_actors(p,p->resources,p->map,p->story,1);
     if(!actors)return 0;install_actors(p,actors);return 1;
 }
+int hg_field_player_swap_party(HGFieldPlayer *p,unsigned first,unsigned second){
+    if(!p||p->walking||p->script||p->exploring)return 0;
+    unsigned count=Party_GetCount(hg_story_save_party(p->field.saveData));
+    if(first>=count||second>=count||first==second)return 0;
+    HGStoryState *candidate=hg_story_clone(p->story);if(!candidate)return 0;
+    unsigned long long revision=hg_story_revision(p->story);
+    FieldSystem field={0};hg_story_bind_field(candidate,&field);Party *party=hg_story_save_party(field.saveData);
+    /* Original swap includes Aprijuice slot records; its BOOL is FALSE even on success. */
+    Party_SwapSlots(party,first,second);
+    LocalMapObject *old=MapObjectManager_GetFirstActiveObjectByID(&p->manager,obj_partner_poke);
+    unsigned index=old?(unsigned)(old-p->objects):p->manager.objectCount;
+    if(index>=64){hg_story_free(candidate);return 0;}
+    int x=MapObject_GetXCoord(old?old:p->objects),z=MapObject_GetZCoord(old?old:p->objects);
+    unsigned direction=MapObject_GetFacingDirection(old?old:p->objects);
+    LocalMapObject replacement;
+    if(!add_follower(&replacement,&p->manager,p->resources,p->map,party,x,z,direction)){hg_story_free(candidate);return 0;}
+    HGFieldView *sprite=hg_character_sprite_load(MapObject_GetSpriteID(&replacement),direction,NULL,0);
+    HGMotionSession session=p->session;memset(session.follower,0,sizeof(session.follower));
+    if(!sprite||!hg_motion_follow_tick(p->resources,p->avatar,&replacement,&session,1,48)||!hg_story_commit(p->story,candidate,revision)){
+        hg_field_view_free(sprite);hg_story_free(candidate);return 0;
+    }
+    hg_story_free(candidate);
+    if(old)release_live_sprite(p,index-1);else{p->manager.objectCount++;p->actors.active++;}
+    p->objects[index]=replacement;p->actor_sprites[index-1]=sprite;p->session=session;p->step_valid=0;return 1;
+}
 int hg_field_player_interaction_tick(HGFieldPlayer *p,char *message,size_t capacity) {
     if(!p||!p->script)return HG_SCRIPT_DONE;
     int status=hg_field_script_tick(p->script);
@@ -743,6 +771,9 @@ int hg_field_player_interact(HGFieldPlayer *p,char *message,size_t capacity) {
     if(!message||!capacity||!hg_field_player_interaction_begin(p))return 0;
     int status;do{status=hg_field_player_interaction_tick(p,message,capacity);}while(status==HG_SCRIPT_RUNNING);
     return status==HG_SCRIPT_MESSAGE;
+}
+int hg_field_player_probe_step_transition(HGFieldPlayer *p,HGWarpDestination *out){
+    return p&&!p->walking&&!p->script&&out&&hg_transition_probe_step(p->transitions,p->resources,out);
 }
 int hg_field_player_probe_transition(HGFieldPlayer *p,uint16_t keys,HGWarpDestination *out) {
     if(!p||p->walking||p->script||!out)return 0;int direction;

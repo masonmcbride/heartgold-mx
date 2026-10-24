@@ -10,27 +10,8 @@ static void put(uint8_t *ram,unsigned offset,uint32_t value) {
 }
 static int math_boundary(DSThumb *cpu,void *user) {
     (void)user;
-    if(cpu->r[15]==HG_THUMB_BOUNDARY__ll_mul) {
-        uint64_t a=(uint64_t)cpu->r[0]|(uint64_t)cpu->r[1]<<32;
-        uint64_t b=(uint64_t)cpu->r[2]|(uint64_t)cpu->r[3]<<32;
-        uint64_t product=a*b;cpu->r[0]=(uint32_t)product;cpu->r[1]=(uint32_t)(product>>32);return 1;
-    }
-    if(cpu->r[15]==HG_THUMB_BOUNDARY_FX_Div) {
-        /* Explicit synchronous Q32 quotient -> rounded Q12 arithmetic boundary.
-         * SDK/hardware division implementation and timing are not executed. */
-        int64_t numerator=(int64_t)(int32_t)cpu->r[0]*INT64_C(4294967296);
-        int32_t denominator=(int32_t)cpu->r[1];
-        if(!denominator || (numerator==INT64_MIN && denominator==-1))return -1;
-        int64_t quotient=numerator/denominator;
-        if(quotient>INT64_MAX-INT64_C(524288))return -1;
-        quotient+=INT64_C(524288);
-        /* Explicit arithmetic shift, including negative nonmultiples. */
-        int64_t result=quotient/INT64_C(1048576);
-        if(quotient<0 && quotient%INT64_C(1048576))result--;
-        if(result<INT32_MIN || result>INT32_MAX)return -1;
-        cpu->r[0]=(uint32_t)(int32_t)result;return 1;
-    }
-    return 0;
+    const char *name=cpu->r[15]==HG_THUMB_BOUNDARY__ll_mul?"_ll_mul":cpu->r[15]==HG_THUMB_BOUNDARY_FX_Div?"FX_Div":"";
+    return ds_thumb_math_boundary(cpu,name);
 }
 int hg_collision_height(const uint8_t *bytes,size_t size,unsigned mode,int32_t reference,
                         int32_t x,int32_t z,int32_t *height) {

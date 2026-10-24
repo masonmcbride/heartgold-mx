@@ -12,7 +12,7 @@ for relative in source_inputs:
   functions[m[1]]=(path,m)
 existing={'SaveArray_Party_Get','SaveArray_PCStorage_Get','Save_Pokedex_Get'}
 for name in ('pokemon_decls.inc','script_kernel_decls.inc','save_c_records_decls.inc'):
- existing.update(re.findall(r'\b(\w+)\([^;{}]*\)\s*;',(out/name).read_text()))
+ existing.update(re.findall(r'^(?!static\b)[^\n;{}]*?\b(\w+)\([^;{}]*\)\s*;',(out/name).read_text(),re.M))
 roots='BugContest_New BugContest_Delete BugContest_Judge BugContest_GetEncounterSlot BugContest_ContestantIsRegistered GetIdxOfFirstAliveMonInParty_CrashIfNone'.split()
 selected={};pending=roots[:]
 while pending:

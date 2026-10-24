@@ -15,7 +15,7 @@ field=(root/'include/field_system.h').read_text()
 types.append(re.search(r'typedef struct FieldInput \{.*?^\} FieldInput;',field,re.M|re.S)[0])
 write_text_if_changed(out/'event_types.inc', '/* Original declarations; build-local. */\n'+'\n'.join(types)+'\n')
 groups={
- 'src/field/field_control.c':('PlayerAvatar_GetStandingTileCoords','ShiftFieldCoordsByCompassDirection','PlayerAvatar_GetFacingTileCoords','SetLocation','FieldSystem_MapConnection','FieldSystem_CheckMapTransition'),
+ 'src/field/field_control.c':('PlayerAvatar_GetStandingTileCoords','ShiftFieldCoordsByCompassDirection','PlayerAvatar_GetFacingTileCoords','SetLocation','FieldSystem_MapConnection','FieldSystem_CheckMapTransition','FieldSystem_CheckTransition','FieldSystem_SetMapConnection','FieldSystem_TrySetMapConnection'),
  'src/location_backup.c':('Location_SetToPlayerRoom',),
  'src/field_warp_tasks.c':('sub_02052F94',),
 }

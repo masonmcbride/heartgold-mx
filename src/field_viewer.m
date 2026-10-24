@@ -1,5 +1,6 @@
 #import <Cocoa/Cocoa.h>
 #include "field_app.h"
+#include "story_checkpoints.h"
 #include <math.h>
 #include <time.h>
 #define WIDTH 800
@@ -12,6 +13,8 @@ void hg_ui_test_approach_center_door(HGFieldApp *);
 void hg_ui_test_prepare_nurse(HGFieldApp *);
 void hg_ui_test_prepare_mart(HGFieldApp *);
 void hg_ui_test_prepare_mother(HGFieldApp *);
+HGFieldApp *hg_ui_test_tower_ladder(void);
+void hg_ui_test_tower_descend(HGFieldApp *);
 int hg_ui_test_nurse_healed(HGFieldApp *);
 @interface FieldCanvas : NSView
 @property const HGFieldView *field;
@@ -72,7 +75,7 @@ int hg_ui_test_nurse_healed(HGFieldApp *);
 }
 - (BOOL)loadCheckpoint:(NSString *)path error:(char *)error { return [self loadSession:path cartridge:NO error:error]; }
 - (BOOL)loadSession:(NSString *)path cartridge:(BOOL)cartridge error:(char *)error {
-    HGFieldApp *next=cartridge?hg_field_app_continue(path.fileSystemRepresentation,error,256):hg_field_app_checkpoint_load(path.fileSystemRepresentation,error,256);if(!next)return NO;
+    HGFieldApp *next=[path.pathExtension isEqualToString:@"hgstory"]?hg_story_checkpoint_load((unsigned)path.lastPathComponent.integerValue,path.stringByDeletingLastPathComponent.fileSystemRepresentation,error,256):cartridge?hg_field_app_continue(path.fileSystemRepresentation,error,256):hg_field_app_checkpoint_load(path.fileSystemRepresentation,error,256);if(!next)return NO;
     DSCamera camera;hg_field_app_camera(next,&camera,WIDTH,HEIGHT);
     if(!hg_field_app_render(next,&camera,self.bitmap.bitmapData,WIDTH,HEIGHT)){snprintf(error,256,"Cannot display this checkpoint");hg_field_app_free(next);return NO;}
     if(self.audioEnabled&&!hg_field_app_audio_enable(next,1,error,256)){hg_field_app_free(next);return NO;}
@@ -141,6 +144,10 @@ int hg_ui_test_nurse_healed(HGFieldApp *);
         else if(event.characters.length&&![event.characters rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].length){hg_field_app_name_edit(self.application,[draft stringByAppendingString:event.characters].UTF8String);}
         [self render];return;
     }
+    if(hg_field_app_inspect_kind(self.application)&&event.keyCode>=123&&event.keyCode<=126){
+        self.movementKeys=0;
+        hg_field_app_input(self.application,(event.keyCode==123||event.keyCode==126)?0x40:0x80);return;
+    }
     DSCamera c=self.camera;NSString *key=event.charactersIgnoringModifiers.lowercaseString;BOOL changed=YES;
     if(hg_field_app_player(self.application,NULL,NULL)) {
         if([key isEqualToString:@"b"]||[key isEqualToString:@"p"]||event.keyCode==53){
@@ -151,6 +158,7 @@ int hg_ui_test_nurse_healed(HGFieldApp *);
         }
         uint16_t bit=[key isEqualToString:@"w"]?0x40:[key isEqualToString:@"s"]?0x80:
                      [key isEqualToString:@"a"]?0x20:[key isEqualToString:@"d"]?0x10:0;
+        if(bit&&hg_field_app_inspect_kind(self.application)){self.movementKeys=0;hg_field_app_input(self.application,bit);return;}
         if(bit){self.movementKeys=(self.movementKeys|bit)&~2u;if(event.modifierFlags&NSEventModifierFlagShift)self.movementKeys|=2;
             hg_field_app_input(self.application,self.movementKeys);return;}
     }
@@ -345,11 +353,17 @@ static NSString *mapTitle(unsigned map) {
     NSButton *pokemon=[NSButton buttonWithTitle:@"Pokémon (P)" target:self action:@selector(showPokemon:)];pokemon.frame=NSMakeRect(590,612,140,28);pokemon.autoresizingMask=NSViewMinYMargin;[root addSubview:pokemon];
     self.checkpoints=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(740,612,250,28) pullsDown:NO];[self.checkpoints addItemWithTitle:@"Jump to checkpoint…"];
     NSString *checkpointDirectory=[NSBundle.mainBundle.executablePath.stringByDeletingLastPathComponent stringByAppendingPathComponent:@"checkpoints"];
+    for(unsigned i=0;i<hg_story_checkpoint_count();i++){
+        [self.checkpoints addItemWithTitle:[NSString stringWithUTF8String:hg_story_checkpoint_title(i)]];
+        self.checkpoints.lastItem.representedObject=[checkpointDirectory stringByAppendingPathComponent:[NSString stringWithFormat:@"%u.hgstory",i]];
+        self.checkpoints.lastItem.toolTip=@"A fresh six-Pokémon team at this story moment. Back restores your previous session.";
+    }
+    [self.checkpoints.menu addItem:NSMenuItem.separatorItem];
     NSArray<NSString *> *files=[[[NSFileManager defaultManager] contentsOfDirectoryAtPath:checkpointDirectory error:nil] sortedArrayUsingSelector:@selector(compare:)];
-    NSDictionary *starters=@{@"152":@"Chikorita",@"155":@"Cyndaquil",@"158":@"Totodile"};NSArray *stages=@[@"",@"Route 29",@"Before rival",@"After rival",@"Before tutorial",@"After tutorial"];
+    NSDictionary *starters=@{@"152":@"Chikorita",@"155":@"Cyndaquil",@"158":@"Totodile"};NSArray *stages=@[@"",@"First steps",@"Mystery Egg & rival",@"Return to Elm",@"Catching lesson",@"Adventure begins"];
     for(NSString *file in files){if(![file.pathExtension isEqualToString:@"hgcheckpoint"])continue;NSArray *parts=[file.stringByDeletingPathExtension componentsSeparatedByString:@"-"];if(parts.count!=2)continue;NSString *name=starters[parts[0]];NSInteger stage=[parts[1] integerValue];if(!name||stage<1||stage>5)continue;
-        [self.checkpoints addItemWithTitle:[NSString stringWithFormat:@"%@ · %@",name,stages[stage]]];self.checkpoints.lastItem.representedObject=[checkpointDirectory stringByAppendingPathComponent:file];}
-    self.checkpoints.target=self;self.checkpoints.action=@selector(checkpointChanged:);self.checkpoints.autoresizingMask=NSViewMinYMargin;self.checkpoints.toolTip=@"Resume an opening-route state captured after its required events. Back returns to your previous session.";[root addSubview:self.checkpoints];
+        [self.checkpoints addItemWithTitle:[NSString stringWithFormat:@"Original party · %@ · %@",name,stages[stage]]];self.checkpoints.lastItem.representedObject=[checkpointDirectory stringByAppendingPathComponent:file];}
+    self.checkpoints.target=self;self.checkpoints.action=@selector(checkpointChanged:);self.checkpoints.autoresizingMask=NSViewMinYMargin;self.checkpoints.toolTip=@"Story moments include a full team. Original-party entries preserve the played run. Back restores your previous session.";[root addSubview:self.checkpoints];
     self.checkpointBack=[NSButton buttonWithTitle:@"Back" target:self action:@selector(checkpointBack:)];self.checkpointBack.frame=NSMakeRect(995,612,75,28);self.checkpointBack.autoresizingMask=NSViewMinYMargin;self.checkpointBack.enabled=NO;[root addSubview:self.checkpointBack];
     self.search=[[NSSearchField alloc] initWithFrame:NSMakeRect(10,578,248,28)];self.search.placeholderString=@"Search name or enter an ID";self.search.delegate=self;self.search.autoresizingMask=NSViewMinYMargin;[root addSubview:self.search];
     NSScrollView *scroll=[[NSScrollView alloc] initWithFrame:NSMakeRect(10,48,248,520)];scroll.hasVerticalScroller=YES;scroll.autoresizingMask=NSViewHeightSizable;
@@ -594,6 +608,32 @@ static NSString *mapTitle(unsigned map) {
         if(![retainedPage isEqualToString:[NSString stringWithUTF8String:hg_field_app_dialogue_page(retained)]]||!hg_field_app_interaction_busy(retained))field_fail(__LINE__);
         settleAutomatic(retained);
         HGFieldApp *beforeJump=self.canvas.application;HGStoryState *beforeJumpStory=hg_field_app_story(beforeJump);unsigned long long beforeJumpRevision=hg_story_revision(beforeJumpStory);
+        [self.checkpoints selectItemAtIndex:1];[self checkpointChanged:self.checkpoints];
+        if(self.canvas.application==beforeJump||hg_field_app_map(self.canvas.application)!=33||!self.checkpointBack.enabled)field_fail(__LINE__);
+        [self showPokemon:nil];char teamText[4096];hg_field_app_inspect_text(self.canvas.application,teamText,sizeof(teamText));
+        if(!strstr(teamText,"6 in party")||!strstr(teamText,"Lv5")||!strstr(teamText,"PP"))field_fail(__LINE__);
+        if(![self.canvas render])field_fail(__LINE__);
+        [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/story-team-party-ui.png" atomically:YES];
+        NSEvent *partyDown=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"s" charactersIgnoringModifiers:@"s" isARepeat:NO keyCode:1];
+        NSEvent *partyUp=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"" charactersIgnoringModifiers:@"" isARepeat:NO keyCode:126];
+        NSEvent *partyEnter=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:self.window.windowNumber context:nil characters:@"\r" charactersIgnoringModifiers:@"\r" isARepeat:NO keyCode:36];
+        [self.canvas keyDown:partyDown];
+        for(unsigned i=0;i<12;i++){hg_field_app_input(self.canvas.application,self.canvas.movementKeys);hg_field_app_step(self.canvas.application);}
+        hg_field_app_inspect_text(self.canvas.application,teamText,sizeof(teamText));if(!strstr(teamText,"2/6")||self.canvas.movementKeys)field_fail(__LINE__);
+        [self.canvas keyDown:partyUp];hg_field_app_step(self.canvas.application);
+        [self.canvas keyDown:partyEnter];hg_field_app_step(self.canvas.application);
+        [self.canvas keyDown:partyDown];hg_field_app_step(self.canvas.application);
+        [self.canvas keyDown:partyEnter];hg_field_app_step(self.canvas.application);
+        unsigned partyFollower;if(!hg_field_app_follower(self.canvas.application,&partyFollower,NULL,NULL)||partyFollower!=492)field_fail(__LINE__);
+        [self.canvas keyDown:partyUp];hg_field_app_step(self.canvas.application);if(![self.canvas render])field_fail(__LINE__);
+        [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/party-reordered-ui.png" atomically:YES];
+        [self showPokemon:nil];
+        hg_field_app_input(self.canvas.application,0x20);hg_field_app_step(self.canvas.application);hg_field_app_clear_input(self.canvas.application);
+        for(unsigned i=0;i<16;i++)hg_field_app_step(self.canvas.application);
+        int partyX,partyZ,followX,followZ;
+        if(!hg_field_app_player(self.canvas.application,&partyX,&partyZ)||!hg_field_app_follower(self.canvas.application,&partyFollower,&followX,&followZ)||partyFollower!=492||(partyX==followX&&partyZ==followZ)||hg_field_app_error(self.canvas.application)[0]||![self.canvas render])field_fail(__LINE__);
+        [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/story-team-field-ui.png" atomically:YES];
+        [self checkpointBack:nil];if(self.canvas.application!=beforeJump||hg_field_app_story(beforeJump)!=beforeJumpStory||hg_story_revision(beforeJumpStory)!=beforeJumpRevision)field_fail(__LINE__);
         NSInteger checkpointIndex=-1;for(NSInteger i=1;i<self.checkpoints.numberOfItems;i++)if([self.checkpoints.itemArray[i].representedObject hasSuffix:@"152-2.hgcheckpoint"]){checkpointIndex=i;break;}
         if(checkpointIndex<0)field_fail(__LINE__);[self.checkpoints selectItemAtIndex:checkpointIndex];[self checkpointChanged:self.checkpoints];
         if(self.canvas.application==beforeJump||hg_field_app_map(self.canvas.application)!=67||!self.checkpointBack.enabled)field_fail(__LINE__);
@@ -729,6 +769,15 @@ static NSString *mapTitle(unsigned map) {
             if(![self.canvas render])field_fail(__LINE__);
             [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/mother-call-return-ui.png" atomically:YES];
             self.canvas.application=previous;hg_field_app_free(mother);[self.canvas resetCamera];
+        }
+        {
+            HGFieldApp *previous=self.canvas.application,*tower=hg_ui_test_tower_ladder();
+            NSString *temporarySave=[NSString stringWithUTF8String:hg_field_app_save_path(tower)];
+            self.canvas.application=tower;[self.canvas resetCamera];if(![self.canvas render])field_fail(__LINE__);
+            [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/ladder-upper-ui.png" atomically:YES];
+            hg_ui_test_tower_descend(tower);[self.canvas resetCamera];if(![self.canvas render])field_fail(__LINE__);
+            [[self.canvas.bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@"build/evidence/ladder-lower-ui.png" atomically:YES];
+            self.canvas.application=previous;hg_field_app_free(tower);[[NSFileManager defaultManager] removeItemAtPath:temporarySave error:nil];[self.canvas resetCamera];
         }
         [self.canvas display];fprintf(stderr,"Map browser smoke: Elm, breeder and rival conversations, rival shove/jump and original completion, Mom, NPC paging, retained travel/session statistics, map-list/camera synchronization, validated checkpoint/Back, visible rival battle/cutscene return, typed rival naming and Elm Egg handoff, automatic tutorial capture/return and five-Ball checkpoint, original wild loss/home and Center recovery with healing presentation, visible Center entrance and exit doors, normal Nurse Joy healing, original Mart clerk/menu and native shop panel, walk/run, town sign, input, timing, search, exploration/session restoration and AppKit display passed\n");[NSApp terminate:nil];
     });

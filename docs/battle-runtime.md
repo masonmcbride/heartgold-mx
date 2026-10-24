@@ -520,3 +520,46 @@ starters open/cancel Bag, target and party menus before catching. Native AppKit
 smoke opens/renders Bag/party, cancels with Escape and still completes the
 original defeat/recovery routes. Existing upstream signed-shift UBSan reports
 remain; instrumented scenario completion is not a clean UBSan claim.
+
+## Trainer event services, 2026-10-22
+
+The gameplay-produced Cyndaquil Violet save reaches Sprout Tower 2F and Sage
+Nico's standard trainer script. Grouped preflight now executes original actor
+movement queries, the trainer identity/phone metadata lookup, original encounter
+music selection, original trainer/message table selection and the original
+static-facing reset callbacks. The next rejection is ordinary `TrainerBattle`
+(opcode 213, bank 953 byte 3123). This is still a failing probe: preflight withholds
+the live event, so no trainer dialogue/battle victory or badge is claimed.
+
+The native reset reads its callback/type choices from the original tables. It
+admits static movements 14–17 and ordinary object types, runs the original empty
+teardown, facing initializer, previous-position synchronization and type initializer,
+and preserves the entire object on failure. Dynamic trainer effects, double
+trainers and DS autonomous movement callback scheduling remain unconnected.
+The original overlay-26 reset helper executes inside checked native module
+registration/load/unload. Scene binding now supplies the actual selected NPC ID.
+
+Trainer text uses the unchanged original `GetTrainerMessageByIdPair` traversal;
+its native String boundary returns a message-bank/member reference to the existing
+UTF-8 formatter and acknowledgement owner. Tests check every valid original table
+pair, missing-message clearing and invalid-output preservation. Encounter music
+uses the original class/region table and selector. Native audio retains the paused
+BGM voice, including track position, across scene clones; failed preparation leaves
+playback unchanged. Restoration is checked sample-for-sample against uninterrupted
+playback. This adapts the original field sound save/resume boundary; DS sound-handle
+and NNS calls are not executed.
+
+Actor service fixtures cover private preflight, all 16 facing-movement pairs,
+unsupported callback/type rejection, retry, cartridge Save/load and actor
+reconstruction. These are feature fixtures, separate from the continuous route.
+Ordinary trainer acceptance still requires battle/result ownership, original
+WhiteOut into existing blackout recovery, the saved candle predicate, post-win
+flag publication, defeated dialogue and durable gameplay-produced victory.
+
+Verification for this service group: all 77 CTests pass, as do nine dependency
+analysis tests. Actor/text/audio scenarios finish under ASan/UBSan with the
+previously recorded upstream Pokedex/sys-vars signed-shift warnings and no
+AddressSanitizer errors. The native AppKit smoke check passes; the recovered
+field/follower scene was inspected. The compiler-resolved trainer-message
+closure contains 82 nodes and no open call edges, with resource traversal checked
+by the table-pair scenarios. The full trainer event closure remains open.

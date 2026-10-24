@@ -27,7 +27,10 @@ static int paint(const Triangle *t,const DSRasterMaterial *m,uint8_t *rgba,doubl
         if((fabs(a)<1e-10 && !inclusive(v+1,v+2,area)) || (fabs(b)<1e-10 && !inclusive(v+2,v,area)) || (fabs(c)<1e-10 && !inclusive(v,v+1,area)))continue;size_t i=(size_t)y*w+x;double z=a*v[0].z+b*v[1].z+c*v[2].z;
         if(z<depth[i]-1e-8)continue;
         uint32_t tex=0xffffffff;
-        if(m->textured && !ds_texture_sample(&m->texture,a*v[0].u+b*v[1].u+c*v[2].u+m->uv_u,a*v[0].v+b*v[1].v+c*v[2].v+m->uv_v,m->params,&tex))return 0;
+        double u=a*v[0].u+b*v[1].u+c*v[2].u,vc=a*v[0].v+b*v[1].v+c*v[2].v;
+        if(m->uv_transform){const double *q=m->uv_matrix;double x=q[0]*u+q[2]*vc+q[4];vc=q[1]*u+q[3]*vc+q[5];u=x;}
+        else {u+=m->uv_u;vc+=m->uv_v;}
+        if(m->textured && !ds_texture_sample(&m->texture,u,vc,m->params,&tex))return 0;
         unsigned alpha=(tex>>24)*((m->polygon>>16)&31)/31;
         if(!alpha || ((alpha<255)!=alpha_pass))continue;
         double color[3]={a*v[0].r+b*v[1].r+c*v[2].r,a*v[0].g+b*v[1].g+c*v[2].g,a*v[0].b+b*v[1].b+c*v[2].b};

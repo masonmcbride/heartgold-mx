@@ -49,6 +49,34 @@ if len(tables)!=1:raise ValueError('Original Apricorn sprite table changed')
 raw+='\n#include "constants/sprites.h"\n.text\n'+apricorn_matches[0][0]+'\n.rodata\n.public ov01_02207274\nov01_02207274:\n'+tables[0]+'\n'
 
 
+# Static trainer facing reset: unchanged four initializers, their shared
+# state initializer/tick, and the original ordinary-object type initializer.
+actor_slices=[]
+for relative,names in {'asm/unk_02061284.s':('sub_02061648','sub_0206166C','sub_02061690','sub_0206169C','sub_020616A8','sub_020616B4'),'asm/unk_020632B0.s':('sub_02063AFC',)}.items():
+ source=(root/relative).read_text()
+ for name in names:
+  matches=re.findall(r'\tthumb_func_start '+name+r'\n.*?\tthumb_func_end '+name,source,re.S)
+  if len(matches)!=1:raise ValueError(('Original static actor reset changed',name))
+  actor_slices.append(dict(source=relative,function=name,slice_sha256=hashlib.sha256(matches[0].encode()).hexdigest()))
+  raw+='\n.text\n'+matches[0]+'\n'
+# Resolve admitted callbacks from the original movement and type tables.
+movement_source=(root/'asm/unk_data_020FCBD8.s').read_text()
+movement_table=re.search(r'_020FD1F4:\n((?:\t.word \w+\n){57})',movement_source)
+if not movement_table:raise ValueError('Original movement table changed')
+movement_rows=re.findall(r'\t.word (\w+)',movement_table[1])
+actor_rows=[]
+for movement in range(14,18):
+ descriptor=re.search(r'^'+movement_rows[movement]+r':\n((?:\t.word \w+\n){5})',movement_source,re.M)
+ if not descriptor:raise ValueError(('Original facing movement descriptor changed',movement))
+ values=re.findall(r'\t.word (\w+)',descriptor[1])
+ if values[2]!='sub_0206166C' or values[3]!='sub_0205FCBC':raise ValueError(('Unexpected static actor callbacks',movement,values))
+ actor_rows.append('ACTOR_FACING('+str(movement)+',HG_FIELD_GUEST_'+values[1]+')\n')
+write_text_if_changed(out/'field_guest_actor.inc',''.join(actor_rows))
+type_source=(root/'asm/unk_020632B0.s').read_text()
+type_table=re.search(r'_020FE104:\n((?:\t.word \w+\n){12})',type_source)
+if not type_table:raise ValueError('Original actor type table changed')
+write_text_if_changed(out/'field_guest_actor_types.inc',''.join('case '+str(i)+':return 1;\n' for i,name in enumerate(re.findall(r'\t.word (\w+)',type_table[1])) if name=='sub_02063AFC'))
+
 # Bounded original brightness controller closure. Other wipe/window fades remain
 # unprovided, and hardware brightness is captured by the native display boundary.
 fade_path=root/'asm/unk_0201010C.s'
@@ -65,7 +93,24 @@ for p in message_sources:
  if definitions!={m['id']:str(i) for i,m in enumerate(json.loads(p.read_text())['messages'])}:raise ValueError(('Shared message indices changed',p))
 from guest_assembly import assemble
 image,code_size,imports=assemble(raw,root,out,cc,'field_guest','HG_FIELD_GUEST')
-write_text_if_changed(out/'field_guest_provenance.json', json.dumps({'sources':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in sources+message_sources},'function_slices':[{'source':str(effect_path),'function':'ov01_02200480','source_sha256':hashlib.sha256(effect_path.read_bytes()).hexdigest(),'slice_sha256':hashlib.sha256(effect_slice.encode()).hexdigest()}],'interaction_slices':[{'source':str(surf_path),'function':name,'source_sha256':hashlib.sha256(surf_path.read_bytes()).hexdigest(),'slice_sha256':hashlib.sha256(body.encode()).hexdigest()} for name,body in [('Field_PlayerCanSurfOnTile',surf_matches[0][0]),('MetatileBehavior_IsRockClimbInDirection',rock_matches[0][0])]],'image_sha256':hashlib.sha256(image).hexdigest(),'image_size':len(image),'code_size':code_size,'imports':imports},indent=2)+'\n')
+# Same relocation identities as the guest image. Validate dense slots before
+# emitting O(1) membership/name indexing; handlers compare numeric addresses.
+base=min(imports.values())
+if sorted(imports.values())!=list(range(base,base+4*len(imports),4)):
+ raise ValueError('Motion import relocation slots are not dense/aligned')
+write_text_if_changed(out/'field_guest_dispatch.inc',
+ 'enum HGMotionImport {\n'+''.join(' HG_MOTION_'+name+' = '+str(address)+'u,\n' for name,address in imports.items())+'};\n'+
+ '#define HG_MOTION_IMPORT_BASE '+str(base)+'u\n'+
+ '#define HG_MOTION_IMPORT_COUNT '+str(len(imports))+'u\n')
+
+# Typed terrain predicates are already compiled from the complete original C
+# unit. Derive the guest bridge in one batch rather than per movement/species.
+terrain_source=root/'src/metatile_behavior.c'
+terrain_predicates=re.findall(r'^BOOL (\w+)\((?:u8|u32) \w+\)',terrain_source.read_text(),re.M)
+if len(terrain_predicates)!=len(set(terrain_predicates)):raise ValueError('Ambiguous terrain predicates')
+terrain_imports=sorted(set(terrain_predicates)&set(imports))
+write_text_if_changed(out/'field_guest_terrain.inc',''.join('TILE_PREDICATE('+name+')\n' for name in terrain_imports))
+write_text_if_changed(out/'field_guest_provenance.json', json.dumps({'sources':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in sources+message_sources+[terrain_source]},'function_slices':[{'source':str(effect_path),'function':'ov01_02200480','source_sha256':hashlib.sha256(effect_path.read_bytes()).hexdigest(),'slice_sha256':hashlib.sha256(effect_slice.encode()).hexdigest()}],'interaction_slices':[{'source':str(surf_path),'function':name,'source_sha256':hashlib.sha256(surf_path.read_bytes()).hexdigest(),'slice_sha256':hashlib.sha256(body.encode()).hexdigest()} for name,body in [('Field_PlayerCanSurfOnTile',surf_matches[0][0]),('MetatileBehavior_IsRockClimbInDirection',rock_matches[0][0])]],'terrain_predicates':terrain_imports,'image_sha256':hashlib.sha256(image).hexdigest(),'image_size':len(image),'code_size':code_size,'imports':imports},indent=2)+'\n')
 print(f'Original field guest: {len(image)} bytes, {len(imports)} named import traps')
 
 # Record the selector and LUT independently of whole-assembly coverage.
@@ -78,6 +123,7 @@ provenance=json.loads(provenance_path.read_text())
 provenance['brightness_controller']=[{'source':str(fade_path),'function':name,'source_sha256':hashlib.sha256(fade_path.read_bytes()).hexdigest(),'slice_sha256':hashlib.sha256(body.encode()).hexdigest()} for name,body in fade_slices]
 write_text_if_changed(provenance_path, json.dumps(provenance,indent=2)+'\n')
 
+provenance['actor_reset']={'functions':actor_slices,'movement_table_sha256':hashlib.sha256(movement_table[1].encode()).hexdigest(),'type_table_sha256':hashlib.sha256(type_table[1].encode()).hexdigest()}
 provenance['avatar_transitions']={'functions':[{'function':name,'slice_sha256':hashlib.sha256(body.encode()).hexdigest()} for name,body in avatar_slices],'source':str(surf_path),'source_sha256':hashlib.sha256(surf_path.read_bytes()).hexdigest(),'table_sha256':hashlib.sha256(avatar_table[0].encode()).hexdigest()}
 write_text_if_changed(provenance_path, json.dumps(provenance,indent=2)+'\n')
 

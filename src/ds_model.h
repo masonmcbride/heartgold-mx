@@ -36,3 +36,7 @@ int ds_model_inspection_scene(const DSModel *,DSSceneTriangle,void *,DSModelStat
 
 #include "ds_joint_animation.h"
 int ds_model_scene_pose(const DSModel *,int shape,int material,const DSJointPose *,DSSceneTriangle,void *,DSModelStats *);
+
+/* Mutate only material flags on the caller-owned model backing, after validating
+ * every record. The view and its native render users retain the same bytes. */
+int ds_model_modify_material_flags(const DSModel *,uint8_t *,uint16_t,int);

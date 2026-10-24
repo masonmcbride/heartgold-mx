@@ -114,3 +114,8 @@ int hg_motion_door_sound(const uint8_t list[24],int opening,unsigned *sound);
 typedef struct HGMotionTask { uint8_t environment[72];uint32_t callback;int active,retract; } HGMotionTask;
 int hg_motion_handoff_begin(FieldSystem *,HGMotionTask *);
 int hg_motion_task_tick(FieldSystem *,HGMotionTask *);
+
+/* Static facing actors only: original movement 14..17 teardown/init and ordinary
+ * type initialization. Dynamic trainer scan/effect callbacks remain unadmitted.
+ * Failure preserves the complete object. */
+int hg_motion_actor_reset(LocalMapObject *,unsigned movement);

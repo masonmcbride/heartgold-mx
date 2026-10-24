@@ -18,8 +18,8 @@ void *Heap_Alloc(enum HeapID heap,u32 size) {
     running_battle->allocations[slot]=p;
     if(size==sizeof(BattleContext)&&running_battle&&!running_battle->system.ctx)running_battle->system.ctx=p;return p;
 }
-void ReadWholeNarcMemberByIdPair(void *out,NarcId id,s32 member) {const uint8_t *bytes;size_t size;if(!native_resource_member(id,0,member,&bytes,&size))battle_boundary_failed("battle archive member");memcpy(out,bytes,size);}
-u32 GetNarcMemberSizeByIdPair(NarcId id,s32 member) {const uint8_t *bytes;size_t size;if(!native_resource_member(id,0,member,&bytes,&size))battle_boundary_failed("battle archive size");return (u32)size;}
+static void ReadWholeNarcMemberByIdPair(void *out,NarcId id,s32 member) {const uint8_t *bytes;size_t size;if(!native_resource_member(id,0,member,&bytes,&size))battle_boundary_failed("battle archive member");memcpy(out,bytes,size);}
+static u32 GetNarcMemberSizeByIdPair(NarcId id,s32 member) {const uint8_t *bytes;size_t size;if(!native_resource_member(id,0,member,&bytes,&size)||size>UINT32_MAX)battle_boundary_failed("battle archive size");return (u32)size;}
 void MI_CpuClear32(void *out,u32 size){memset(out,0,size);}
 u32 MaskOfFlagNo(int bit){GF_ASSERT(bit>=0&&bit<32);return 1u<<bit;}
 int LowestFlagNo(u32 value){return value?__builtin_ctz(value):32;}

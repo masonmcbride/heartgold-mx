@@ -5,7 +5,8 @@
 #include "game_font.h"
 #include "compat/resources.h"
 #include <stdarg.h>
-struct HGFieldMenu { SaveData *save;unsigned section,item,move;int stage,changed;char message[256];struct Bag *bag;Party *party;HGInventory *inventory;HGFont *font;int kind;unsigned selected; };
+struct HGFieldMenu { SaveData *save;unsigned section,item,move;int stage,changed;char message[256];struct Bag *bag;Party *party;HGInventory *inventory;HGFont *font;int kind;unsigned selected,swap_from;HGFieldPartySwap swap;void *swap_owner; };
+void hg_field_menu_set_party_swap(HGFieldMenu *m,HGFieldPartySwap swap,void *owner){if(m){m->swap=swap;m->swap_owner=owner;}}
 static void append(char *out,size_t size,const char *fmt,...){size_t used=strlen(out);if(used>=size)return;va_list args;va_start(args,fmt);vsnprintf(out+used,size-used,fmt,args);va_end(args);}
 HGFieldMenu *hg_field_menu_new(SaveData *save,unsigned section){
     if(!save)return NULL;struct Bag *bag=hg_story_save_bag(save);Party *party=hg_story_save_party(save);HGFieldMenu *m=calloc(1,sizeof(*m));if(!m)return NULL;
@@ -14,7 +15,7 @@ HGFieldMenu *hg_field_menu_new(SaveData *save,unsigned section){
 void hg_field_menu_free(HGFieldMenu *m){if(m){hg_inventory_free(m->inventory);hg_font_free(m->font);free(m);}}
 int hg_field_menu_kind(const HGFieldMenu *m){return m?m->kind:0;}
 void hg_field_menu_open(HGFieldMenu *m,int kind){
-    if(!m)return;hg_inventory_free(m->inventory);m->inventory=NULL;m->selected=0;m->kind=kind;m->stage=0;
+    if(!m)return;hg_inventory_free(m->inventory);m->inventory=NULL;m->selected=0;m->kind=kind;m->stage=0;m->swap_from=6;m->message[0]=0;
     if(kind==1){m->inventory=hg_inventory_new_bag(m->bag);if(!m->inventory)m->kind=0;}
 }
 void hg_field_menu_input(HGFieldMenu *m,uint16_t keys){
@@ -36,6 +37,14 @@ void hg_field_menu_input(HGFieldMenu *m,uint16_t keys){
 }
 int hg_field_menu_take_changed(HGFieldMenu *m){if(!m)return 0;int result=m->changed;m->changed=0;return result;}
 void hg_field_menu_confirm(HGFieldMenu *m){
+    if(m&&m->kind==2){
+        unsigned count=Party_GetCount(m->party);if(m->selected>=count||count<2)return;
+        if(m->swap_from==6){m->swap_from=m->selected;m->message[0]=0;return;}
+        int canceled=m->swap_from==m->selected;
+        int ok=!canceled&&m->swap&&m->swap(m->swap_owner,m->swap_from,m->selected);
+        snprintf(m->message,sizeof(m->message),"%s",canceled?"Switch canceled.":ok?"Party order changed.":"Couldn't switch. Your party is unchanged.");
+        m->swap_from=6;return;
+    }
     if(!m||m->kind!=1)return;
     if(!m->stage){HGItem item;if(!hg_inventory_item(m->inventory,hg_inventory_selected(m->inventory),&item))return;
         m->item=item.id;m->selected=m->move=0;
@@ -60,15 +69,17 @@ void hg_field_menu_text(HGFieldMenu *m,char *out,size_t size){
         for(unsigned i=start;i<count&&i<start+6;i++){HGItem item;if(hg_inventory_item(m->inventory,i,&item))append(out,size,"%c %s x%u\n",i==selected?'>':' ',item.name,item.quantity);}
         HGItem item;if(hg_inventory_item(m->inventory,selected,&item))append(out,size,"\n%s\n\nEnter: use on a Pokemon",item.description);
     }else {
-        unsigned count=Party_GetCount(m->party);append(out,size,"POKEMON / %u in party\nW/S select Pokemon\n\n",count);
+        unsigned count=Party_GetCount(m->party);append(out,size,"POKEMON / %u in party\nW/S or arrows: select\nEnter: pick up / place\n",count);
         if(!count){append(out,size,"No Pokemon yet.\nChoose a starter at Elm's lab.");return;}
+        for(unsigned i=0;i<count;i++){Pokemon *p=Party_GetMonByIndex(m->party,i);append(out,size,"%c%u %s Lv%u%s\n",i==m->selected?'>':' ',i+1,hg_pokemon_species_name(GetMonData(p,MON_DATA_SPECIES_OR_EGG,NULL)),GetMonData(p,MON_DATA_LEVEL,NULL),i==m->swap_from?" *":"");}
+        append(out,size,"%s\n\n",m->swap_from<6?"Choose destination; Enter to switch.":m->message);
         Pokemon *mon=Party_GetMonByIndex(m->party,m->selected);unsigned species=GetMonData(mon,MON_DATA_SPECIES_OR_EGG,NULL),level=GetMonData(mon,MON_DATA_LEVEL,NULL);
-        append(out,size,"%u/%u  %s Lv%u\nHP %u/%u  Status: %s\nEXP %u\n",m->selected+1,count,hg_pokemon_species_name(species),level,GetMonData(mon,MON_DATA_HP,NULL),GetMonData(mon,MON_DATA_MAX_HP,NULL),GetMonData(mon,MON_DATA_STATUS,NULL)&7?"Sleep":GetMonData(mon,MON_DATA_STATUS,NULL)&0x88?"Poison":GetMonData(mon,MON_DATA_STATUS,NULL)&16?"Burn":GetMonData(mon,MON_DATA_STATUS,NULL)&32?"Frozen":GetMonData(mon,MON_DATA_STATUS,NULL)&64?"Paralysis":"OK",GetMonData(mon,MON_DATA_EXPERIENCE,NULL));
+        append(out,size,"%u/%u  %s Lv%u\nHP %u/%u %s EXP %u\n",m->selected+1,count,hg_pokemon_species_name(species),level,GetMonData(mon,MON_DATA_HP,NULL),GetMonData(mon,MON_DATA_MAX_HP,NULL),GetMonData(mon,MON_DATA_STATUS,NULL)&7?"Sleep":GetMonData(mon,MON_DATA_STATUS,NULL)&0x88?"Poison":GetMonData(mon,MON_DATA_STATUS,NULL)&16?"Burn":GetMonData(mon,MON_DATA_STATUS,NULL)&32?"Frozen":GetMonData(mon,MON_DATA_STATUS,NULL)&64?"Paralysis":"OK",GetMonData(mon,MON_DATA_EXPERIENCE,NULL));
         append(out,size,"Atk %u  Def %u  Speed %u\nSp.Atk %u  Sp.Def %u\n\n",GetMonData(mon,MON_DATA_ATK,NULL),GetMonData(mon,MON_DATA_DEF,NULL),GetMonData(mon,MON_DATA_SPEED,NULL),GetMonData(mon,MON_DATA_SP_ATK,NULL),GetMonData(mon,MON_DATA_SP_DEF,NULL));
         for(unsigned i=0;i<4;i++){unsigned move=GetMonData(mon,MON_DATA_MOVE1+i,NULL);const uint8_t *name;size_t length;
             if(move&&native_resource_member(NARC_msgdata_msg,750,move,&name,&length))append(out,size,"%s PP %u\n",(const char *)name,GetMonData(mon,MON_DATA_MOVE1_PP+i,NULL));
         }
-        unsigned held=GetMonData(mon,MON_DATA_HELD_ITEM,NULL);HGItem item;append(out,size,"\nHeld item: %s",held&&hg_item_details(held,&item)?item.name:"None");
+        unsigned held=GetMonData(mon,MON_DATA_HELD_ITEM,NULL);HGItem item;append(out,size,"Held item: %s",held&&hg_item_details(held,&item)?item.name:"None");
     }
 }
 int hg_field_menu_render(HGFieldMenu *m,uint8_t *pixels,unsigned width,unsigned height){

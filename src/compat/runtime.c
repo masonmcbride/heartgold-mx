@@ -4,16 +4,14 @@
 #include "item_records.inc"
 #include "compat/resources.h"
 static void unavailable(const char *name) { fprintf(stderr, "Unsupported native boundary: %s\n", name); abort(); }
-void *Heap_Alloc(enum HeapID heap, u32 size) { (void)heap; void *p = malloc(size); if (!p) abort(); return p; }
-void Heap_Free(void *p) { free(p); }
-void Heap_FreeExplicit(enum HeapID heap, void *p) { (void)heap; free(p); }
 void MI_CpuClear8(void *p,u32 n) { memset(p,0,n); }
 void MI_CpuClear16(void *p, u32 n) { memset(p, 0, n); }
 void MI_CpuCopy8(const void *p, void *q, u32 n) { memcpy(q, p, n); }
+void MI_CpuFill8(void *dest,u8 value,u32 size) { memset(dest,value,size); }
 void *AllocAndReadWholeNarcMemberByIdPair(int archive, int member, enum HeapID heap) {
-    if(archive==NARC_itemtool_itemdata_item_icon) {
+    if(archive!=NARC_itemtool_itemdata_item_data) {
         const uint8_t *bytes;size_t size;
-        if(!native_resource_member(archive,0,member,&bytes,&size))unavailable("icon member");
+        if(!native_resource_member(archive,0,member,&bytes,&size)||size>UINT32_MAX)unavailable("archive member");
         void *p=Heap_Alloc(heap,(u32)size);memcpy(p,bytes,size);return p;
     }
     if (archive != NARC_itemtool_itemdata_item_data || member < 0 || (size_t)member >= NELEMS(native_items)) unavailable("archive/member");
@@ -32,7 +30,7 @@ struct String { char *utf8; };
 struct MsgData { int archive,group; };
 int native_message_bank(const MsgData *m){GF_ASSERT(m&&m->archive==NARC_msgdata_msg);return m->group;}
 String *native_string_new(void) { String *s=Heap_Alloc(HEAP_ID_DEFAULT,sizeof(*s));s->utf8=NULL;return s; }
-void native_string_free(String *s) { if(s) { free(s->utf8);free(s); } }
+void native_string_free(String *s) { if(s) { Heap_Free(s->utf8);Heap_Free(s); } }
 const char *native_string_utf8(const String *s) { return s->utf8?s->utf8:""; }
 MsgData *NewMsgDataFromNarc(int type,int archive,int group,enum HeapID heap) {
     if(type!=MSGDATA_LOAD_LAZY)unavailable("message load mode");
@@ -41,9 +39,7 @@ MsgData *NewMsgDataFromNarc(int type,int archive,int group,enum HeapID heap) {
 void ReadMsgDataIntoString(MsgData *m,int index,String *s) {
     const uint8_t *bytes;size_t size;
     if(!native_resource_member(m->archive,m->group,index,&bytes,&size) || !size || bytes[size-1]!=0)unavailable("message member");
-    char *text=Heap_Alloc(HEAP_ID_DEFAULT,(u32)size);memcpy(text,bytes,size);free(s->utf8);s->utf8=text;
+    char *text=Heap_Alloc(HEAP_ID_DEFAULT,(u32)size);memcpy(text,bytes,size);Heap_Free(s->utf8);s->utf8=text;
 }
-void DestroyMsgData(MsgData *m) { free(m); }
+void DestroyMsgData(MsgData *m) { Heap_Free(m); }
 String *NewString_ReadMsgData(MsgData *m,int index) { String *s=native_string_new();ReadMsgDataIntoString(m,index,s);return s; }
-
-void *Heap_AllocAtEnd(enum HeapID heap,u32 n) { return Heap_Alloc(heap,n); }

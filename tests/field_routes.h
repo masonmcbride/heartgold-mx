@@ -48,6 +48,17 @@ static unsigned hg_test_travel(HGFieldApp *app,unsigned expect,unsigned budget) 
 /* Reusable scenario routing: discover with original collision/targeting, then
  * play every step through actual application input. Only the current 32x32
  * map header footprint is searched, including its connected chunks. This is test automation, not runtime pathfinding. */
+static int hg_test_probe_portal(HGTransition *transition,HGFieldResources *terrain,PlayerAvatar *avatar,unsigned direction,HGWarpDestination *destination){
+    if(hg_transition_probe(transition,terrain,direction,destination))return 1;
+    unsigned mask;if(!hg_motion_player_collision(terrain,avatar,direction,&mask)||mask)return 0;
+    static const int dx[]={0,0,-1,1},dz[]={-1,1,0,0};
+    LocalMapObject *object=PlayerAvatar_GetMapObject(avatar),saved=*object;
+    int x=MapObject_GetXCoord(object)+dx[direction],z=MapObject_GetZCoord(object)+dz[direction];int32_t height;
+    if(hg_field_resources_height(terrain,x,z,0,0,&height)!=1)return 0;
+    MapObject_SetCurrentX(object,x);MapObject_SetCurrentZ(object,z);MapObject_SetCurrentY(object,(height>>3)/4096);
+    VecFx32 position={x*65536+32768,height,z*65536+32768};MapObject_SetPositionVector(object,&position);
+    int selected=hg_transition_probe_step(transition,terrain,destination);*object=saved;return selected;
+}
 static void hg_test_route_impl(HGFieldApp *app,int goalx,int goalz,int target_script,unsigned replans) {
     CHECK(replans<8);
     unsigned map=hg_field_app_map(app);
@@ -97,7 +108,7 @@ static void hg_test_route_impl(HGFieldApp *app,int goalx,int goalz,int target_sc
             MapObject_SetFacingDirectionDirect(objects,d);MapObject_SetNextFacingDirection(objects,d);
             if(target_script<=-2) {
                 HGWarpDestination destination;
-                if(hg_transition_probe(transitions,terrain,d,&destination)&&destination.map==-target_script-2){goal=at;face=(int)d;break;}
+                if(hg_test_probe_portal(transitions,terrain,avatar,d,&destination)&&destination.map==-target_script-2){goal=at;face=(int)d;break;}
                 HGFieldTile tile;unsigned collision;
                 if(hg_field_resources_tile(terrain,x+dx[d],z+dz[d],&tile)&&tile.map_header==(unsigned)(-target_script-2)&&
                    hg_motion_player_collision(terrain,avatar,d,&collision)&&!collision){goal=at;face=(int)d;break;}
@@ -114,7 +125,7 @@ static void hg_test_route_impl(HGFieldApp *app,int goalx,int goalz,int target_sc
             int nx=x+dx[d],nz=z+dz[d];if(nx<basex||nx>=endx||nz<basez||nz>=endz)continue;
             int next=(nz-basez)*width+nx-basex;if(previous[next]>=0)continue;unsigned mask;HGWarpDestination warp;
             HGFieldTile next_tile;
-            if(!hg_field_resources_tile(terrain,nx,nz,&next_tile)||next_tile.map_header!=map||hg_field_resources_height(terrain,nx,nz,0,0,&height)!=1||hg_transition_probe(transitions,terrain,d,&warp)||
+            if(!hg_field_resources_tile(terrain,nx,nz,&next_tile)||next_tile.map_header!=map||hg_field_resources_height(terrain,nx,nz,0,0,&height)!=1||hg_test_probe_portal(transitions,terrain,avatar,d,&warp)||
                !hg_motion_player_collision(terrain,avatar,d,&mask)||mask)continue;
             previous[next]=at;direction[next]=(int)d;queue[write++]=next;
         }

@@ -23,6 +23,8 @@
 #include "constants/std_script.h"
 #include "constants/trainers.h"
 #include "trainer_data.h"
+#include "constants/trainer_class.h"
+#include "compat/trainer_message.h"
 #include "gear_phone.h"
 #include "phonebook_dat.h"
 #include "constants/init_script_types.h"
@@ -46,13 +48,13 @@ struct HGFieldScript {
     FieldSystem field;ScriptContext context;HGStoryState *owner;HGStoryState candidate;
     const uint8_t *bytes;uint8_t *code;size_t size,floor,start;unsigned message_bank;
     unsigned long long revision;u16 special[NUM_SPECIAL_VARS];
-    HGScriptMessage message;unsigned face,sound,total;int waiting,acknowledged,yielded,done,failed,preview,committed;
+    HGScriptMessage message;unsigned face,sound,total;int waiting,acknowledged,yielded,done,failed,preview,committed,message_window_open;
     HGScriptSceneServices services;void *scene;MessageFormat format,*format_ptr;u8 movement_count;
     int menu_pending,menu_checked;unsigned menu_choices;u32 *menu_result;
     struct UnkStruct_ov01_021EDC28 list_menu,*list_ptr;Window menu_window;int menu_general,mg_open;u16 menu_variable;HGShop *shop;
     HGFieldScript *parent,*child;u8 waiters,context_count;ScriptContext *contexts[3];
     HGNaming *naming;unsigned preview_menu_offsets[32],preview_menu_count;
-    PhoneBookEntry trainer_entry;HGPhone *phone;void *application_data;DSAudio *local_audio;unsigned unlock_notice;
+    LocalMapObject *last_interacted;PhoneBookEntry trainer_entry;HGPhone *phone;void *application_data;DSAudio *local_audio;unsigned unlock_notice;
     unsigned battle_trainer,battle_pending;u32 battle_result;u16 script_number;
     char error[160];
 };
@@ -94,7 +96,19 @@ static unsigned native_map_bgm(FieldSystem *field,unsigned map) { (void)field;re
 #define GF_SndStartFadeInBGM native_bgm_fade_in
 #define GF_SndGetFadeTimer native_bgm_timer
 #define FieldBGM_GetForMapHeader native_map_bgm
+static void native_encounter_bgm(unsigned sequence) {
+    GF_ASSERT(active_script&&ds_audio_play_temporary_bgm(script_audio(),sequence));
+    active_script->candidate.music.sequence=sequence;active_script->candidate.music.requests++;
+}
+#define BGM_SaveStateAndPlayNew native_encounter_bgm
+LocalMapObject *MapObjectManager_GetFirstActiveObjectByID(MapObjectManager *,u32);
 static void *native_attribute(FieldSystem *field,enum ScriptEnvField attr) {
+    if(attr==SCRIPTENV_LAST_INTERACTED) {
+        HGFieldScript *s=(HGFieldScript *)(void *)field;
+        unsigned id=root_script(s)->special[VAR_SPECIAL_LAST_TALKED-SPECIAL_VAR_BASE];
+        s->last_interacted=id==65535?NULL:MapObjectManager_GetFirstActiveObjectByID(field->mapObjectManager,id);
+        return &s->last_interacted;
+    }
     if(attr==SCRIPTENV_WINDOW)return &((HGFieldScript *)(void *)field)->menu_window;
     if(attr==SCRIPTENV_ACTIVE_SCRIPT_NUMBER)return &root_script((HGFieldScript *)(void *)field)->script_number;
     if(attr==SCRIPTENV_BATTLE_WIN_FLAG)return &((HGFieldScript *)(void *)field)->battle_result;
@@ -125,6 +139,7 @@ void hg_story_set_blackout_spawn(SaveData *save,u16 spawn) { LocalFieldData_SetB
 static SaveData *story_save(const StoryData *data) { return (SaveData *)(void *)&data->save; }
 static SaveData *native_save(FieldSystem *field) { return field->saveData; }
 static void native_buffer_player(MessageFormat *,unsigned,PlayerProfile *);
+void *hg_script_attribute(FieldSystem *field,enum ScriptEnvField attr) { return native_attribute(field,attr); }
 #define FieldSysGetAttrAddr native_attribute
 #define Save_VarsFlags_Get native_vars
 #define Save_PlayerData_GetProfile hg_story_save_profile
@@ -334,9 +349,9 @@ static int operands(unsigned op) {
     default:break;
     }
     switch(op) {
-    case 54:case HG_SCRIPT_MART_SELL:case 0:case 2:case 27:case 50:case 51:case 53:case 58:case 95:case 96:case 97:case 104:case 167:case 609:case 621:case 505:case 21:case 608:case 603:case 746:case 747:case 79:return 0;
+    case 54:case HG_SCRIPT_MART_SELL:case 0:case 2:case 27:case 49:case 52:case 50:case 51:case 53:case 58:case 95:case 96:case 97:case 104:case 167:case 609:case 621:case 505:case 21:case 608:case 603:case 746:case 747:case 79:return 0;
     case 489:case HG_SCRIPT_MART_BUY:case HG_SCRIPT_SPECIAL_MART:case 46:case 11:case 12:case 20:case 30:case 31:case 32:case 60:case 73:case 132:case 144:case 332:case 386:case 131:case 602:case 604:case 605:case 748:case 78:return 2;
-    case 105:case 3:case 17:case 18:case 22:case 26:case 39:case 40:case 41:case 42:case 43:case 294:case 354:case 130:return 4;
+    case HG_SCRIPT_TRAINER_MESSAGE:case 105:case 3:case 17:case 18:case 22:case 26:case 39:case 40:case 41:case 42:case 43:case 294:case 354:case 130:return 4;
     case 339:return 10;
     case 28:case 29:return 5;
     case 45:case 57:case 190:return 1;case 56:case 59:return 3;case 55:case 94:case 106:return 6;case 193:return 3;case 127:case 125:return 6;default:return -1;
@@ -363,6 +378,7 @@ static int valid_operands(HGFieldScript *s,unsigned op,const uint8_t *p) {
         if(target<(int64_t)s->floor||target>=(int64_t)s->size)return 0;
     }
     if(op==212&&!variable(half(p)))return 0;
+    if(op==460&&(!value_valid(half(p))||!variable(half(p+2))))return 0;
     if((op==215||op==216)&&(!variable(half(p))||!variable(half(p+2))||!variable(half(p+4))))return 0;
     if(op==217&&!variable(half(p)))return 0;
     if(op==212||op==215||op==216||op==217) {
@@ -445,6 +461,10 @@ static int valid_operands(HGFieldScript *s,unsigned op,const uint8_t *p) {
     if(op==604&&half(p)!=48&&half(p)!=55&&half(p)!=56)return 0;
     if(op==605&&(p[0]>3||p[1]>3))return 0;
     if(op==339)for(unsigned i=0;i<5;i++)if(!value_valid(half(p+2*i)))return 0;
+    if(op==HG_SCRIPT_ENCOUNTER_MUSIC&&(!value_valid(half(p))||FieldSystem_VarGet(&s->field,half(p))<FIRST_TRAINER_INDEX||FieldSystem_VarGet(&s->field,half(p))>=LAST_TRAINER_INDEX||!s->field.location||MapHeader_GetRegionNo(s->field.location->mapId)>1))return 0;
+    if(op==HG_SCRIPT_TRAINER_MESSAGE&&(!value_valid(half(p))||!value_valid(half(p+2))))return 0;
+    if(op==574&&(!variable(half(p))||!value_valid(half(p+2))))return 0;
+    if(op==109&&!value_valid(half(p)))return 0;
     if(op==105&&(!variable(half(p))||!variable(half(p+2))))return 0;
     if(op==106&&(!value_valid(half(p))||!variable(half(p+2))||!variable(half(p+4))))return 0;
     if((op==332||op==386)&&!variable(half(p)))return 0;
@@ -534,6 +554,8 @@ static void native_external_message(ScriptContext *ctx,MsgData *data,u16 message
 static BOOL native_external_done(ScriptContext *ctx){return !((HGFieldScript *)(void *)ctx->fieldSystem)->waiting;}
 static BOOL presentation(ScriptContext *ctx,unsigned op) {
     HGFieldScript *s=(HGFieldScript *)(void *)ctx->fieldSystem;
+    if(op==52){s->message_window_open=1;s->menu_window.revision++;return FALSE;}
+    if(op==53){s->message_window_open=0;s->message.text[0]=0;s->menu_window.revision++;return FALSE;}
     if(op==489){unsigned mode=ScriptReadHalfword(ctx);if(!mode)s->mg_open=1;else if(mode==7)s->mg_open=0;else {u16 *result=ScriptGetVarPointer(ctx);unsigned tag=hg_delivery_gift_tag(ctx->fieldSystem->saveData);*result=(u16)(mode==1?tag!=0:tag);}return FALSE;}
     if(op==104) {
         s->face=1;
@@ -553,6 +575,17 @@ static BOOL presentation(ScriptContext *ctx,unsigned op) {
         size_t target=(size_t)((ctx->script_ptr-s->code)+(int64_t)delta);
         if(!s->services.apply(s->scene,person,s->bytes+target,s->size-target))fail(s,"Unsupported scripted movement",op,target);
         s->movement_count=(u8)s->services.active(s->scene);
+    } else if(op==HG_SCRIPT_TRAINER_MESSAGE) {
+        unsigned trainer=ScriptGetVar(ctx),kind=ScriptGetVar(ctx);HGTrainerMessageRef ref;
+        const u8 *text;size_t length;
+        if(!hg_trainer_message_ref(trainer,kind,&ref)||
+           (ref.found&&(!native_resource_member(NARC_msgdata_msg,ref.bank,ref.message,&text,&length)||
+           !expand_message(s,text,length,s->message.text,sizeof(s->message.text))))) {
+            fail(s,"Unsupported trainer message",op,(size_t)(ctx->script_ptr-s->code));return TRUE;
+        }
+        if(!ref.found)s->message.text[0]=0;
+        s->message.face_player=s->face;s->message.select_sound=s->sound;
+        s->face=s->sound=0;s->message_window_open=1;s->waiting=1;s->acknowledged=0;return TRUE;
     } else if(op==46||op==45||op==55||op==59||op==132) {
         unsigned message=op==46?ScriptGetVar(ctx):ScriptReadByte(ctx);const uint8_t *text;size_t length;
         if(op==132){unsigned female=ScriptReadByte(ctx);if(PlayerProfile_GetTrainerGender(hg_story_save_profile(story_save(&s->candidate.data))))message=female;}
@@ -563,7 +596,7 @@ static BOOL presentation(ScriptContext *ctx,unsigned op) {
         s->message.face_player=s->face;s->message.select_sound=s->sound;
         s->face=s->sound=0;s->waiting=1;s->acknowledged=0;
         int remaining=operands(op)-(op==132||op==46?2:1);while(remaining-->0)(void)ScriptReadByte(ctx);return TRUE;
-    } else if(op==50||op==51) {
+    } else if(op==49||op==50||op==51) {
         if(!s->acknowledged){fail(s,"Button wait has no presented message",op,(size_t)(ctx->script_ptr-s->code));return TRUE;}
         s->acknowledged=0;
     } else {
@@ -628,7 +661,7 @@ static void initialize(HGFieldScript *s) {
     }
     s->mg_open=0;s->menu_general=0;s->list_ptr=NULL;memset(&s->list_menu,0,sizeof(s->list_menu));hg_shop_free(s->shop);s->shop=NULL;
     s->battle_pending=s->battle_trainer=s->battle_result=0;
-    s->unlock_notice=0;s->menu_pending=0;s->menu_result=NULL;s->face=s->sound=s->total=0;s->waiting=s->acknowledged=s->yielded=s->done=s->failed=0;s->error[0]=0;
+    s->unlock_notice=0;s->menu_pending=0;s->menu_result=NULL;s->face=s->sound=s->total=0;s->message_window_open=s->waiting=s->acknowledged=s->yielded=s->done=s->failed=0;s->error[0]=0;
     if(s->services.incoming_phone) {
         s->phone=hg_phone_new(&s->field,(HGPhoneServices){s,phone_message,phone_waiting,phone_acknowledged,phone_buffer_area,phone_buffer_message,phone_menu_begin,phone_menu_waiting,phone_buffer_integer});
         if(!s->phone||!hg_phone_set_incoming(s->phone,s->special[4],s->special[5],s->special[6],s->special[7]))fail(s,"Incoming call requires an unavailable phone service",431,0);

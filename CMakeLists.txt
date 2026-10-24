@@ -7,6 +7,8 @@ endif()
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/generated_files.py")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/native_bit_operations.py")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/prepare_original_parent.py")
 set(HG_UPSTREAM "${CMAKE_SOURCE_DIR}/upstream/pokeheartgold" CACHE PATH "Unmodified decompilation")
 if(NOT EXISTS "${HG_UPSTREAM}/src/item.c")
   message(FATAL_ERROR "Missing upstream checkout; see README")
@@ -21,7 +23,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HG_UPSTREAM}/s
 # Locally authored SDK scalar interface; no proprietary SDK headers/libraries.
 add_library(hg_sdk_types INTERFACE)
 target_include_directories(hg_sdk_types INTERFACE "${CMAKE_SOURCE_DIR}/src/compat/include")
-add_library(hg_logic STATIC "${HG_UPSTREAM}/src/item.c" "${HG_UPSTREAM}/src/bag.c" src/compat/runtime.c src/compat/menu.c src/compat/resources.c src/demo_bridge.c "${HG_UPSTREAM}/src/list_menu.c")
+add_library(hg_logic STATIC "${HG_UPSTREAM}/src/item.c" "${HG_UPSTREAM}/src/bag.c" src/compat/runtime.c src/compat/native_heap.c src/compat/menu.c src/compat/resources.c src/demo_bridge.c "${HG_UPSTREAM}/src/list_menu.c")
 target_include_directories(hg_logic PUBLIC "${HG_UPSTREAM}/include" "${GEN}" "${CMAKE_SOURCE_DIR}/src")
 target_compile_options(hg_logic PUBLIC "$<$<COMPILE_LANGUAGE:C>:-include>" "$<$<COMPILE_LANGUAGE:C>:${CMAKE_SOURCE_DIR}/src/compat/native.h>")
 add_executable(heartgold_native src/main.c)
@@ -30,7 +32,7 @@ enable_testing()
 add_executable(test_items tests/test_items.c)
 target_link_libraries(test_items PRIVATE hg_logic)
 add_test(NAME original_items COMMAND test_items)
-add_library(ds_platform STATIC src/ds_brightness.c src/ds_graphics.c src/ds_resources.c src/ds_model.c src/ds_joint_animation.c src/ds_texture_animation.c src/ds_texture.c src/ds_raster.c src/ds_transform.c src/ds_frame_clock.c)
+add_library(ds_platform STATIC src/ds_video.c src/ds_irq.c src/ds_brightness.c src/ds_graphics.c src/ds_resources.c src/ds_model.c src/ds_joint_animation.c src/ds_texture_animation.c src/ds_texture.c src/ds_raster.c src/ds_transform.c src/ds_frame_clock.c)
 target_include_directories(ds_platform PUBLIC src)
 # These per-pixel loops run in the interactive app even in a Debug build.
 # Keep assertions/debug symbols/sanitizers; do not enable fast-math.
@@ -99,7 +101,7 @@ target_include_directories(test_sdk_types PRIVATE "${HG_UPSTREAM}/include")
 target_link_libraries(test_sdk_types PRIVATE hg_sdk_types)
 add_test(NAME ds_scalar_abi COMMAND test_sdk_types)
 
-target_sources(hg_logic PRIVATE src/compat/scheduler.c
+target_sources(hg_logic PRIVATE src/compat/scheduler.c src/compat/native_irq.c src/compat/native_video.c src/compat/native_vram.c
   "${HG_UPSTREAM}/src/sys_task.c"
   "${HG_UPSTREAM}/src/sys_task_api.c"
   "${HG_UPSTREAM}/src/systask_environment.c")
@@ -154,7 +156,7 @@ target_link_libraries(test_field_view PRIVATE hg_field_view)
 add_test(NAME original_textured_field_view COMMAND test_field_view)
 
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_props.py" "${HG_UPSTREAM}" "${GEN}" COMMAND_ERROR_IS_FATAL ANY)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/prepare_props.py" "${HG_UPSTREAM}/include/field/overlay_01_02204004.h" "${HG_UPSTREAM}/include/unk_02097268.h" "${HG_UPSTREAM}/include/field/map_load_manager.h" "${HG_UPSTREAM}/include/field/map_prop_animation.h" "${HG_UPSTREAM}/src/field/map_prop_animation.c" "${HG_UPSTREAM}/src/field/overlay_01_02204004.c")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/prepare_props.py" "${HG_UPSTREAM}/include/gf_rtc.h" "${HG_UPSTREAM}/include/field/overlay_01_02204004.h" "${HG_UPSTREAM}/include/unk_02097268.h" "${HG_UPSTREAM}/include/field/map_load_manager.h" "${HG_UPSTREAM}/include/field/map_prop_animation.h" "${HG_UPSTREAM}/src/field/map_prop_animation.c" "${HG_UPSTREAM}/src/field/overlay_01_02204004.c")
 add_library(hg_props STATIC "${HG_UPSTREAM}/src/field/map_prop_manager.c" src/compat/props.c src/compat/prop_animation.c)
 target_link_libraries(hg_props PUBLIC hg_field)
 target_compile_options(hg_props PUBLIC "$<$<COMPILE_LANGUAGE:C>:SHELL:-include \"${CMAKE_SOURCE_DIR}/src/compat/props.h\">")
@@ -176,8 +178,19 @@ target_link_libraries(hg_field_view PUBLIC hg_props)
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_thumb.py"
   "${HG_UPSTREAM}" "${GEN}" "${CMAKE_C_COMPILER}" COMMAND_ERROR_IS_FATAL ANY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-  "${CMAKE_SOURCE_DIR}/scripts/prepare_thumb.py" "${HG_UPSTREAM}/asm/overlay_01_021FAD1C.s" "${HG_UPSTREAM}/asm/unk_02020B8C.s")
+  "${CMAKE_SOURCE_DIR}/scripts/prepare_thumb.py" "${HG_UPSTREAM}/asm/overlay_01_021FAD1C.s" "${HG_UPSTREAM}/asm/unk_02020B8C.s" "${HG_UPSTREAM}/asm/unk_02023694.s" "${HG_UPSTREAM}/asm/unk_0200B150.s" "${HG_UPSTREAM}/asm/overlay_02_02248728.s"
+  "${HG_UPSTREAM}/asm/overlay_01_021F1348.s" "${HG_UPSTREAM}/asm/unk_020689C8.s" "${HG_UPSTREAM}/asm/unk_0202068C.s"
+  "${HG_UPSTREAM}/asm/overlay_01_021FC4C4.s" "${HG_UPSTREAM}/asm/overlay_01_data_02208BFC.s"
+  "${HG_UPSTREAM}/asm/overlay_01_021FD1B8.s" "${HG_UPSTREAM}/asm/overlay_01_02203E40.s"
+  "${HG_UPSTREAM}/src/unk_02025534.c" "${HG_UPSTREAM}/include/gf_3d_loader.h")
 target_sources(ds_platform PRIVATE src/ds_thumb.c)
+# Profiled opening-route execution spends ~20s dispatching 501M guest instructions.
+# Optimize that shared machine service, retaining assertions and sanitizer flags.
+option(HG_OPTIMIZE_THUMB "Optimize bounded ARM/Thumb interpreter dispatch" ON)
+if(HG_OPTIMIZE_THUMB)
+  set_property(SOURCE src/ds_thumb.c APPEND PROPERTY COMPILE_OPTIONS -O2)
+endif()
+
 add_executable(test_thumb tests/test_thumb.c)
 target_include_directories(test_thumb PRIVATE "${GEN}")
 target_link_libraries(test_thumb PRIVATE hg_field)
@@ -196,14 +209,51 @@ target_link_libraries(hg_overlays PUBLIC hg_logic)
 target_compile_options(hg_overlays PUBLIC "$<$<COMPILE_LANGUAGE:C>:SHELL:-include \"${CMAKE_SOURCE_DIR}/src/compat/overlays.h\">")
 add_executable(test_overlays tests/test_overlays.c)
 add_test(NAME original_overlay_lifecycle COMMAND test_overlays)
-add_library(hg_field_app STATIC src/field_app.c src/field_menu.c)
+add_executable(test_native_lifetimes tests/test_native_lifetimes.c)
+target_link_libraries(test_native_lifetimes PRIVATE hg_overlays)
+add_test(NAME native_heap_module_lifetimes COMMAND test_native_lifetimes)
+# Isolated original native owner; never links the legacy field-task owner.
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_original_field.py" "${HG_UPSTREAM}" "${GEN}" COMMAND_ERROR_IS_FATAL ANY)
+include("${GEN}/original_field_inputs.cmake")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${CMAKE_SOURCE_DIR}/scripts/prepare_original_field.py"
+  ${HG_ORIGINAL_FIELD_INPUTS})
+add_executable(test_original_field_owner tests/test_original_field_owner.c "${HG_UPSTREAM}/src/task.c")
+target_link_libraries(test_original_field_owner PRIVATE hg_overlays)
+target_include_directories(test_original_field_owner PRIVATE "${GEN}")
+target_compile_definitions(test_original_field_owner PRIVATE POKEHEARTGOLD_SCRIPT_MANAGER_H)
+target_compile_options(test_original_field_owner PRIVATE "SHELL:-include \"${GEN}/original_field_owner.h\"")
+add_test(NAME original_field_owner_mechanisms COMMAND test_original_field_owner)
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_field_loader.py" "${HG_UPSTREAM}" "${GEN}" "${CMAKE_C_COMPILER}" COMMAND_ERROR_IS_FATAL ANY)
+include("${GEN}/original_loader_dependencies.cmake")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${CMAKE_SOURCE_DIR}/scripts/prepare_field_loader.py" "${CMAKE_SOURCE_DIR}/scripts/guest_assembly.py"
+  "${HG_UPSTREAM}/asm/overlay_01_021F4704.s" "${HG_UPSTREAM}/asm/overlay_01_021FAC44.s"
+  "${HG_UPSTREAM}/asm/overlay_01_021FB04C.s" "${HG_UPSTREAM}/asm/overlay_01_021FB878.s"
+  "${HG_UPSTREAM}/asm/overlay_01_021EA6C4.s"
+  "${HG_UPSTREAM}/asm/unk_02054648.s" "${HG_UPSTREAM}/asm/overlay_01_021FAD1C.s"
+  "${HG_UPSTREAM}/asm/overlay_01_021FB368.s" "${HG_UPSTREAM}/asm/unk_02020B8C.s" "${HG_UPSTREAM}/asm/unk_02023694.s" "${HG_UPSTREAM}/asm/unk_0200B150.s" "${HG_UPSTREAM}/asm/overlay_02_02248728.s"
+  "${HG_UPSTREAM}/asm/overlay_01_021F1348.s" "${HG_UPSTREAM}/asm/unk_020689C8.s" "${HG_UPSTREAM}/asm/unk_0202068C.s"
+  "${HG_UPSTREAM}/asm/overlay_01_021FC4C4.s" "${HG_UPSTREAM}/asm/overlay_01_data_02208BFC.s"
+  "${HG_UPSTREAM}/asm/overlay_01_021FD1B8.s" "${HG_UPSTREAM}/asm/overlay_01_02203E40.s"
+  "${HG_UPSTREAM}/src/unk_02025534.c" "${HG_UPSTREAM}/include/gf_3d_loader.h"
+  "${HG_UPSTREAM}/src/system.c" "${HG_UPSTREAM}/include/system.h"
+  "${HG_UPSTREAM}/src/field/map_prop_manager.c" "${HG_UPSTREAM}/files/a/0/7/0")
+add_executable(test_original_field_constructor tests/test_original_field_constructor.c src/compat/original_loader.c "${HG_UPSTREAM}/src/task.c" "${HG_UPSTREAM}/src/field/field_3d_object_task.c")
+target_compile_options(test_original_field_constructor PRIVATE "SHELL:-include \"${GEN}/original_field_task_names.h\"" "SHELL:-include \"${GEN}/original_field_owner.h\"")
+target_link_libraries(test_original_field_constructor PRIVATE hg_overlays)
+target_compile_definitions(test_original_field_constructor PRIVATE POKEHEARTGOLD_SCRIPT_MANAGER_H MI_CpuClear32=MI_CpuClear8)
+target_include_directories(test_original_field_constructor PRIVATE "${GEN}")
+target_compile_definitions(test_original_field_constructor PRIVATE HG_ORIGINAL_SCRIPT_VM="${HG_UPSTREAM}/src/script.c")
+add_test(NAME original_field_construction COMMAND test_original_field_constructor)
+add_library(hg_field_app STATIC src/field_app.c src/field_menu.c src/story_checkpoints.c)
 target_link_libraries(hg_field_app PUBLIC hg_field_view PRIVATE hg_overlays)
 target_link_libraries(heartgold_field_viewer PRIVATE hg_field_app)
 
 target_link_libraries(test_overlays PRIVATE hg_field_app)
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_characters.py" "${HG_UPSTREAM}" "${GEN}" COMMAND_ERROR_IS_FATAL ANY)
-file(GLOB CHARACTER_INPUTS CONFIGURE_DEPENDS "${HG_UPSTREAM}/files/data/mmodel/mmodel/*.NSBMD" "${HG_UPSTREAM}/files/data/mmodel/mmodel/*.NSBTX")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CHARACTER_INPUTS} "${CMAKE_SOURCE_DIR}/scripts/prepare_characters.py" "${HG_UPSTREAM}/include/constants/mmodel.h" "${HG_UPSTREAM}/include/constants/sprites.h" "${HG_UPSTREAM}/asm/overlay_01_sprite_data.s")
+file(GLOB CHARACTER_INPUTS CONFIGURE_DEPENDS "${HG_UPSTREAM}/files/data/mmodel/mmodel/*.NSBMD" "${HG_UPSTREAM}/files/data/mmodel/mmodel/*.NSBTX" "${HG_UPSTREAM}/files/data/mmodel/mmodel/*.json")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CHARACTER_INPUTS} "${HG_UPSTREAM}/files/data/mmodel/mmodel.json.txt" "${CMAKE_SOURCE_DIR}/scripts/prepare_characters.py" "${HG_UPSTREAM}/include/constants/mmodel.h" "${HG_UPSTREAM}/include/constants/sprites.h" "${HG_UPSTREAM}/asm/overlay_01_sprite_data.s")
 add_executable(test_characters tests/test_characters.c)
 target_link_libraries(test_characters PRIVATE hg_field_view)
 add_test(NAME character_sprite_catalog COMMAND test_characters)
@@ -251,15 +301,21 @@ add_test(NAME original_locomotion_controller COMMAND test_locomotion)
 add_executable(test_transitions tests/test_transitions.c)
 target_link_libraries(test_transitions PRIVATE hg_field_app hg_motion)
 add_test(NAME original_field_transitions COMMAND test_transitions)
+set_tests_properties(original_field_transitions PROPERTIES DEPENDS original_violet_arrival RUN_SERIAL TRUE WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 add_executable(test_actors tests/test_actors.c)
 target_link_libraries(test_actors PRIVATE hg_field_app hg_motion)
 add_test(NAME original_event_actors COMMAND test_actors)
 add_test(NAME original_motion_state COMMAND test_motion)
 
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_field_guest.py" "${HG_UPSTREAM}" "${GEN}" "${CMAKE_C_COMPILER}" COMMAND_ERROR_IS_FATAL ANY)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/prepare_field_guest.py" "${CMAKE_SOURCE_DIR}/scripts/guest_assembly.py" "${HG_UPSTREAM}/asm/overlay_02_02248728.s"
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/prepare_field_guest.py" "${CMAKE_SOURCE_DIR}/scripts/guest_assembly.py" "${HG_UPSTREAM}/src/metatile_behavior.c" "${HG_UPSTREAM}/asm/overlay_02_02248728.s"
+  "${HG_UPSTREAM}/asm/overlay_01_021F1348.s" "${HG_UPSTREAM}/asm/unk_020689C8.s" "${HG_UPSTREAM}/asm/unk_0202068C.s"
+  "${HG_UPSTREAM}/asm/overlay_01_021FC4C4.s" "${HG_UPSTREAM}/asm/overlay_01_data_02208BFC.s"
+  "${HG_UPSTREAM}/asm/overlay_01_021FD1B8.s" "${HG_UPSTREAM}/asm/overlay_01_02203E40.s"
+  "${HG_UPSTREAM}/src/unk_02025534.c" "${HG_UPSTREAM}/include/gf_3d_loader.h"
   "${HG_UPSTREAM}/asm/unk_0205CB48.s" "${HG_UPSTREAM}/asm/unk_0205FD20.s"
   "${HG_UPSTREAM}/asm/unk_02054648.s" "${HG_UPSTREAM}/asm/unk_02062108.s"
+  "${HG_UPSTREAM}/asm/unk_02061284.s" "${HG_UPSTREAM}/asm/unk_020632B0.s"
   "${HG_UPSTREAM}/asm/unk_data_020FCBD8.s" "${HG_UPSTREAM}/asm/unk_data_020FDB44.s"
   "${HG_UPSTREAM}/asm/unk_data_020FD978.s"
   "${HG_UPSTREAM}/asm/overlay_01_022053EC.s" "${HG_UPSTREAM}/asm/overlay_01_022001E4.s"
@@ -288,6 +344,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${HG_EVENT_INPUTS
   "${HG_UPSTREAM}/files/msgdata/msg/msg_0542_T20.json")
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_script_kernel.py" "${HG_UPSTREAM}" "${GEN}" COMMAND_ERROR_IS_FATAL ANY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/prepare_script_kernel.py"
+  "${HG_UPSTREAM}/src/field_bgm.c" "${HG_UPSTREAM}/src/overlay_26_022599D0.c"
   "${HG_UPSTREAM}/src/script_manager.c" "${HG_UPSTREAM}/src/scrcmd_c.c" "${HG_UPSTREAM}/src/sys_vars.c"
   "${HG_UPSTREAM}/src/scrcmd_lottery.c" "${HG_UPSTREAM}/src/player_data.c" "${HG_UPSTREAM}/src/scrcmd_17.c"
   "${HG_UPSTREAM}/src/party.c" "${HG_UPSTREAM}/src/scrcmd_party.c"
@@ -301,7 +358,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS scripts/prepare_n
 add_library(hg_script STATIC "${HG_UPSTREAM}/src/script.c" src/sign_script.c src/field_script.c src/compat/pokegear.c src/compat/apricorn.c)
 target_compile_definitions(hg_script PRIVATE HG_ORIGINAL_POKEGEAR="${HG_UPSTREAM}/src/save_pokegear.c" HG_ORIGINAL_APRICORN="${HG_UPSTREAM}/src/apricorn_tree_sys.c")
 target_link_libraries(hg_script PUBLIC hg_field)
-target_sources(hg_script PRIVATE src/compat/naming.c src/compat/field_queries.c)
+target_sources(hg_script PRIVATE src/compat/naming.c src/compat/field_queries.c src/compat/trainer_message.c)
 target_link_libraries(hg_script PRIVATE hg_stats)
 target_compile_options(hg_script PRIVATE "$<$<COMPILE_LANGUAGE:C>:SHELL:-include \"${CMAKE_SOURCE_DIR}/src/compat/script.h\">")
 add_executable(test_story tests/test_story.c)
@@ -547,9 +604,9 @@ add_test(NAME original_battle_sprite_palettes COMMAND "${Python3_EXECUTABLE}" "$
 add_executable(test_checkpoints tests/test_checkpoints.c)
 target_link_libraries(test_checkpoints PRIVATE hg_field_app hg_motion hg_battle)
 add_test(NAME connected_checkpoint_resume COMMAND test_checkpoints)
-set_tests_properties(connected_checkpoint_resume PROPERTIES DEPENDS original_background_interaction TIMEOUT 30 RUN_SERIAL TRUE WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(connected_checkpoint_resume PROPERTIES DEPENDS "original_background_interaction;original_catching_tutorial;original_violet_arrival" TIMEOUT 45 RUN_SERIAL TRUE WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 set_tests_properties(original_background_interaction PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-add_custom_target(heartgold_checkpoints COMMAND $<TARGET_FILE:test_interaction> COMMAND $<TARGET_FILE:test_tutorial> DEPENDS test_interaction test_tutorial WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" COMMENT "Generate validated opening checkpoints through original gameplay")
+add_custom_target(heartgold_checkpoints COMMAND $<TARGET_FILE:test_interaction> COMMAND $<TARGET_FILE:test_tutorial> COMMAND $<TARGET_FILE:test_violet> DEPENDS test_interaction test_tutorial test_violet WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" COMMENT "Generate gameplay-produced story sources through Violet; curated teams load separately")
 
 add_executable(test_elm_return tests/test_elm_return.c)
 target_link_libraries(test_elm_return PRIVATE hg_field_app hg_motion hg_battle)
@@ -557,14 +614,14 @@ add_test(NAME original_elm_return COMMAND test_elm_return)
 set_tests_properties(original_elm_return PROPERTIES DEPENDS original_background_interaction RUN_SERIAL TRUE TIMEOUT 30 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 add_executable(test_trainer_events tests/test_trainer_events.c)
-target_link_libraries(test_trainer_events PRIVATE hg_script hg_save)
+target_link_libraries(test_trainer_events PRIVATE hg_script hg_save hg_motion)
 add_test(NAME original_trainer_identity COMMAND test_trainer_events)
 set_tests_properties(original_trainer_identity PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 add_executable(test_violet tests/test_violet.c)
 target_link_libraries(test_violet PRIVATE hg_field_app hg_motion hg_battle)
 add_test(NAME original_violet_arrival COMMAND test_violet)
-set_tests_properties(original_violet_arrival PROPERTIES RUN_SERIAL TRUE TIMEOUT 45 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(original_violet_arrival PROPERTIES DEPENDS original_catching_tutorial RUN_SERIAL TRUE TIMEOUT 45 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 add_executable(test_tutorial tests/test_tutorial.c)
 target_link_libraries(test_tutorial PRIVATE hg_field_app hg_motion hg_battle)
@@ -582,6 +639,7 @@ execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/pre
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_field_time.py" "${HG_UPSTREAM}" "${GEN}" "${CMAKE_C_COMPILER}" COMMAND_ERROR_IS_FATAL ANY)
 add_library(hg_save STATIC src/compat/bug_contest.c src/compat/field_time.c src/compat/play_time.c src/compat/save_manager.c src/compat/save_records.c src/compat/save_c_records.c src/ds_save_flash.c src/ds_account.c)
 target_link_libraries(hg_save PUBLIC hg_motion hg_pokemon)
+target_link_libraries(test_original_field_constructor PRIVATE hg_save)
 target_link_libraries(hg_script PRIVATE hg_save)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
  "${CMAKE_SOURCE_DIR}/scripts/prepare_save_manager.py" "${CMAKE_SOURCE_DIR}/scripts/prepare_save_c_records.py"
@@ -742,3 +800,9 @@ add_executable(test_battle_menus tests/test_battle_menus.c)
 target_link_libraries(test_battle_menus PRIVATE hg_battle_view hg_save)
 add_test(NAME original_battle_menus COMMAND test_battle_menus)
 set_tests_properties(original_battle_menus PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" TIMEOUT 60)
+
+# One process reuses the existing complete runtime contract tests; mutable owners
+# are constructed/destroyed twice, without constructing a field application.
+add_executable(test_compat_micro tests/test_compat_micro.c tests/micro_platform.c tests/micro_lifetimes.c tests/micro_scheduler.c)
+target_link_libraries(test_compat_micro PRIVATE hg_save hg_overlays ds_platform)
+add_test(NAME compatibility_micro COMMAND test_compat_micro)

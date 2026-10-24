@@ -13,6 +13,11 @@
 void hg_ui_test_approach(HGFieldApp *app,unsigned script) { hg_test_approach(app,script); }
 
 void hg_ui_test_return_to_elm(HGFieldApp *app){hg_test_portal(app,33);hg_test_portal(app,60);hg_test_portal(app,61);}
+HGFieldApp *hg_ui_test_tower_ladder(void){
+    char error[256];HGFieldApp *app=hg_field_app_continue_copy("build/checkpoints/155-violet-arrival.sav","/tmp","hg-ladder-ui",error,sizeof(error));CHECK(app);
+    hg_test_portal(app,110);hg_test_portal(app,155);CHECK(hg_field_app_map(app)==155);return app;
+}
+void hg_ui_test_tower_descend(HGFieldApp *app){hg_test_portal(app,110);CHECK(hg_field_app_map(app)==110&&!hg_field_app_error(app)[0]);}
 
 
 /* A legal one-HP party fixture; battle outcome still comes from the original

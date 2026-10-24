@@ -17,7 +17,7 @@ ReadMsgDataIntoU16Array GF_RTC_CopyDateTime sub_0202C08C SaveArray_Get SaveArray
 # Pokemon rules already belong to the shared original Pokemon closure.
 existing.update(re.findall(r'\b(\w+)\([^;{}]*\)\s*;', (out/'pokemon_decls.inc').read_text()))
 registry=(root/'src/save_arrays.c').read_text()
-roots=(set(re.findall(r'\(SAVE(?:SIZE|INIT)FN\)(\w+)',registry))|set('MailMsg_Init_FromTemplate sub_0203A01C PCStorage_GetActiveBox PCStorage_SetActiveBox PCStorage_FindFirstBoxWithEmptySlot PCStorage_CountEmptySpotsInAllBoxes PCStorage_PlaceMonInBoxFirstEmptySlot PCStorage_GetNumBoxes PCStorage_GetSizeOfBox Save_GetPCBoxModifiedFlags Save_ResetPCBoxModifiedFlags Save_SetAllPCBoxesModified sub_020271A0 Save_Misc_Get SaveMisc_CheckExtraChunksExist SaveMisc_SetExtraChunksExist Save_PlayerData_GetIGTAddr Save_Daycare_Get SaveArray_PCStorage_Get AddIGTSeconds sub_0202AC38 sub_0202AC60'.split()))-existing
+roots=(set(re.findall(r'\(SAVE(?:SIZE|INIT)FN\)(\w+)',registry))|set('MailMsg_Init_FromTemplate sub_0203A01C PCStorage_GetActiveBox PCStorage_SetActiveBox PCStorage_FindFirstBoxWithEmptySlot PCStorage_CountEmptySpotsInAllBoxes PCStorage_PlaceMonInBoxFirstEmptySlot PCStorage_GetNumBoxes PCStorage_GetSizeOfBox Save_GetPCBoxModifiedFlags Save_ResetPCBoxModifiedFlags Save_SetAllPCBoxesModified sub_020271A0 Save_Misc_Get SaveMisc_CheckExtraChunksExist SaveMisc_SetExtraChunksExist Save_PlayerData_GetIGTAddr Save_Daycare_Get SaveArray_PCStorage_Get AddIGTSeconds sub_0202AC38 sub_0202AC60 Save_GetGymmickPtr'.split()))-existing
 pattern=r'^(?:(?:static|inline) )*[A-Za-z_][^\n;{}]*\b(\w+)\([^;{}]*\) \{\n.*?^\}'
 functions={}
 for path in (root/'src').rglob('*.c'):

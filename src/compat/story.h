@@ -71,3 +71,6 @@ void hg_story_rng_set(HGStoryState *,u32);
 void hg_story_touch(HGStoryState *);
 
 HGStoryState *hg_story_from_save_records(const SaveData *);
+
+/* Script-owned attributes, including the current private interaction actor. */
+void *hg_script_attribute(FieldSystem *,enum ScriptEnvField);

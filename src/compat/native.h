@@ -31,6 +31,7 @@ void Heap_FreeExplicit(enum HeapID, void *);
 void MI_CpuClear8(void *, u32);
 void MI_CpuClear16(void *, u32);
 void MI_CpuCopy8(const void *, void *, u32);
+void MI_CpuFill8(void *,u8,u32);
 void *SaveArray_Get(SaveData *, int);
 BagView *BagView_New(u8);
 struct ItemSlot;
@@ -47,6 +48,8 @@ void NARC_GetMemberImageStartOffset(NARC *,u32,u32 *);
 /* Original MsgDataLoadType values; direct loading remains unsupported. */
 enum { MSGDATA_LOAD_DIRECT = 0, MSGDATA_LOAD_LAZY = 1 };
 void *AllocAndReadWholeNarcMemberByIdPair(int, int, enum HeapID);
+u32 GetNarcMemberSizeByIdPair(NarcId,s32);
+void ReadWholeNarcMemberByIdPair(void *,NarcId,s32);
 void *AllocAndReadFromNarcMemberByIdPair(int, int, enum HeapID, u32, u32);
 MsgData *NewMsgDataFromNarc(int, int, int, enum HeapID);
 void ReadMsgDataIntoString(MsgData *, int, String *);

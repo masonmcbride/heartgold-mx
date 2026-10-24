@@ -54,3 +54,12 @@ shutil.copyfile(root/"files/fielddata/build_model/bm_room_matshp.dat",out/"resou
 
 for source,name in (("a/1/0/6","prop_animations.narc"),("a/1/0/7","field_prop_animations.narc"),("a/1/0/8","room_prop_animations.narc")):
     shutil.copyfile(root/"files"/source,out/"resources"/name)
+
+# Original area-manager secondary texture archive, shared with the same cache.
+shutil.copyfile(root/"files/a/0/7/0",out/"resources/prop_texture.narc")
+
+# Original opening-map object preload table, read through the shared cache.
+shutil.copyfile(root/"files/a/0/9/2",out/"resources/map_object_preload.narc")
+
+# Original field-effect archive; shared resource cache only.
+shutil.copyfile(root/"files/a/1/0/3",out/"resources/field_effects.narc")

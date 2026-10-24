@@ -5,32 +5,49 @@
 #include "ds_model.h"
 #include "motion_guest.h"
 #include "constants/maps.h"
+#include <setjmp.h>
+struct AnimationDecodeTrap {jmp_buf jump;const char *volatile error;};
+static struct AnimationDecodeTrap *animation_decode_trap;
 u16 FieldSystem_VarGet(FieldSystem *,u16);
 /* Typed native arena and graphics objects: original playback uses native
  * pointers; these are never exposed to guest ARM or serialized as save data. */
-typedef struct { unsigned unused; } NNSFndAllocator;
-typedef struct { fx32 frame;DSJointAnimation joint;DSTextureAnimation texture; } NNSG3dAnmObj;
-typedef struct NNSG3dResTex NNSG3dResTex;
+typedef struct { enum HeapID heap;unsigned alignment; } NNSFndAllocator;
+static void HeapExp_FndInitAllocator(NNSFndAllocator *a,enum HeapID heap,unsigned alignment) {
+    GF_ASSERT(alignment==4);*a=(NNSFndAllocator){heap,alignment};
+}
+u16 NARC_GetFileCount(NARC *);
+typedef struct HGNativeG3dAnimation { fx32 frame;DSJointAnimation joint;DSTextureAnimation texture;NNSG3dRenderObj *bound;const u8 *original_frame;DSAnimationResource resource;struct HGNativeG3dAnimation *next;unsigned slot; } NNSG3dAnmObj;
+typedef struct NNSG3dResTex {DSTextureBank bank;} NNSG3dResTex;
 #include "prop_animation_types.inc"
 #define ANIM_ARCHIVE_ID_NONE -1
 static void GF_AssertFail(void) { abort(); }
-static fx32 NNS_G3dAnmObjGetNumFrame(const NNSG3dAnmObj *a) { return (fx32)(a->joint.frames?a->joint.frames:a->texture.frames)*FX32_ONE; }
-static void NNS_G3dRenderObjAddAnmObj(NNSG3dRenderObj *r,NNSG3dAnmObj *a) { GF_ASSERT(r&&!r->anmJnt);r->anmJnt=a; }
-static void NNS_G3dRenderObjRemoveAnmObj(NNSG3dRenderObj *r,NNSG3dAnmObj *a) { GF_ASSERT(r&&r->anmJnt==a);r->anmJnt=NULL; }
+static fx32 NNS_G3dAnmObjGetNumFrame(const NNSG3dAnmObj *a) { return (fx32)(a->resource.frames?a->resource.frames:a->joint.frames?a->joint.frames:a->texture.frames)*FX32_ONE; }
+static void NNS_G3dRenderObjAddAnmObj(NNSG3dRenderObj *r,NNSG3dAnmObj *a) { GF_ASSERT(r&&!r->anmJnt);r->anmJnt=a;a->bound=r; }
+static void NNS_G3dRenderObjRemoveAnmObj(NNSG3dRenderObj *r,NNSG3dAnmObj *a) { GF_ASSERT(r&&r->anmJnt==a);r->anmJnt=NULL;a->bound=NULL; }
 void NARC_ReadWholeMember(NARC *,u32,void *);
 void *NARC_AllocAndReadWholeMember(NARC *,u32,enum HeapID);
-static MapPropAnimation *ov01_022042FC(FieldSystemUnkSubCC_Sub0 *pool) {
-    if(pool->unk22>=pool->unk20)return NULL;
-    return pool->unk14[pool->unk22++];
+static void ov01_02204500(FieldSystemUnkSubCC_Sub0 *pool,MapPropAnimation *a) { (void)pool;if(a->animObj&&a->animObj->bound)NNS_G3dRenderObjRemoveAnmObj(a->animObj->bound,a->animObj);Heap_Free(a->animObj); }
+int hg_prop_model_uv_compatible(const NNSG3dResMdl *,const DSTextureAnimation *);
+int hg_prop_model_animation_compatible(const NNSG3dResMdl *,const DSAnimationResource *);
+static int decode_original_animation(const u8 *p,size_t n,NNSG3dResMdl *model,NNSG3dAnmObj *decoded){
+    memset(decoded,0,sizeof(*decoded));
+    return (ds_joint_animation_open(p,n,&decoded->joint)||ds_texture_animation_open(p,n,&decoded->texture))&&
+        (!decoded->texture.kind||hg_prop_model_uv_compatible(model,&decoded->texture));
 }
-static void ov01_0220431C(FieldSystemUnkSubCC_Sub0 *pool,MapPropAnimation *a) {
-    GF_ASSERT(pool->unk22);free(a->res);a->res=NULL;a->animObj=NULL;a->unk14=0;pool->unk14[--pool->unk22]=a;
-}
-static void ov01_02204500(FieldSystemUnkSubCC_Sub0 *pool,MapPropAnimation *a) { (void)pool;free(a->animObj); }
 static void ov01_02204470(FieldSystemUnkSubCC_Sub0 *pool,MapPropAnimation *a,void *res,NNSG3dResMdl *model,NNSG3dResTex *texture) {
     (void)pool;(void)model;(void)texture;const u8 *p=res;size_t n=(u32)p[8]|(u32)p[9]<<8|(u32)p[10]<<16|(u32)p[11]<<24;
-    a->animObj=calloc(1,sizeof(*a->animObj));GF_ASSERT(a->animObj&&(ds_joint_animation_open(p,n,&a->animObj->joint)||ds_texture_animation_open(p,n,&a->animObj->texture)));a->res=res;
+    a->res=NULL;a->animObj=NULL;
+    NNSG3dAnmObj decoded={0};
+    if(!decode_original_animation(p,n,model,&decoded)) {
+        if(animation_decode_trap) {
+            animation_decode_trap->error=!memcmp(p,"BTA0",4)?"NNS_G3dAnmObjInit: NSBTA/SRT0 UV tracks":"NNS_G3dAnmObjInit: unsupported animation resource";
+            Heap_Free(res);longjmp(animation_decode_trap->jump,1);
+        }
+        GF_ASSERT(!"unsupported original animation resource");
+    }
+    a->animObj=Heap_Alloc(pool->unk0.heap,sizeof(*a->animObj));*a->animObj=decoded;a->res=res;
 }
+static void ov01_022046A4(NNSFndAllocator *a,NNSG3dAnmObj **out,void *res){(void)a;(void)out;(void)res;GF_ASSERT(!"custom land animation resource not implemented");}
 #include "prop_animation_kernel.inc"
 typedef struct { u8 tag;unsigned model,selected;double world[3];NNSG3dRenderObj render; } PropTrack;
 struct HGPropAnimations {
@@ -47,7 +64,7 @@ HGPropAnimations *hg_prop_animations_new(unsigned map) {
     s->list_archive=p[6]?NARC_a_1_0_7:NARC_a_1_0_8;s->manager.animListNARC=NARC_New((NarcId)s->list_archive,HEAP_ID_FIELD1);
     s->manager.unk138=&s->pool;s->pool.unk10=s->storage;s->pool.unk14=s->free_slots;s->pool.unk20=16;
     for(unsigned i=0;i<16;i++)s->free_slots[i]=s->storage+i;
-    s->scheduler.unk4=&s->pool;s->scheduler.unkC=1;return s;
+    HeapExp_FndInitAllocator(&s->pool.unk0,HEAP_ID_FIELD1,4);s->scheduler.unk4=&s->pool;s->scheduler.unkC=1;return s;
 }
 static PropTrack *track(HGPropAnimations *s,unsigned tag) { for(unsigned i=0;i<16;i++)if(s->tracks[i].tag==tag)return s->tracks+i;return NULL; }
 static void load_track(HGPropAnimations *s,PropTrack *t) {
@@ -215,3 +232,77 @@ int hg_prop_animation_close_door(HGPropAnimations *s,unsigned tag,unsigned *soun
     return t&&sound&&native_resource_member(s->list_archive,0,t->model,&list,&n)&&n==24&&
         hg_motion_door_sound(list,0,sound)&&hg_prop_animation_play(s,tag,1);
 }
+
+/* Original native owner graph, separate from the viewer's script session. */
+#include "compat/original_prop_animation.h"
+struct HGOriginalPropAnimations {FieldSystemUnkSubC8 *pools;MapPropAnimationManager *manager;FieldSystemUnkSubCC *land;const char *error;unsigned borrowed;};
+HGOriginalPropAnimations *hg_original_prop_animations_new(NARC *list) {
+    HGOriginalPropAnimations *o=Heap_Alloc(HEAP_ID_FIELD1,sizeof(*o));
+    o->error=NULL;o->borrowed=0;o->pools=ov01_022041C4(HEAP_ID_FIELD1);
+    o->manager=MapPropAnimationManager_Init(list,o->pools);o->land=ov01_0220460C(o->pools);return o;
+}
+unsigned hg_original_prop_animations_count(HGOriginalPropAnimations *o){return MapPropAnimationManager_GetAnimListNARCFileCount(o->manager);}
+void hg_original_prop_animations_tick(HGOriginalPropAnimations *o){GF_ASSERT(!o->error);ov01_02204350(o->pools);}
+void hg_original_prop_animations_free(HGOriginalPropAnimations *o) {
+    if(!o)return;if(!o->borrowed){ov01_02204634(o->land);ov01_02204278(o->pools);MapPropAnimationManager_Free(o->manager);}Heap_Free(o);
+}
+
+int hg_original_prop_animations_preload(HGOriginalPropAnimations *o,unsigned id,NNSG3dRenderObj *render,const u8 *bytes,const DSTextureBank *bank) {
+    MapPropAnimListFile list;memcpy(&list,bytes,sizeof(list));
+    if(list.hasAnimations&&list.flags==8){o->error="original time-of-day visual owner";return 0;} /* Real time-visual owner still required. */
+    NNSG3dResTex texture={*bank};struct AnimationDecodeTrap trap;struct AnimationDecodeTrap *previous=animation_decode_trap;
+    animation_decode_trap=&trap;o->error=NULL;
+    if(setjmp(trap.jump)) {animation_decode_trap=previous;o->error=trap.error;return 0;}
+    ov01_021E8F3C(id,render->model,render,&texture,&list,o->manager,NULL);
+    animation_decode_trap=previous;return 1;
+}
+unsigned hg_original_prop_animations_active(HGOriginalPropAnimations *o) {return o->manager->unk138->unk22;}
+
+const char *hg_original_prop_animations_error(HGOriginalPropAnimations *o){return o->error;}
+
+int hg_prop_render_animation_matrix(const NNSG3dRenderObj *render,const DSModelMaterial *material,double matrix[6]) {
+    NNSG3dAnmObj *a=render->anmMat?render->anmMat:render->anmJnt;
+    while(a&&a->resource.kind&&a->resource.kind!=DS_ANIMATION_SRT&&a->resource.kind!=DS_ANIMATION_PATTERN)a=a->next;
+    if(!a)return 0;
+    if(a->resource.kind&&!a->texture.bytes){
+        NNSG3dAnmObj decoded;if(!decode_original_animation(a->resource.bytes,a->resource.size,render->model,&decoded))return -1;
+        a->joint=decoded.joint;a->texture=decoded.texture;
+    }fx32 frame=a->frame;
+    if(a->original_frame){u32 bits=(u32)a->original_frame[0]|(u32)a->original_frame[1]<<8|(u32)a->original_frame[2]<<16|(u32)a->original_frame[3]<<24;memcpy(&frame,&bits,4);}
+    return ds_texture_animation_matrix(&a->texture,frame/(double)FX32_ONE,material->name,material->width,material->height,matrix);
+}
+
+unsigned hg_original_prop_land_animation_count(HGOriginalPropAnimations *o){return ov01_02204698(o->land);}
+
+HGOriginalPropAnimations *hg_original_prop_animations_attach(void *pools,void *manager,void *land){
+    GF_ASSERT(pools&&manager&&land);HGOriginalPropAnimations *o=Heap_Alloc(HEAP_ID_FIELD1,sizeof(*o));
+    *o=(HGOriginalPropAnimations){pools,manager,land,NULL,1};return o;
+}
+void hg_original_prop_animations_release(HGOriginalPropAnimations *o){
+    GF_ASSERT(o&&o->borrowed&&o->pools&&o->manager&&o->land);
+    ov01_02204634(o->land);ov01_02204278(o->pools);MapPropAnimationManager_Free(o->manager);
+    o->pools=NULL;o->manager=NULL;o->land=NULL;
+}
+
+void *hg_native_field_animation_new(const u8 *bytes,size_t size,NNSG3dResMdl *model,unsigned heap){
+    DSAnimationResource resource;if(!ds_animation_resource_open(bytes,size,0,&resource)||!hg_prop_model_animation_compatible(model,&resource))return NULL;
+    NNSG3dAnmObj *a=Heap_Alloc((enum HeapID)heap,sizeof(*a));memset(a,0,sizeof(*a));a->resource=resource;return a;
+}
+int hg_native_field_animation_bind(NNSG3dRenderObj *object,void *animation){
+    NNSG3dAnmObj *a=animation;if(!object||!object->model||!a||a->bound||a->next)return 0;
+    a->slot=a->resource.kind==DS_ANIMATION_JOINT?1:2;
+    NNSG3dAnmObj **head=(NNSG3dAnmObj **)(a->slot==1?&object->anmJnt:&object->anmMat);
+    while(*head)head=&(*head)->next;*head=a;a->bound=object;return 1;
+}
+void hg_native_field_animation_detach(void *animation){
+    NNSG3dAnmObj *a=animation;if(!a||!a->bound)return;
+    if(!a->slot){NNS_G3dRenderObjRemoveAnmObj(a->bound,a);return;}
+    NNSG3dAnmObj **head=(NNSG3dAnmObj **)(a->slot==1?&a->bound->anmJnt:&a->bound->anmMat);
+    while(*head&&*head!=a)head=&(*head)->next;GF_ASSERT(*head==a);*head=a->next;a->next=NULL;a->bound=NULL;
+}
+int hg_native_field_animation_is_bound(void *animation,NNSG3dRenderObj *object){return animation&&((NNSG3dAnmObj *)animation)->bound==object;}
+void hg_native_field_animation_detach_object(NNSG3dRenderObj *object){while(object->anmJnt)hg_native_field_animation_detach(object->anmJnt);while(object->anmMat)hg_native_field_animation_detach(object->anmMat);}
+void hg_native_field_animation_free(void *animation){if(!animation)return;hg_native_field_animation_detach(animation);Heap_Free(animation);}
+int hg_native_field_animation_frame(void *animation,s32 frame){NNSG3dAnmObj *a=animation;if(!a||frame<0||frame>=NNS_G3dAnmObjGetNumFrame(a))return 0;if(a->original_frame){u32 bits=(u32)a->original_frame[0]|(u32)a->original_frame[1]<<8|(u32)a->original_frame[2]<<16|(u32)a->original_frame[3]<<24;fx32 observed;memcpy(&observed,&bits,4);return observed==frame;}a->frame=frame;return 1;}
+
+void hg_native_field_animation_observe_frame(void *animation,const u8 *word){NNSG3dAnmObj *a=animation;GF_ASSERT(a&&word&&!a->original_frame);a->original_frame=word;}

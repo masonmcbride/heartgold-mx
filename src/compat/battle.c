@@ -49,6 +49,11 @@ static _Noreturn void battle_boundary_failed(const char *name) {
 }
 #undef GF_ASSERT
 #define GF_ASSERT(condition) do{if(!(condition))battle_boundary_failed("assertion: " #condition);}while(0)
+/* Keep battle's recoverable failure policy local; archive storage is shared. */
+#define ReadWholeNarcMemberByIdPair battle_read_whole_member
+#define GetNarcMemberSizeByIdPair battle_member_size
+static void battle_read_whole_member(void *,NarcId,s32);
+static u32 battle_member_size(NarcId,s32);
 #include "battle_kernel.inc"
 #include "battle_data.inc"
 BtlCmdFunc sBattleScriptCommandTable[]={

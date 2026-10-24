@@ -8,6 +8,10 @@ typedef struct { fx32 m[9]; } MtxFx33;
 #define FX32_ONE 4096
 #define FX32_CONST(x) ((fx32)((x)*4096))
 typedef struct HGPropModel NNSG3dResMdl;
+/* Native decoded resource views share the existing model owner. These are not
+ * serialized SDK structs and must never be dereferenced by guest ARM code. */
+typedef struct HGPropModel NNSG3dResFileHeader;
+typedef struct HGPropModel NNSG3dResMdlSet;
 typedef struct { NNSG3dResMdl *model;void *anmMat,*anmJnt,*anmVis; } NNSG3dRenderObj;
 typedef struct Field3dRenderObjManager Field3dRenderObjManager;
 typedef struct MapPropAnimationManager MapPropAnimationManager;
@@ -44,3 +48,8 @@ void NNS_G3dGlbSetBaseScale(const VecFx32 *);
 void NNS_G3dGlbFlush(void);
 void NNS_G3dDraw1Mat1Shp(const NNSG3dResMdl *,int,int,BOOL);
 void sub_02020D2C(MtxFx33 *,VecFx32 *);
+
+void hg_prop_renderer_initialize(void);
+void hg_prop_renderer_reset_matrices(void);
+
+NNSG3dResFileHeader **hg_prop_resources_headers_new(void);

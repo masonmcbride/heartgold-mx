@@ -1,17 +1,28 @@
 #include "ds_resources.h"
 #include "compat/resources.h"
 #include "message_bank_count.inc"
+#include <time.h>
+/* Opt-in aggregate measurements; immutable cache behavior is unchanged. */
+static struct {unsigned requests,loads;size_t bytes;double io,parse;} resource_profile;
+static int resource_profiling=-1;
+static double resource_clock(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec+t.tv_nsec*1e-9;}
+static void resource_profile_report(void){fprintf(stderr,"HG_RESOURCES {\"requests\":%u,\"loads\":%u,\"bytes\":%zu,\"io_seconds\":%.9f,\"parse_seconds\":%.9f}\n",resource_profile.requests,resource_profile.loads,resource_profile.bytes,resource_profile.io,resource_profile.parse);}
 /* Process-lifetime cache. All callers run on the main thread. */
 typedef struct { uint8_t *bytes; DSNarc narc; } Cache;
-static Cache cache[45];
+static Cache cache[48];
 static Cache message_cache[HG_MESSAGE_BANK_COUNT];
 static Cache *resource_archive(int archive,int group) {
+    if(resource_profiling<0){resource_profiling=getenv("HG_PROFILE_RESOURCES")!=NULL;if(resource_profiling)atexit(resource_profile_report);}
+    if(resource_profiling)resource_profile.requests++;
     const char *name;int slot;char message_name[32];Cache *c;
     if(archive==NARC_msgdata_msg) {
         if(group<0||group>=HG_MESSAGE_BANK_COUNT)return 0;
         snprintf(message_name,sizeof(message_name),"msg_%04d.narc",group);name=message_name;c=&message_cache[group];
     } else {
-        if(archive==NARC_a_2_3_0) { slot=44;name="safari_enc.narc"; }
+        if(archive==NARC_a_1_0_3) {slot=47;name="field_effects.narc";}
+        else if(archive==NARC_a_0_9_2) {slot=46;name="map_object_preload.narc";}
+        else if(archive==NARC_a_0_7_0) { slot=45;name="prop_texture.narc"; }
+        else if(archive==NARC_a_2_3_0) { slot=44;name="safari_enc.narc"; }
         else if(archive==NARC_itemtool_itemdata_item_icon) { slot=0;name="item_icon.narc"; }
         else if(archive==NARC_graphic_font) { slot=4;name="font.narc"; }
         else if(archive==NARC_native_bag) { slot=5;name="bag.narc"; }
@@ -49,13 +60,16 @@ static Cache *resource_archive(int archive,int group) {
         c=&cache[slot];
     }
     if(!c->bytes) {
+        double started=resource_profiling?resource_clock():0;
         char path[4096];if(snprintf(path,sizeof(path),"%s/%s",HG_PACKED_ROOT,name)>=(int)sizeof(path))return 0;
         FILE *f=fopen(path,"rb");if(!f)return 0;
         if(fseek(f,0,SEEK_END)) { fclose(f);return 0; }long length=ftell(f);
         if(length<=0 || length>(archive==NARC_fielddata_landdata_land_data?32:16)*1024*1024 || fseek(f,0,SEEK_SET)) { fclose(f);return 0; }
         uint8_t *p=malloc((size_t)length);if(!p) { fclose(f);return 0; }
         int ok=fread(p,1,(size_t)length,f)==(size_t)length;fclose(f);
+        double parsed=resource_profiling?resource_clock():0;
         if(!ok || !ds_narc_open(&c->narc,p,(size_t)length)) { free(p);return 0; }c->bytes=p;
+        if(resource_profiling){resource_profile.loads++;resource_profile.bytes+=(size_t)length;resource_profile.io+=parsed-started;resource_profile.parse+=resource_clock()-parsed;}
     }
     return c;
 }
@@ -76,13 +90,13 @@ int native_resource_range(int archive,int group,int member,size_t offset,size_t 
 struct NARC { const uint8_t *bytes;size_t size;DSNarc narc;const uint8_t *stream;size_t stream_size,position; };
 NARC *NARC_New(NarcId id,enum HeapID heap) {
     Cache *c=resource_archive(id,0);if(!c)abort();
-    NARC *n=Heap_Alloc(heap,sizeof(*n));memset(n,0,sizeof(*n));n->narc=c->narc;n->bytes=c->bytes;n->size=n->narc.size;return n;
+    NARC *n=Heap_Alloc(heap,sizeof(*n));memset(n,0,sizeof(*n));n->narc=c->narc;n->bytes=c->bytes;n->size=n->narc.size;n->stream=n->bytes;n->stream_size=n->size;return n;
 }
-void NARC_Delete(NARC *n) { free(n); }
+void NARC_Delete(NARC *n) { Heap_Free(n); }
 void NARC_ReadFromMember(NARC *n,u32 member,u32 offset,u32 length,void *out) {
-    const uint8_t *p;size_t size;if(!ds_narc_member(&n->narc,member,&p,&size) || offset>size || length>size-offset)abort();memcpy(out,p+offset,length);
+    const uint8_t *p;size_t size;if(!ds_narc_member(&n->narc,member,&p,&size) || offset>size || length>size-offset)abort();memcpy(out,p+offset,length);n->position=(size_t)(p-n->bytes)+offset+length;
 }
-void NARC_ReadFromAbsolutePos(NARC *n,u32 offset,u32 length,void *out) { if(offset>n->size || length>n->size-offset)abort();memcpy(out,n->bytes+offset,length); }
+void NARC_ReadFromAbsolutePos(NARC *n,u32 offset,u32 length,void *out) { if(offset>n->size || length>n->size-offset)abort();memcpy(out,n->bytes+offset,length);n->position=offset+length; }
 void NARC_GetMemberImageStartOffset(NARC *n,u32 member,u32 *offset) { const uint8_t *p;size_t size;if(!ds_narc_member(&n->narc,member,&p,&size))abort();*offset=(u32)(p-n->bytes); }
 
 NARC *native_resource_stream(const void *p,size_t size) {
@@ -122,3 +136,17 @@ void *GfGfxLoader_LoadFromOpenNarc(NARC *n,s32 member,BOOL compressed,enum HeapI
     void *out=atEnd?Heap_AllocAtEnd(heap,size):Heap_Alloc(heap,size);
     if(!out)abort();memcpy(out,bytes,size);return out;
 }
+
+/* Shared original filesystem transport: native cache owns bytes; caller owns out. */
+u32 GetNarcMemberSizeByIdPair(NarcId id,s32 member) {
+    const uint8_t *bytes;size_t size;
+    GF_ASSERT(native_resource_member(id,0,member,&bytes,&size)&&size<=UINT32_MAX);
+    return (u32)size;
+}
+void ReadWholeNarcMemberByIdPair(void *out,NarcId id,s32 member) {
+    const uint8_t *bytes;size_t size;
+    GF_ASSERT(out&&native_resource_member(id,0,member,&bytes,&size));
+    memcpy(out,bytes,size);
+}
+
+u16 NARC_GetFileCount(NARC *n) { GF_ASSERT(n&&n->narc.count<=UINT16_MAX);return (u16)n->narc.count; }

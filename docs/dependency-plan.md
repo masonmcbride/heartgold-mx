@@ -28,10 +28,19 @@ through the original Route 30 Mother savings call and gatehouse Vs. Recorder
 scene. Both savings responses and durable Route 30/gatehouse/Violet reopen run;
 the gatehouse scene retains offstage actor positions through original height
 status handling. The probe reaches Sprout Tower 2F and rejects Sage Nico's shared
-standard trainer script at `GetTrainerNum` (212, byte 2970, bank 953). This is city
+standard trainer script at the actor movement query (574, byte 2980, bank 953),
+after original trainer identity and phonebook lookup. Identity/attributes, defeat
+flags and phonebook success/miss/cancel execute in separate service fixtures. This is city
 arrival evidence, not a first badge. `test_violet --probe` reproduces that boundary.
-The next original closure includes trainer identity, phonebook lookup, actor
-metadata, defeat flags, encounter music, trainer text and ordinary battle return.
+The remaining original closure includes actor metadata/reset callback tables,
+encounter music, trainer text and ordinary battle return. Cached reports in
+`build/audit/trainer-query-closure.json` and `trainer-native-closure.json`
+distinguish the closed queries from the still-open complete event. The inventory
+follows compiler calls, address-taken functions, C/assembly tables and cycles;
+indirect dispatch and missing/ambiguous leaves stay explicit. Resource, failure
+and resume contracts still require execution checks. The current connected
+route uses one representative starter and tests the other savings choice
+independently; prior all-starter evidence is retained.
 Chapter feature rosters are in [chapter-test-teams.md](chapter-test-teams.md).
 
 ## Refreshed partition and dispatch decision
@@ -70,6 +79,11 @@ copies of the save or battle subsystems.
    gym events. Extract its exact event/predicate worklist and resolve each shared
    service on the connected path; add original trainer/reward, move-learning or
    field services where reached. Keep opening-route regression evidence.
+   Actor query/static reset, original trainer-message lookup and encounter-theme
+   selection now have service evidence; Nico preflight reaches ordinary battle
+   start (213 at bank 953 byte 3123). Close ordinary victory/loss/WhiteOut and
+   saved candle-state branches together before admitting that event. Full
+   phone/rematch/dynamic-trainer closure remains open.
 3. Save/exit/reload at each new meaningful state, especially moved objects and
    puzzles. Expand Continue reconstruction when those scenarios expose a gap.
    Do not reopen already passed record/flash/ABI work without new evidence.

@@ -25,6 +25,23 @@ int main(void) {
     for(unsigned i=0;i<60;i++)CHECK(ds_audio_tick(a));
     DSAudio *b=ds_audio_clone(a);CHECK(b);
     for(unsigned i=0;i<60;i++){CHECK(ds_audio_tick(a));CHECK(ds_audio_tick(b));CHECK(!memcmp(ds_audio_pcm(a),ds_audio_pcm(b),DS_AUDIO_FRAMES*4));}
+    CHECK(!ds_audio_play_temporary_bgm(a,999999));
+    CHECK(ds_audio_tick(a)&&ds_audio_tick(b));CHECK(!memcmp(ds_audio_pcm(a),ds_audio_pcm(b),DS_AUDIO_FRAMES*4));
+    CHECK(ds_audio_play_temporary_bgm(a,1185));
+    for(unsigned i=0;i<12;i++)CHECK(ds_audio_tick(a));
+    CHECK(!ds_audio_play_temporary_bgm(a,999999));
+    DSAudio *temporary=ds_audio_clone(a);CHECK(temporary&&ds_audio_bgm(temporary)==1185);
+    CHECK(ds_audio_restore_bgm(a)&&!ds_audio_restore_bgm(a));
+    CHECK(ds_audio_restore_bgm(temporary));
+    for(unsigned i=0;i<12;i++){
+        CHECK(ds_audio_tick(a)&&ds_audio_tick(b)&&ds_audio_tick(temporary));
+        CHECK(!memcmp(ds_audio_pcm(a),ds_audio_pcm(b),DS_AUDIO_FRAMES*4));
+        CHECK(!memcmp(ds_audio_pcm(a),ds_audio_pcm(temporary),DS_AUDIO_FRAMES*4));
+    }
+    ds_audio_discard_saved_bgm(temporary);CHECK(!ds_audio_restore_bgm(temporary));ds_audio_free(temporary);
+    DSAudio *fresh=ds_audio_new();CHECK(fresh&&ds_audio_play_temporary_bgm(fresh,1185)&&!ds_audio_restore_bgm(fresh));ds_audio_free(fresh);
+    DSAudio *fading=ds_audio_clone(a);CHECK(fading);ds_audio_fade(fading,0,3);
+    CHECK(ds_audio_play_temporary_bgm(fading,1185)&&!ds_audio_restore_bgm(fading));ds_audio_free(fading);
     ds_audio_stop(b,DS_AUDIO_BGM,0);CHECK(!ds_audio_playing(b,DS_AUDIO_BGM,0));CHECK(ds_audio_playing(a,DS_AUDIO_BGM,1018));
     CHECK(ds_audio_play(a,DS_AUDIO_EFFECT,1500));CHECK(ds_audio_tick(a));CHECK(energy(ds_audio_pcm(a)));
     ds_audio_fade(a,0,12);for(unsigned i=0;i<120;i++)CHECK(ds_audio_tick(a));CHECK(!energy(ds_audio_pcm(a)));

@@ -5,6 +5,8 @@
 #include "map_header.h"
 #include "constants/sndseq.h"
 #include "field_app.h"
+#include <unistd.h>
+#include <stdlib.h>
 #include "field_player.h"
 #include "battle_view.h"
 #include "field_menu.h"
@@ -391,7 +393,11 @@ static int scene_exec(OverlayManager *manager,int *state) {
             }
         }
         if(advanced>0&&!hg_field_player_walking(app->player)) {
+            HGWarpDestination destination;
             int started=hg_field_player_coordinate_begin(app->player);
+            if(!started&&hg_field_player_probe_step_transition(app->player,&destination)){
+                started=1;if(!transition_begin(app,&destination))interaction_unavailable(app);
+            }
             if(started)app->held_keys=app->pending_keys=0;
             if(started<0)interaction_unavailable(app);
             if(!started)begin_wild_battle(app);
@@ -451,7 +457,8 @@ audio_step:;
     DSAudio *audio=hg_field_player_audio(app->player);
     if(audio) {
         if(!app->battle&&(!app->audio_started||app->audio_map!=app->map)) {
-            if(!ds_audio_play(audio,DS_AUDIO_BGM,MapHeader_GetDayMusicId(app->map)))snprintf(app->error,sizeof(app->error),"%s",ds_audio_error(audio));
+            if(app->audio_map!=app->map)ds_audio_discard_saved_bgm(audio);
+            if(!ds_audio_restore_bgm(audio)&&!ds_audio_play(audio,DS_AUDIO_BGM,MapHeader_GetDayMusicId(app->map)))snprintf(app->error,sizeof(app->error),"%s",ds_audio_error(audio));
             app->audio_map=app->map;app->audio_started=1;
         }
         if(ds_audio_last_epoch(audio)<=audio_epoch&&!ds_audio_tick(audio))snprintf(app->error,sizeof(app->error),"%s",ds_audio_error(audio));
@@ -692,13 +699,14 @@ int hg_field_app_battle_choose(HGFieldApp *app,unsigned choice){
     app->battle_choice=choice;app->interact_pending=1;app->held_keys=app->pending_keys=0;return 1;
 }
 
+static int field_party_swap(void *owner,unsigned first,unsigned second){return hg_field_player_swap_party(owner,first,second);}
 int hg_field_app_inspect(HGFieldApp *app,int kind){
     if(!app||kind<0||kind>2)return 0;
     if(hg_field_menu_kind(app->field_menu)==kind)kind=0;
     if(!kind){hg_field_menu_open(app->field_menu,0);hg_field_app_clear_input(app);app->revision++;return 1;}
     if(!app->player||app->exploring||app->blackout||app->battle||app->dialogue[0]||hg_field_player_interaction_busy(app->player)||hg_field_player_walking(app->player))return 0;
     if(!app->field_menu){FieldSystem field={0};hg_field_player_bind_runtime(app->player,&field);app->field_menu=hg_field_menu_new(field.saveData,MapHeader_GetMapSec(app->map));}
-    if(!app->field_menu)return 0;hg_field_menu_open(app->field_menu,kind);hg_field_app_clear_input(app);app->revision++;return hg_field_menu_kind(app->field_menu)==kind;
+    if(!app->field_menu)return 0;hg_field_menu_set_party_swap(app->field_menu,field_party_swap,app->player);hg_field_menu_open(app->field_menu,kind);hg_field_app_clear_input(app);app->revision++;return hg_field_menu_kind(app->field_menu)==kind;
 }
 int hg_field_app_inspect_kind(const HGFieldApp *app){return app?hg_field_menu_kind(app->field_menu):0;}
 void hg_field_app_inspect_text(HGFieldApp *app,char *out,size_t size){hg_field_menu_text(app?app->field_menu:NULL,out,size);}
@@ -818,4 +826,20 @@ unsigned hg_field_app_menu_count(const HGFieldApp *app){return app?hg_field_play
 int hg_field_app_battle_cancel(HGFieldApp *app){
     if(!app||!hg_battle_menu_cancellable(app->battle))return 0;
     app->battle_choice=UINT32_MAX;app->interact_pending=1;app->held_keys=app->pending_keys=0;return 1;
+}
+
+HGFieldApp *hg_field_app_continue_copy(const char *source,const char *directory,const char *name,char *error,size_t size){
+    if(error&&size)error[0]=0;
+    char path[4096];
+    if(!source||!directory||!name||snprintf(path,sizeof(path),"%s/%s-XXXXXX.sav",directory,name)>=(int)sizeof(path))return NULL;
+    FILE *input=fopen(source,"rb");if(!input){if(error&&size)snprintf(error,size,"Generate the Violet arrival checkpoint first");return NULL;}
+    int fd=mkstemps(path,4);FILE *output=fd<0?NULL:fdopen(fd,"wb");
+    if(!output){if(fd>=0){close(fd);unlink(path);}fclose(input);if(error&&size)snprintf(error,size,"Cannot create a separate team save");return NULL;}
+    unsigned char bytes[8192];size_t length;int ok=1;
+    while((length=fread(bytes,1,sizeof(bytes),input)))if(fwrite(bytes,1,length,output)!=length){ok=0;break;}
+    if(ferror(input))ok=0;
+    if(fclose(input))ok=0;if(fclose(output))ok=0;
+    HGFieldApp *app=ok?hg_field_app_continue(path,error,size):NULL;
+    if(!app){unlink(path);if(error&&size&&!error[0])snprintf(error,size,"Cannot copy the checkpoint save");}
+    return app;
 }

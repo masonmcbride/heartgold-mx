@@ -1,11 +1,25 @@
 from generated_files import write_bytes_if_changed, write_text_if_changed
-import pathlib,re,struct,sys
+import pathlib,re,struct,sys,json,hashlib
 root,out=map(pathlib.Path,sys.argv[1:]);base=root/'files/data/mmodel/mmodel'
-files={int(p.stem.split('_')[-1]):p for p in base.iterdir() if p.suffix in ('.NSBMD','.NSBTX')}
+files={int(p.stem.split('_')[-1]):p.read_bytes() for p in base.iterdir() if p.suffix in ('.NSBMD','.NSBTX')}
+# The original archive also contains 17 JSON-generated animation/control tables.
+# Emit precisely the original assembler template's count, shorts and byte planes.
+template=root/'files/data/mmodel/mmodel.json.txt'
+expected='f71fb98d8cfa391b10954437b8f558f8623c4db0c4fca3781b9a74ce7e6a8761'
+if hashlib.sha256(template.read_bytes()).hexdigest()!=expected:raise ValueError('mmodel binary template drift')
+for path in sorted(base.glob('*.json')):
+ payload=json.loads(path.read_text())
+ if set(payload)!={'data'}:raise ValueError(('mmodel schema',path))
+ rows=payload['data']
+ if any(set(row)!={'unk0','unk1','unk2'} or not all(type(v) is int for v in row.values()) for row in rows):raise ValueError(('mmodel row schema',path))
+ encoded=struct.pack('<I',len(rows))+b''.join(struct.pack('<H',row['unk0']) for row in rows)+bytes(row['unk1'] for row in rows)+bytes(row['unk2'] for row in rows)
+ index=int(path.stem.split('_')[-1])
+ if index in files:raise ValueError(('duplicate mmodel member',index))
+ files[index]=encoded
 image=bytearray();fat=bytearray()
 for i in range(max(files)+1):
  start=len(image)
- if i in files:image.extend(files[i].read_bytes())
+ if i in files:image.extend(files[i])
  fat.extend(struct.pack('<II',start,len(image)));image.extend(b'\xff'*((-len(image))%4))
 def block(tag,data):return tag+struct.pack('<I',8+len(data))+data
 body=block(b'BTAF',struct.pack('<HH',max(files)+1,0)+fat)+block(b'BTNF',struct.pack('<IHH',4,0,1))+block(b'GMIF',image)

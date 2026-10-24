@@ -10,7 +10,55 @@ static void frame(HGFieldView *view,const DSCamera *camera,const char *name,uint
     char path[4096];CHECK(snprintf(path,sizeof(path),"%s/door-%s.ppm",dir,name)>0);FILE *f=fopen(path,"wb");CHECK(f);fprintf(f,"P6\n512 384\n255\n");
     for(unsigned i=0;i<512*384;i++)CHECK(fwrite(pixels+4*i,1,3,f)==3);CHECK(!fclose(f));
 }
+static void put32(uint8_t *p,uint32_t v){for(unsigned i=0;i<4;i++)p[i]=(uint8_t)(v>>(8*i));}
+static void srt_checks(void) {
+    unsigned count=0;
+    for(unsigned id=0;id<4096;id++) {
+        const uint8_t *p;size_t n;if(!native_resource_member(NARC_a_1_0_6,0,id,&p,&n))break;
+        if(n<4||memcmp(p,"BTA0",4))continue;DSTextureAnimation a;CHECK(ds_texture_animation_open(p,n,&a)&&a.kind);count++;
+        for(unsigned m=0;m<a.materials;m++) {
+            char name[17];memcpy(name,a.bytes+a.names+16*m,16);name[16]=0;double first[6],second[6],half[6];
+            CHECK(ds_texture_animation_matrix(&a,0,name,64,32,first)==1);
+            CHECK(ds_texture_animation_matrix(&a,1,name,64,32,second)==1);
+            CHECK(ds_texture_animation_matrix(&a,.5,name,64,32,half)==1);
+            for(unsigned k=0;k<6;k++)CHECK(isfinite(half[k])&&fabs(half[k]-(first[k]+second[k])*.5)<1e-8);
+            CHECK(ds_texture_animation_matrix(&a,a.frames-1,name,64,32,first)==1);
+            CHECK(ds_texture_animation_matrix(&a,a.frames,name,64,32,first)==-1);
+        }
+    }
+    CHECK(count==99);
+    const uint8_t *p;size_t n;DSTextureAnimation a;CHECK(native_resource_member(NARC_a_1_0_6,0,32,&p,&n)&&ds_texture_animation_open(p,n,&a));
+    for(size_t i=0;i<n;i++){DSTextureAnimation bad;CHECK(!ds_texture_animation_open(p,i,&bad));}
+    char name[17];memcpy(name,a.bytes+a.names,16);name[16]=0;double q[6];
+    CHECK(ds_texture_animation_matrix(&a,1,name,64,32,q)==1&&fabs(q[4]+64*137/4096.0)<1e-9);
+    uint8_t *copy=malloc(n);CHECK(copy);memcpy(copy,p,n);size_t base=(size_t)(a.bytes-p),table=base+a.table;
+    uint32_t values[]={8192,2048,4096,1024,(uint32_t)-1024};
+    for(unsigned k=0;k<5;k++){put32(copy+table+8*k,(k==2?0x20000000u:0x30000000u)|a.frames);put32(copy+table+8*k+4,values[k]);}
+    CHECK(ds_texture_animation_open(copy,n,&a)&&ds_texture_animation_matrix(&a,0,name,64,32,q)==1);
+    CHECK(q[0]==0&&q[1]==-.25&&q[2]==4&&q[3]==0&&q[4]==-32&&q[5]==28);
+    put32(copy+table,0x70000000u|a.frames);CHECK(!ds_texture_animation_open(copy,n,&a));free(copy);
+}
+static void initialization_checks(void){
+    const uint8_t *p;size_t n;DSAnimationResource a;
+    const unsigned members[]={168,166};const unsigned kinds[]={DS_ANIMATION_COLOR,DS_ANIMATION_JOINT};
+    for(unsigned k=0;k<2;k++){
+        CHECK(native_resource_member(NARC_a_1_0_3,0,members[k],&p,&n));
+        CHECK(ds_animation_resource_open(p,n,0,&a)&&a.kind==kinds[k]&&a.frames);
+        CHECK(a.bytes==p&&a.record>=p&&a.record+a.record_size==p+n);
+        CHECK(!ds_animation_resource_open(p,n,1,&a));
+        for(size_t truncated=0;truncated<n;truncated++)CHECK(!ds_animation_resource_open(p,truncated,0,&a));
+        uint8_t *copy=malloc(n);CHECK(copy);memcpy(copy,p,n);copy[4]=0;
+        CHECK(!ds_animation_resource_open(copy,n,0,&a));free(copy);
+    }
+    /* An SDK init validates mapping metadata, not sample curve encodings. */
+    CHECK(native_resource_member(NARC_a_1_0_6,0,32,&p,&n)&&ds_animation_resource_open(p,n,0,&a));
+    uint8_t *copy=malloc(n);CHECK(copy);memcpy(copy,p,n);
+    put32(copy+(a.record-p)+a.table,0x70000000u|a.frames);
+    CHECK(ds_animation_resource_open(copy,n,0,&a));
+    DSTextureAnimation sampled;CHECK(!ds_texture_animation_open(copy,n,&sampled));free(copy);
+}
 int main(void) {
+    initialization_checks();srt_checks();
     HGStoryState *story=hg_story_new();HGFieldResources *resources=hg_field_resources_new(60);HGFieldView *view=hg_field_view_new(60);HGPropAnimations *s=hg_prop_animations_new(60);CHECK(story&&resources&&view&&s);
     FieldSystem field={.native_prop_animations=s};hg_story_bind_field(story,&field);
     const uint8_t init[]={21,0,12,0,12,0,9,0,77};ScriptContext ctx={.fieldSystem=&field,.script_ptr=init};

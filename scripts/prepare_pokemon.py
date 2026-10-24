@@ -1,4 +1,4 @@
-"""Build-local unchanged Pokemon function closure and original resource records."""
+"""Build-local original Pokemon closure with recorded native bit-packing fixes."""
 from generated_files import write_bytes_if_changed, write_text_if_changed
 import csv,hashlib,json,pathlib,re,struct,subprocess,sys
 from narc_tools import pack
@@ -6,7 +6,7 @@ root,out,cc=map(pathlib.Path,sys.argv[1:])
 roots={
  'src/pokemon.c':['CreateMon','GetMonData','SetMonData','ZeroMonData','MonDecryptSegment','CalcMonChecksum','sub_020720FC','MonIsShiny','AddMonData','AllocMonZeroed','AllocAndLoadMonPersonal_HandleAlternateForm','GetFlavorPreferenceFromPID','GetMonBaseExperienceAtCurrentLevel','Pokemon_GetPercentToNextLevel','Pokemon_TryLevelUp','CopyPokemonToPokemon','Mon_GetBoxMon','MonSetMoveInSlot','MonTryLearnMoveOnLevelUp','MonApplyFriendshipMod','Mon_UpdateGiratinaForm','Party_GetMaxLevel','Party_GivePokerusAtRandom','Party_MaskMonsWithPokerus','Party_SpreadPokerus','SetTrMonCapsule','CreateMonWithNature','CreateMonWithGenderNatureLetter','WildMonSetRandomHeldItem'],
  'src/pokemon_mood.c':['ApplyMonMoodModifier','ApplyItemEffectOnMonMood'],
- 'src/script_pokemon_util.c':['GetIdxOfFirstPartyMonWithMove'],
+ 'src/script_pokemon_util.c':['GetIdxOfFirstPartyMonWithMove','CountAlivePokemon','GetFirstAliveMonInParty_CrashIfNone','GetFirstNonEggInParty'],
  'src/trainer_memo.c':['BoxMonSetTrainerMemo'],
  'src/pokedex.c':['Save_Pokedex_Init','Pokedex_SetMonCaughtFlag','Pokedex_CheckMonCaughtFlag','Pokedex_Enable','Pokedex_IsEnabled','Pokedex_SetMonSeenFlag','Pokedex_NationalDexIsComplete'],
  'src/pokedex_util.c':['Pokedex_IsNatDexEnabled'],
@@ -15,7 +15,7 @@ roots={
  'src/use_item_on_mon.c':['HealParty','CanUseItemOnPokemon','UseItemOnPokemon'],
  'src/sav_system_info.c':['Save_SysInfo_SetMysteryGiftActive','Save_SysInfo_GetMysteryGiftActive'],
  'src/options.c':['Options_Init','Options_GetBattleScene','Options_GetBattleStyle','Options_GetTextFrameDelay'],
- 'src/party.c':['Party_InitWithMaxSize','Party_AddMon','Party_GetMonByIndex'],
+ 'src/party.c':['Party_InitWithMaxSize','Party_AddMon','Party_GetMonByIndex','Party_SwapSlots'],
  'src/pm_string.c':['String_New','String_Delete','String_Copy','CopyStringToU16Array','CopyU16ArrayToString'],
  'src/string_util.c':['StringNotEqual','StringNotEqualN','StringFillEOS'],
  'src/mail.c':['Mail_New','Mail_Copy'],
@@ -74,8 +74,11 @@ decls=[];records=[]
 for name in sorted(selected):
  path,m=functions[name];line=sources[path][:m.start()].count('\n')+1
  decls.append(m[0].split(' {\n')[0]+';')
- lines.extend([f'#line {line} "{root/path}"',m[0]])
+ from native_bit_operations import adapt_native_bits
+ body,adaptations=adapt_native_bits(path,name,m[0])
+ lines.extend([f'#line {line} "{root/path}"',body])
  records.append({'source':path,'function':name,'line':line,'slice_sha256':hashlib.sha256(m[0].encode()).hexdigest()})
+ if adaptations:records[-1].update(adaptations=adaptations,emitted_sha256=hashlib.sha256(body.encode()).hexdigest())
 write_text_if_changed(out/'pokemon_kernel.inc', '\n'.join(lines)+'\n')
 write_text_if_changed(out/'pokemon_decls.inc', '\n'.join(decls)+'\n')
 provenance={'functions':records,'sources':{p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in roots}}

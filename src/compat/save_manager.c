@@ -262,11 +262,18 @@ int hg_save_manager_write_steps(SaveData *live,unsigned max_steps,int *completed
  * Accept an absent precomputed table during early native owner initialization;
  * the result is independent of the optional acceleration table. */
 u16 MATH_CalcCRC16CCITT(const MATHCRC16Table *table,const void *data,u32 size) {
-    (void)table;
     const u8 *bytes=data; u16 crc=0xffff;
+    if(table){
+        for(u32 i=0;i<size;i++)crc=(u16)((crc<<8)^table->entries[(crc>>8)^bytes[i]]);
+        return crc;
+    }
+    /* Early owners have not called GF_InitCRC16Table. This immutable nibble
+     * table accelerates the same polynomial without mutable initialization. */
+    static const u16 nibble[16]={0x0000,0x1021,0x2042,0x3063,0x4084,0x50a5,0x60c6,0x70e7,0x8108,0x9129,0xa14a,0xb16b,0xc18c,0xd1ad,0xe1ce,0xf1ef};
     for(u32 i=0;i<size;i++) {
         crc^=(u16)bytes[i]<<8;
-        for(int bit=0;bit<8;bit++)crc=(u16)((crc<<1)^((crc&0x8000)?0x1021:0));
+        crc=(u16)((crc<<4)^nibble[crc>>12]);
+        crc=(u16)((crc<<4)^nibble[crc>>12]);
     }
     return crc;
 }

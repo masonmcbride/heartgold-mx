@@ -16,7 +16,7 @@ HGFont *hg_font_new(void) {
     HGFont *f=Heap_Alloc(HEAP_ID_DEFAULT,sizeof(*f));f->data=FontData_New(NARC_graphic_font,0,FONTARC_MODE_DIRECT,FALSE,HEAP_ID_DEFAULT);
     GenerateFontHalfRowLookupTable(1,0,2);return f;
 }
-void hg_font_free(HGFont *f) { if(f) { FontData_Delete(f->data);free(f); } }
+void hg_font_free(HGFont *f) { if(f) { FontData_Delete(f->data);Heap_Free(f); } }
 static uint16_t next_glyph(const char **text) {
     const uint8_t *p=(const uint8_t *)*text;uint32_t value=*p++;unsigned remaining=0;
     if(value>=0xc2 && value<0xe0) { value&=31;remaining=1; }

@@ -13,12 +13,45 @@ from audit_reuse import strip_c
 from generated_files import write_text_if_changed
 
 
-def source_index(upstream, cache):
+def original_dependencies(row, definitions):
+    """Keep assembler annotations and local branches out of the C call parser."""
+    body=row['body']
+    assembly=row['kind']=='assembly' or row.get('source','').endswith(('.s','.inc'))
+    if assembly:
+        # ARM source uses semicolon comments, including C-like pseudocode.
+        body=re.sub(r';[^\n]*','',body)
+        labels=set(re.findall(r'^\s*([A-Za-z_]\w*):',body,re.M))
+        branches=re.findall(r'^\s*(?:blx|bl|bx|b)(?:eq|ne|cs|hs|cc|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le|al)?\s+([A-Za-z_]\w*)',body,re.M)
+        indirect={n for n in branches if re.fullmatch(r'r(?:1[0-5]|[0-9])',n)}
+        calls=set(branches)-indirect-labels-{'lr'}
+        operands=[]
+        for line in body.splitlines():
+            line=re.sub(r'^\s*[A-Za-z_]\w*:', '', line).strip()
+            parts=line.split(None,1)
+            if len(parts)==2:operands.append(parts[1])
+        reference_body='\n'.join(operands)
+    else:
+        if row['kind']=='function':body=body[body.index('{')+1:]
+        calls=set(re.findall(r'\b(\w+)\s*\(',body))-{'if','for','while','switch','sizeof','typeof','return','_Static_assert','asm','__asm__'} if row['kind'] in ('function','macro') else set()
+        indirect=set(re.findall(r'\b\w+\s*(?:->|\.)\s*\w+\s*(?:\[[^\]]*\])?\s*\(',body))
+    refs=set(re.findall(r'\b[A-Za-z_]\w*\b',reference_body if assembly else body))&definitions.keys()
+    if assembly:
+        # Inline literal/branch labels are already part of this function. Their
+        # numeric names can coincide with unrelated overlay data addresses.
+        # Following those foreign definitions creates false game-wide cycles.
+        refs-=labels
+        for values in re.findall(r'^\s*(?:[A-Za-z_]\w*:\s*)?\.(?:word|long)\s+([^\n]+)',body,re.M):
+            refs.update(set(re.findall(r'\b[A-Za-z_]\w*\b',values))-labels)
+        indirect.update(re.findall(r'^\s*(?:mov|ldr)(?:eq|ne|cs|hs|cc|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le|al)?\s+pc,\s*([^\n]+)',body,re.M))
+    return calls,refs,indirect
+
+
+def source_index(upstream, cache, include_host=True):
     upstream=upstream.resolve();cache=cache.resolve()
     paths=sorted(p for folder in ('src','include','asm','lib') for p in (upstream/folder).rglob('*') if p.suffix in ('.c','.h','.s','.inc'))
     names={str(p.relative_to(upstream)):p for p in paths}
     project=upstream.parent.parent
-    for folder in (project/'src',cache.parent.parent/'generated'):
+    for folder in ((project/'src',cache.parent.parent/'generated') if include_host else ()):
         for p in folder.rglob('*'):
             if p.suffix in ('.c','.h','.inc'):names['@host/'+str(p.relative_to(project))]=p
     inputs={name:hashlib.sha256(p.read_bytes()).hexdigest() for name,p in names.items()}
@@ -31,7 +64,7 @@ def source_index(upstream, cache):
         source=p.read_text();clean=strip_c(source)
         # Balanced bodies, not a regex ending at an arbitrary closing brace.
         patterns=[('function',r'^(?:[\w*]+[ \t]+)+\**([A-Za-z_]\w*)\s*\([^;{}]*\)\s*\{'),
-                  ('table',r'^(?:static\s+)?(?:const\s+)?[\w* \t]+\b(\w+)\s*(?:\[[^\n;]*?\])+\s*=\s*\{')]
+                  ('table',r'^(?:static\s+)?(?:const\s+)?[\w* \t]+\b(\w+)\s*(?:\[[^\n;]*?\])*\s*=\s*\{')]
         for kind,pattern in patterns:
             for m in re.finditer(pattern,clean,re.M):
                 at=m.end();depth=1;conditions=[]
@@ -56,6 +89,8 @@ def source_index(upstream, cache):
         if p.suffix in ('.s','.inc'):
             for m in re.finditer(r'^\s*(?:thumb_func_start|arm_func_start)\s+(\w+)\s*\n(.*?)^\s*(?:thumb_func_end|arm_func_end)\s+\1',source,re.M|re.S):
                 definitions[m[1]].append(dict(source=relative,line=source.count('\n',0,m.start())+1,kind='assembly',body=m[2]))
+            for m in re.finditer(r'^(\w+):[^\n]*\n((?:\s*\.(?:word|short|hword|byte|asciz|ascii)\s+[^\n]+\n)+)',source,re.M):
+                definitions[m[1]].append(dict(source=relative,line=source.count('\n',0,m.start())+1,kind='table',body=m[2]))
     cache.parent.mkdir(parents=True,exist_ok=True)
     write_text_if_changed(cache,json.dumps(dict(inputs=inputs,extractor=identity,definitions=definitions),sort_keys=True)+'\n')
     return definitions
@@ -111,31 +146,24 @@ def event_closure(upstream, generated, source, entry, output):
         if at+1<len(labels) and (not instructions or instructions[-1] not in ('End','Return','GoTo','EndMovement')):
             target=labels[at+1][1];graph.edge(key,path+':'+target);pending.append((path,target))
     definitions=source_index(upstream,output.parent/'source-index.json');todo=[(n,None,'handler:'+n) for n in handlers];expanded=set()
-    keywords={'if','for','while','switch','return','sizeof','typeof','_Static_assert','asm','__asm__'}
     while todo:
         name,local,user=todo.pop();rows=definitions.get(name,[])
         local_rows=[r for r in rows if r['source']==local]
         if local_rows:rows=local_rows
-        else:
-            native=[r for r in rows if r['source'].startswith('@host/') and (r['kind']=='macro' or not r['body'].lstrip().startswith('static '))]
-            if native:rows=native
+        # Source inventory retains all candidates. Only compiler-context
+        # analysis can establish that a host macro replaces an original call.
         if not rows:
             target='unresolved:'+name;graph.node(target,'unresolved_symbol');graph.edge(user,target);open_edges.append(dict(user=user,kind='missing_definition',target=name));continue
         for row in rows:
             key=row['source']+':'+name+':'+str(row['line']);graph.node(key,row['kind'],source=row['source'],line=row['line']);graph.edge(user,key)
             if key in expanded:continue
-            expanded.add(key);body=row['body']
-            if row['kind']=='function':body=body[body.index('{')+1:]
-            refs=set(re.findall(r'\b[A-Za-z_]\w*\b',body))&definitions.keys();refs.discard(name)
-            calls=set(re.findall(r'\b(\w+)\s*\(',body))-keywords if row['kind'] in ('function','macro') else set()
-            if row['kind']=='assembly':
-                calls.update(re.findall(r'^\s*blx?\s+((?!r[0-9]+\b)\w+)',body,re.M))
-                for register in re.findall(r'^\s*blx?\s+(r[0-9]+)\b',body,re.M):open_edges.append(dict(user=key,kind='indirect_assembly_call',target=register))
+            expanded.add(key)
+            calls,refs,indirect=original_dependencies(row,definitions);refs.discard(name)
+            for target in indirect:open_edges.append(dict(user=key,kind='indirect_assembly_call' if row['kind']=='assembly' else 'indirect_call',target=target))
             for called in calls-refs-{name}:
                 # Function declaration name is not a call; macro params and
                 # indirect pointer calls stay open for explicit target review.
                 if called not in definitions:open_edges.append(dict(user=key,kind='unresolved_call',target=called))
-            for expr in re.findall(r'\b\w+\s*(?:->|\.)\s*\w+\s*(?:\[[^\]]*\])?\s*\(',body):open_edges.append(dict(user=key,kind='indirect_call',target=expr))
             for ref in refs:todo.append((ref,row['source'],key))
     # Materialize unresolved references as graph nodes; never hide missing leaves.
     for edge in open_edges:
@@ -145,6 +173,13 @@ def event_closure(upstream, generated, source, entry, output):
     output.parent.mkdir(parents=True,exist_ok=True);write_text_if_changed(output,json.dumps(report,indent=2,sort_keys=True)+'\n')
     print(json.dumps(dict(nodes=len(graph.nodes),handlers=len(handlers),open_edges=len(open_edges),report=str(output))))
     return report
+
+
+def llvm_references(body):
+    # Encoded ROM bytes and diagnostic strings can contain '@name'. They are
+    # data, whereas LLVM callback/function addresses are unquoted operands.
+    body=re.sub(r'c"(?:\\.|[^"\\])*"', '""', body)
+    return set(re.findall(r'@([\w.$]+)',body))
 
 
 def native_calls(project, build):
@@ -168,14 +203,22 @@ def native_calls(project, build):
         identity=dict(command=row['command'],inputs=inputs,analysis_flags=['-femit-all-decls'])
         if not ir.exists() or not stamp.exists() or json.loads(stamp.read_text())!=identity:
             at=args.index('-o');del args[at:at+2];args.remove('-c');args+=['-S','-emit-llvm','-femit-all-decls','-o',str(ir)]
-            subprocess.run(args,cwd=row['directory'],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+            compiled=subprocess.run(args,cwd=row['directory'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True)
+            if compiled.returncode:raise RuntimeError(str(source)+'\n'+compiled.stderr)
             write_text_if_changed(stamp,json.dumps(identity,sort_keys=True)+'\n')
         data=ir.read_text();unit=str(source.relative_to(project));functions=list(re.finditer(r'^define ([^\n]*?)@([\w.$]+)\([^\n]*\)[^\n]*\{\n(.*?)^}',data,re.M|re.S))
         for match in functions:
             name=match[2];node='llvm:'+unit+':'+name
             calls=re.findall(r'\bcall\b[^\n]*?@([\w.$]+)\(',match[3]);indirect=re.findall(r'\bcall\b[^\n]*?%([\w.]+)\(',match[3])
-            result[node]=dict(unit=unit,name=name,calls=sorted(set(calls)),indirect=sorted(set(indirect)))
+            references=llvm_references(match[3])-set(calls)
+            result[node]=dict(unit=unit,name=name,kind='function',calls=sorted(set(calls)),references=sorted(references),indirect=sorted(set(indirect)))
             if not re.search(r'\binternal\b',match[1]):public[name].append(node)
+        # Address-taken functions and callback tables are dependencies even
+        # when no direct call instruction names them.
+        for match in re.finditer(r'^@([\w.$]+)\s*=([^\n]*)',data,re.M):
+            name,body=match.groups();node='llvm:'+unit+':'+name
+            result[node]=dict(unit=unit,name=name,kind='global',calls=[],references=sorted(llvm_references(body)),indirect=[])
+            if not re.search(r'\b(?:internal|private)\b',body):public[name].append(node)
     linked=subprocess.check_output(['xcrun','nm','-u',str(build/'test_violet')],text=True)
     platform={name[1:] for name in re.findall(r'^\s*(_\S+)',linked,re.M)}
     return dict(functions=result,public=dict(public),platform=sorted(platform),evidence='Clang emitted calls from current built C units; pointer dispatch remains open')
@@ -197,10 +240,10 @@ def function_closure(project,upstream,build,roots,context,output):
         if choices:return choices
         if name.startswith('llvm.') or name in native['platform']:
             key='platform:'+name;nodes[key]=dict(kind='compiler_intrinsic' if name.startswith('llvm.') else 'linked_platform_ABI');return [key]
-        rows=[r for r in definitions.get(name,[]) if r['kind'] in ('function','assembly') and not r['source'].startswith('@host/')]
+        rows=[r for r in definitions.get(name,[]) if r['kind'] in ('function','assembly','table') and not r['source'].startswith('@host/')]
         if len(rows)==1:
             row=rows[0];key='original:'+row['source']+':'+name
-            nodes.setdefault(key,dict(kind='unselected_original_definition',source=row['source'],line=row['line'],body=row['body'],unit=unit));return [key]
+            nodes.setdefault(key,dict(kind='unselected_original_definition',source=row['source'],line=row['line'],body=row['body'],definition_kind=row['kind'],unit=unit));return [key]
         key='open:'+name;nodes[key]=dict(kind='unresolved',candidates=[dict(source=r['source'],line=r['line']) for r in rows]);opened.append(dict(user=user,target=name,kind='missing_or_ambiguous_definition'));return [key]
     expanded=set();root_nodes=[]
     while pending:
@@ -211,15 +254,24 @@ def function_closure(project,upstream,build,roots,context,output):
             if key in expanded:continue
             expanded.add(key)
             if key in native['functions']:
-                row=native['functions'][key];nodes[key]=dict(kind='compiled_native_function',unit=row['unit'],name=row['name'])
-                for target in row['calls']:pending.append((target,row['unit'],key))
+                row=native['functions'][key];nodes[key]=dict(kind='compiled_native_'+row.get('kind','function'),unit=row['unit'],name=row['name'])
+                for target in set(row['calls']+row.get('references',[])):pending.append((target,row['unit'],key))
                 for target in row['indirect']:opened.append(dict(user=key,target=target,kind='indirect_native_call'))
             elif nodes[key]['kind']=='unselected_original_definition':
-                row=nodes[key];body=row['body'];body=body[body.index('{')+1:] if row.get('source','').endswith(('.c','.h')) else body
-                calls=set(re.findall(r'\b(\w+)\s*\(',body))-{'if','for','while','switch','sizeof','return','_Static_assert'}
-                for target in calls:pending.append((target,row['unit'],key))
-                for expr in re.findall(r'\w+\s*(?:->|\.)\s*\w+\s*\(',body):opened.append(dict(user=key,target=expr,kind='indirect_original_call'))
+                row=nodes[key]
+                original=dict(row,kind=row['definition_kind'])
+                calls,references,indirect=original_dependencies(original,definitions)
+                references={name for name in references if name not in definitions or any(r['kind'] in ('function','assembly','table') for r in definitions[name])}
+                for target in calls|references:pending.append((target,row['unit'],key))
+                for target in indirect:opened.append(dict(user=key,target=target,kind='indirect_original_assembly_call' if original['kind']=='assembly' else 'indirect_original_call'))
     for value in nodes.values():value.pop('body',None)
-    report=dict(roots=root_nodes,context=context,nodes=nodes,edges={k:sorted(v) for k,v in edges.items()},open_edges=opened,complete=not opened,evidence='Compiler-resolved existing native C calls plus unselected original definitions; indirect targets remain open; not execution evidence')
+    from audit_chapters import Graph
+    graph=Graph()
+    for key in nodes:graph.node(key,'dependency')
+    for user,targets in edges.items():
+        for target in targets:graph.edge(user,target)
+    graph.seeds['closure'].update(root_nodes)
+    _,components,_=graph.partition()
+    report=dict(roots=root_nodes,context=context,nodes=nodes,edges={k:sorted(v) for k,v in edges.items()},cycles=[c for c in components if len(c)>1],open_edges=opened,complete=not opened,evidence='Compiler-resolved existing native C calls and address/table references plus unselected original definitions; indirect targets remain open; resource and lifecycle contracts still require review; not execution evidence')
     write_text_if_changed(output,json.dumps(report,indent=2,sort_keys=True)+'\n');print(json.dumps(dict(nodes=len(nodes),open_edges=len(opened),complete=not opened,report=str(output))))
     return report

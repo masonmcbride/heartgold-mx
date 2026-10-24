@@ -23,6 +23,7 @@ static void reentry(SysTask *task,void *data) { (void)data;if(!hg_scheduler_step
 static SysTask *from_main;
 static void spawn_main(SysTask *task,void *data) { from_main=SysTask_CreateOnMainQueue(increment,data,1);GF_ASSERT(from_main);SysTask_Destroy(task); }
 int main(void) {
+    log_count=environment_calls=rejected_reentry=0;victim=from_main=NULL;
     /* Queue placement must use native sizeof, not original DS structure sizes. */
     size_t arena_size=SysTaskQueue_GetArenaSize(8);u8 *arena=calloc(1,arena_size+16);CHECK(arena);memset(arena+arena_size,0xa5,16);
     SysTaskQueue *q=SysTaskQueue_PlacementNew(8,arena);

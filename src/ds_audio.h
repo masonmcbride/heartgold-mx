@@ -14,6 +14,11 @@ void ds_audio_free(DSAudio *);
 int ds_audio_play(DSAudio *,unsigned kind,unsigned sequence);
 /* Original StartSeqEx bank selection, used by normal Pokémon cries. */
 int ds_audio_play_bank(DSAudio *,unsigned kind,unsigned sequence,unsigned bank);
+/* Preserve the current BGM playback position for a temporary encounter theme.
+ * Failed preparation preserves playback; snapshots retain independent copies. */
+int ds_audio_play_temporary_bgm(DSAudio *,unsigned sequence);
+int ds_audio_restore_bgm(DSAudio *);
+void ds_audio_discard_saved_bgm(DSAudio *);
 void ds_audio_stop(DSAudio *,unsigned kind,unsigned sequence);
 void ds_audio_fade(DSAudio *,unsigned volume,unsigned ticks);
 unsigned ds_audio_bgm(const DSAudio *);

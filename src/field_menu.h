@@ -2,6 +2,8 @@
 #include <stddef.h>
 #include <stdint.h>
 typedef struct HGFieldMenu HGFieldMenu;
+typedef int (*HGFieldPartySwap)(void *,unsigned,unsigned);
+void hg_field_menu_set_party_swap(HGFieldMenu *,HGFieldPartySwap,void *);
 struct Bag;struct Party;struct SaveData;
 HGFieldMenu *hg_field_menu_new(struct SaveData *,unsigned map_section);
 void hg_field_menu_free(HGFieldMenu *);

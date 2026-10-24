@@ -1,26 +1,33 @@
 """Shared bounded ARM/Thumb assembly and relocation; unknown imports remain traps."""
 from generated_files import write_text_if_changed
-import re,struct,subprocess
+import re,struct,subprocess,tempfile
+from pathlib import Path
 
-def assemble(raw,root,out,cc,stem,prefix):
+def assemble(raw,root,out,cc,stem,prefix,include_dirs=(),data_imports=()):
     source=out/(stem+'_input.S');write_text_if_changed(source, raw)
-    text=subprocess.check_output([str(cc),'-E','-P','-DPM_ASM','-x','assembler-with-cpp','-I'+str(out),'-I'+str(root/'include'),'-I'+str(root/'files'),str(source)],text=True)
-    lines=['.syntax unified','.cpu arm946e-s','.thumb']
+    text=subprocess.check_output([str(cc),'-E','-P','-DPM_ASM','-x','assembler-with-cpp','-I'+str(out),'-I'+str(root/'include'),'-I'+str(root/'files'),*('-I'+str(p) for p in include_dirs),str(source)],text=True)
+    lines=['.syntax unified','.cpu arm946e-s','.thumb'];compiler_syntax=False
     for line in text.splitlines():
      line=line.split(';')[0].strip()
+     if line=='.set hg_compiler_syntax, 1':compiler_syntax=True;continue
+     if line=='.set hg_compiler_syntax, 0':compiler_syntax=False;continue
      if not line or line.startswith(('#','.include','thumb_func_end')):continue
      if line.startswith('thumb_func_start'):
       lines += ['.global '+line.split()[1],'.thumb_func'];continue
      if line=='.rodata':line='.section .rodata\n.balign 4' # Original units have independent word-aligned sections.
      if line.startswith('.public'):line=line.replace('.public','.global',1)
      m=re.match(r'(add|sub|mov|lsl|lsr|asr|mul|adc|orr|neg|eor|and|bic|mvn|sbc|ror)\s+(.*)',line)
-     if m:
+     if m and not compiler_syntax:
       op,args=m.groups();regs=re.findall(r'\b(?:r\d+|sp|lr|pc|ip)\b',args)
       high=any(r in ('sp','lr','pc','ip') or r.startswith('r') and int(r[1:])>=8 for r in regs)
       if op not in ('add','sub','mov') or not high:line=op+'s '+args
      lines.append(line)
     assembly=out/(stem+'.s');obj=out/(stem+'.o');write_text_if_changed(assembly, '\n'.join(lines)+'\n')
-    subprocess.run([str(cc),'-target','arm-none-eabi','-c',str(assembly),'-o',str(obj)],check=True)
+    with tempfile.TemporaryDirectory() as folder:
+        candidate=Path(folder)/'unit.o'
+        subprocess.run([str(cc),'-target','arm-none-eabi','-c',str(assembly),'-o',str(candidate)],check=True)
+        compiled=candidate.read_bytes()
+        if not obj.exists() or obj.read_bytes()!=compiled: obj.write_bytes(compiled)
     data=obj.read_bytes();assert data[:6]==b'\x7fELF\x01\x01'
     shoff=struct.unpack_from('<I',data,32)[0];ents,count,names=struct.unpack_from('<HHH',data,46)
     sections=[struct.unpack_from('<10I',data,shoff+i*ents) for i in range(count)]
@@ -28,19 +35,22 @@ def assemble(raw,root,out,cc,stem,prefix):
     def string(table,offset):return table[offset:table.index(b'\0',offset)].decode()
     strings=payload(sections[names]);image=bytearray();bases={};base=0x02000000
     for i,s in enumerate(sections):
-     if s[2]&2 and s[1]==1:
-      image.extend(b'\0'*((-len(image))%max(s[8],4)));bases[i]=len(image);image.extend(payload(s))
+     if s[2]&2 and s[1] in (1,8):
+      image.extend(b'\0'*((-len(image))%max(s[8],4)));bases[i]=len(image);image.extend(payload(s) if s[1]==1 else bytes(s[5]))
     text_index=next(i for i,s in enumerate(sections) if string(strings,s[0])=='.text');code_size=sections[text_index][5]
     assert bases[text_index]==0, 'executable section must begin the image'
     symtab=next(s for s in sections if s[1]==2);symstrings=payload(sections[symtab[6]]);symbols=[]
     for pos in range(symtab[4],symtab[4]+symtab[5],symtab[9]):
      name,value,size,info,other,index=struct.unpack_from('<IIIBBH',data,pos)
+     if (info&15)==2 and index in bases and index!=text_index:
+      raise ValueError(('guest function outside executable section',string(symstrings,name)))
      symbols.append((string(symstrings,name),value,index))
     imports={name:0x02100000+4*i for i,name in enumerate(sorted({n for n,v,idx in symbols if idx==0 and n}))}
+    if set(data_imports)-imports.keys():raise ValueError(('undefined guest data imports',sorted(set(data_imports)-imports.keys())))
     def address(sym):
      name,value,index=sym
      if index in bases:return base+bases[index]+value
-     if index==0:return imports[name]+1
+     if index==0:return imports[name]+(name not in data_imports)
      if index==0xfff1:return value
      raise ValueError(('unmapped symbol',sym))
     for section in sections:
@@ -57,6 +67,7 @@ def assemble(raw,root,out,cc,stem,prefix):
     header=['/* Original assembled bytes: generated build-local. */',f'static const unsigned char {prefix.lower()}_image[] = {{',','.join(map(str,image)),'};',f'#define {prefix}_CODE_SIZE {code_size}u']
     for name,value,index in symbols:
      if index in bases and name and not name.startswith('$'):header.append(f'#define {prefix}_{name} {address((name,value,index))&~1}u')
+    header += [f'#define {prefix}_IMPORT_{n} {imports[n]}u' for n in sorted(data_imports)]
     header += [f'static const struct {{ unsigned address;const char *name; }} {prefix.lower()}_imports[] = {{']
     header += [f'{{{a}u,"{n}"}},' for n,a in imports.items()];header+=['};']
     write_text_if_changed(out/(stem+'.inc'), '\n'.join(header)+'\n')

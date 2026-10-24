@@ -27,8 +27,11 @@ groups['src/scrcmd_20.c']=('ScrCmd_NopVar490',)
 groups['src/scrcmd_strbuf.c']+=('ScrCmd_BufferRivalsName','ScrCmd_BufferPartyMonNick')
 groups['src/scrcmd_items.c']+=('ScrCmd_TakeItem',)
 groups['src/scrcmd_battle.c']=('ScrCmd_TrainerBattle','ScrCmd_CheckBattleWon')
+groups['src/field_bgm.c']=('FieldBGM_GetEyesMeetForTrainer',)
+groups['src/scrcmd_battle.c']+=('ScrCmd_EncounterMusic',)
 groups['src/scrcmd_battle.c']+=('ScrCmd_GetTrainerNum','ScrCmd_GetTrainerMsgParams','ScrCmd_GetRematchMsgParams','ScrCmd_TrainerIsDoubleBattle')
 groups['src/phonebook_dat.c']=('FreePhoneBook','LoadPhoneBookEntryI')
+groups['src/scrcmd_c.c']+=('ScrCmd_LoadPhoneDat',)
 groups['src/trainer_data.c']=('TrainerData_GetAttr','TrainerData_ReadTrData')
 groups['src/script_manager.c']+=('TrainerNumIsDouble','ScriptNoToDoublePartnerNo')
 groups['src/scrcmd_c.c']+=('ScrCmd_SetTrainerFlag','ScrCmd_CheckTrainerFlag')
@@ -44,8 +47,10 @@ scene_groups['src/scrcmd_c.c']+=('ScrCmd_FadeScreen','ScrCmd_WaitFade','sub_0204
 scene_groups['src/scrcmd_c.c']+=('ScrCmd_729','ScrCmd_GetPlayerState','ScrCmd_SetAvatarBits','ScrCmd_UpdateAvatarState','ScrCmd_446','ScrCmd_PokeCenAnim','ScrCmd_599','ScrCmd_436')
 scene_groups['src/scrcmd_17.c']=('ScrCmd_GiveRunningShoes',)
 scene_groups['src/map_object.c']=('MapObject_Delete',)
+scene_groups['src/scrcmd_c.c']+=('ScrCmd_574','ScrCmd_109','ScrCmd_454')
+scene_groups['src/overlay_26_022599D0.c']=('ov26_022599D0','ov26_022599D8','ov26_02259A24')
 starter_groups={'src/launch_application.c':('ChooseStarter_LaunchApp',),'src/choose_starter.c':('LaunchStarterChoiceScene','CreateStarter'),'src/update_dex_received.c':('UpdatePokedexWithReceivedSpecies',)}
-lines=['/* Unchanged original function slices; not whole-source coverage. */'];records=[];declarations=[]
+lines=['/* Original slices with recorded native adaptations; not whole-source coverage. */'];records=[];declarations=[]
 scene_lines=[];scene_declarations=[];starter_lines=[];starter_declarations=[]
 for relative in dict.fromkeys((*groups,*scene_groups,*starter_groups)):
  names=tuple(dict.fromkeys(groups.get(relative,())+scene_groups.get(relative,())+starter_groups.get(relative,())))
@@ -55,6 +60,10 @@ for relative in dict.fromkeys((*groups,*scene_groups,*starter_groups)):
   tables=re.findall(r'const u16 ov01_022067C8\[\] = \{.*?^\};',source,re.M|re.S)
   if len(tables)!=1:raise ValueError('Original standard message banks changed')
   lines.append(tables[0])
+ if relative=='src/field_bgm.c':
+  music_tables=re.findall(r'^const static u16 sTrainerEncounterMusicParam\[\]\[3\] = \{.*?^\};',source,re.M|re.S)
+  if len(music_tables)!=1:raise ValueError('Original trainer encounter music table changed')
+  lines.append(music_tables[0])
  if relative=='src/scrcmd_c.c':
   match=re.search(r'^static const u8 sConditionTable\[6\]\[3\] = \{.*?^\};',source,re.M|re.S)
   if not match:raise ValueError('Original script condition table changed')
@@ -63,9 +72,11 @@ for relative in dict.fromkeys((*groups,*scene_groups,*starter_groups)):
   matches=list(re.finditer(r'^(?:(?:static|inline) )*[A-Za-z_][^\n;{}]*\b'+name+r'\([^;{}]*\) \{\n.*?^\}',source,re.M|re.S))
   if len(matches)!=1:raise ValueError(('Original script definition changed',name,len(matches)))
   match=matches[0];line=source[:match.start()].count('\n')+1
+  from native_bit_operations import adapt_native_bits
+  body,adaptations=adapt_native_bits(relative,name,match[0])
   if name in groups.get(relative,()):
    declarations.append(match[0].split(' {\n',1)[0]+';')
-   lines.extend([f'#line {line} "{path}"',match[0]])
+   lines.extend([f'#line {line} "{path}"',body])
   if name in scene_groups.get(relative,()):
    scene_declarations.append(match[0].split(' {\n',1)[0]+';')
    scene_lines.extend([f'#line {line} "{path}"',match[0]])
@@ -73,6 +84,7 @@ for relative in dict.fromkeys((*groups,*scene_groups,*starter_groups)):
    starter_declarations.append(match[0].split(' {\n',1)[0]+';')
    starter_lines.extend([f'#line {line} "{path}"',match[0]])
   records.append({'source':relative,'function':name,'line':line,'source_sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'slice_sha256':hashlib.sha256(match[0].encode()).hexdigest()})
+  if adaptations:records[-1].update(adaptations=adaptations,emitted_sha256=hashlib.sha256(body.encode()).hexdigest())
 starter_struct=re.search(r'struct ChooseStarterTaskData \{.*?^\};',(root/'src/choose_starter.c').read_text(),re.M|re.S)[0]
 write_text_if_changed(out/'starter_kernel.inc', starter_struct+'\n'+'\n'.join(starter_lines)+'\n')
 write_text_if_changed(out/'starter_decls.inc', '\n'.join(starter_declarations)+'\n')
@@ -85,6 +97,7 @@ decls=[re.search(r'typedef enum ScriptEnvField \{.*?^\} ScriptEnvField;',script,
 decls.append('#ifndef HG_NAME_SCREEN_TYPE\n#define HG_NAME_SCREEN_TYPE\n'+re.search(r'typedef enum NameScreenType \{.*?\} NameScreenType;', (root/'include/launch_application.h').read_text(),re.S)[0]+'\n#endif')
 write_text_if_changed(out/'story_types.inc', '\n'.join(decls)+'\n')
 commands=re.findall(r'^    (\w+),$',(root/'src/data/fieldmap/script_cmd_table.h').read_text(),re.M)
+write_text_if_changed(out/'trainer_event_opcodes.inc','enum { HG_SCRIPT_TRAINER_MESSAGE='+str(commands.index('ScrCmd_TrainerMessage'))+', HG_SCRIPT_ENCOUNTER_MUSIC='+str(commands.index('ScrCmd_EncounterMusic'))+' };\n')
 selected={name for names in groups.values() for name in names if name.startswith('ScrCmd_')}
 scene_selected={n for names in scene_groups.values() for n in names if n.startswith('ScrCmd_')}
 write_text_if_changed(out/'script_scene_admitted.inc', ''.join(f'case {i}:return 1; /* {name} */\n' for i,name in enumerate(commands) if name in scene_selected))
@@ -131,3 +144,11 @@ fade_header=(root/'include/screen_fade.h').read_text()
 fade_enums=re.findall(r'enum Fade(?:Mode|Type) \{.*?\};',fade_header,re.S)
 if len(fade_enums)!=2:raise ValueError('Original fade modes/types changed')
 write_text_if_changed(out/'screen_fade_types.inc', '\n'.join(fade_enums)+'\n')
+
+# Original trainer message lookup is shared by the native UTF-8 presentation
+# boundary; preserve the resource-table algorithm without a second lookup.
+trainer_message_source=root/'src/trainer_data.c'
+trainer_message_matches=re.findall(r'^void GetTrainerMessageByIdPair\([^;{}]*\) \{\n.*?^\}',trainer_message_source.read_text(),re.M|re.S)
+if len(trainer_message_matches)!=1:raise ValueError('Original trainer message lookup changed')
+write_text_if_changed(out/'trainer_message_kernel.inc',trainer_message_matches[0]+'\n')
+write_text_if_changed(out/'trainer_message_provenance.json',json.dumps({'source':'src/trainer_data.c','function':'GetTrainerMessageByIdPair','source_sha256':hashlib.sha256(trainer_message_source.read_bytes()).hexdigest(),'slice_sha256':hashlib.sha256(trainer_message_matches[0].encode()).hexdigest()},indent=2)+'\n')

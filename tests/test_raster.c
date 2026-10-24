@@ -28,6 +28,12 @@ int main(void) {
     DSRasterMaterial mats[2]={{{red,NULL,2,0,1,1,7,0},0,31u<<16,1},{{blue,NULL,2,0,1,1,7,0},0,31u<<16,1}};
     DSRasterTriangle tris[]={triangle(2,0),triangle(0,1)},reverse[]={tris[1],tris[0]};
     DSCamera camera={.scale=1};uint8_t front[16*16*4],back[sizeof(front)];size_t center=4*(8*16+8);
+    /* Applying a material UV matrix must equal transforming the mesh UVs. */
+    DSRasterMaterial uvmat={.texture=tex,.polygon=31u<<16,.textured=1,.uv_transform=1,.uv_matrix={0,2,-.5,0,3,1}};
+    DSRasterTriangle uvtri=triangle(0,0),mapped=uvtri;
+    for(unsigned i=0;i<3;i++){uvtri.v[i].u=i;uvtri.v[i].v=2*i;mapped.v[i].u=3-i;mapped.v[i].v=1+2*i;}
+    CHECK(ds_raster_draw(&uvtri,1,&uvmat,1,&camera,front,16,16));uvmat.uv_transform=0;
+    CHECK(ds_raster_draw(&mapped,1,&uvmat,1,&camera,back,16,16));CHECK(!memcmp(front,back,sizeof(front)));
     CHECK(ds_raster_draw(tris,2,mats,2,&camera,front,16,16));CHECK(front[center]==255 && front[center+2]==0);
     CHECK(ds_raster_draw(reverse,2,mats,2,&camera,back,16,16));CHECK(!memcmp(front,back,sizeof(front)));
     mats[0].texture.texels=clear;CHECK(ds_raster_draw(tris,2,mats,2,&camera,front,16,16));CHECK(front[center]==0 && front[center+2]==255);

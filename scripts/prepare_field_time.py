@@ -11,10 +11,13 @@ for path in (root/'src').rglob('*.c'):
 # inferred from stale link products. Whole units retain their original owners.
 existing=set()
 for name in ('pokemon_decls.inc','script_kernel_decls.inc','save_c_records_decls.inc','phone_decls.inc'):
- existing.update(re.findall(r'\b(\w+)\([^;{}]*\)\s*;',(out/name).read_text()))
+ existing.update(re.findall(r'^(?!static\b)[^\n;{}]*?\b(\w+)\([^;{}]*\)\s*;',(out/name).read_text(),re.M))
 for relative in ('src/save_pokegear.c','src/save_vars_flags.c','src/apricorn_tree_sys.c','src/map_header.c','src/save_local_field_data.c'):
  existing.update(m[1] for m in re.finditer(pattern,(root/relative).read_text(),re.M|re.S))
 existing.update('AllocAndReadPhoneBook StartMapSceneScript IsSEPlaying PlaySE_SetPitch Heap_Alloc Heap_AllocAtEnd Heap_Free GF_RTC_CopyDateTime GF_CalcCRC16 SaveData_Get SaveSubstruct_UpdateCRC SaveSubstruct_AssertCRC FieldSystem_BugContest_Get GearPhone_ToggleRinging GfGfxLoader_LoadFromNarc SaveArray_Get SaveArray_Const_Get MTRandom LCRandom SaveArray_Party_Get Save_VarsFlags_Get Save_Pokedex_Get'.split())
+# Phonebook allocations here belong to the trapped field-time allocator.
+# Keep original cleanup in this unit even when another kernel selects it.
+existing.discard('FreePhoneBook')
 roots='Field_GetTimeOfDay FieldSystem_StartBugContestTimer GearPhoneRingManager_New SysInfoRTC_HandleContinueOnNewConsole Save_SysInfo_MacAddressIsMine Save_SysInfo_RTCOffsetIsMine Save_SysInfo_InitFromSystem Party_ResetAllShayminToLandForm Save_TrainerCard_Get GetShininessOfBadgeI Options_SetButtonModeOnMain Save_BerryPotRTC_Get sub_02093070 sub_020930C4 ov02_02251F20 SysTask_RingGearPhone'.split()
 selected={};pending=list(roots)
 while pending:

@@ -235,6 +235,23 @@ int ds_model_material(const DSModel *model,unsigned index,DSModelMaterial *out) 
     *out=v;return 1;
 }
 
+int ds_model_modify_material_flags(const DSModel *model,uint8_t *writable,uint16_t mask,int enabled){
+    if(!model||model->bytes!=writable||model->size<64)return 0;
+    size_t start=u32(writable+8),end=u32(writable+12);
+    if(end>model->size||start>=end||end-start<12)return 0;
+    uint8_t *material=writable+start;size_t size=end-start;
+    /* Validate the full set before publishing any edits. */
+    for(unsigned i=0;i<model->materials;i++){
+        uint32_t offset;
+        if(!entry(material+4,size-4,i,&offset,NULL)||offset<4+u16(material+6)||!span(size,offset,44)||u16(material+offset+2)<44||!span(size,offset,u16(material+offset+2)))return 0;
+    }
+    for(unsigned i=0;i<model->materials;i++){
+        uint32_t offset;entry(material+4,size-4,i,&offset,NULL);
+        unsigned flags=u16(material+offset+30);flags=enabled?(flags|mask):(flags&~mask);
+        material[offset+30]=(uint8_t)flags;material[offset+31]=(uint8_t)(flags>>8);
+    }return 1;
+}
+
 int ds_model_inspection_scene(const DSModel *m,DSSceneTriangle emit,void *user,DSModelStats *out) { return scene(m,-1,-1,emit,user,out,1,NULL); }
 
 int ds_model_scene_pose(const DSModel *model,int shape,int material,const DSJointPose *pose,DSSceneTriangle emit,void *user,DSModelStats *out) { return scene(model,shape,material,emit,user,out,0,pose); }

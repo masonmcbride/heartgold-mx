@@ -1,20 +1,17 @@
 # Current connected outcome
-
-- Goal: gameplay-produced, durable first badge through original Violet/Sprout/Falkner events.
-- Entry: executed post-tutorial saves; legal party, gifts and original flags retained.
-- Exit target: original Tower/Gym progression, Falkner badge script, Save/exit/Continue and departure.
-- Last proven: all three starters reach Violet through Mom's Route 30 call and Lyra's original Recorder gift/departure.
-- Durable: Route 30, moved/offstage gatehouse actors and Violet reopen; both savings answers; mid-call saving rejects without publication.
-- Current blocker: Sage Nico on Sprout Tower 2F, standard bank 953; GetTrainerNum rejects (opcode 212, byte 2970).
-- Exact probe: test_violet --probe reaches 110 at 15,28, then 155 at 11,14; interacts with trainer script 3050.
-- Shared callers: standard trainers, Tower sages, Gym trainers; trainer identity/messages/flags and battle loss ownership need one original closure.
-- Next decisive check: compute the complete standard-trainer dependency closure through every leaf/branch/indirect target before implementation; then verify Nico success/loss/retry and durable defeat state.
-- Original contracts: bank 953 uses phonebook lookup, actor metadata, defeat predicates, encounter audio, trainer text, battle and reward publication.
-- Evidence: test_violet covers all starters, renders menus/recovered scenes and writes build/checkpoints/*-violet-arrival.sav; native AppKit Mother menu/field return inspected.
-- Sanitizers: new three-starter scenario completes; unchanged upstream Pokemon/Pokedex/battle signed-shift UBSan reports remain.
-- Regression: 75/76 broad checks passed; stale Mother-rejection assertion updated and its focused check now passes.
-- Method: cache/reuse complete closures across callers; one representative starter route, with distinct choice/failure and starter-specific branches tested separately.
-- Build repair: generated text/binary writes now preserve identical content timestamps; no-change configure preserves 1,776 generated-input hashes and causes zero compiler invocations.
-- Fixtures: nine distinct six-Pokemon chapter contracts in chapter-test-teams.md and chapter manifest; never injected into this route.
-- Limits: no first badge, Tower trainer victory, trainer sight/approach, or trainer medicine acceptance claimed.
-- Deviations: complete trainer closure exceeds initial read bound; extending cached chapter graph with script CFG, recursive C/ASM/table references and explicit unresolved indirect edges before runtime edits.
+- Goal: original FieldMap_Init LOAD completion, actual Main/controller frames and original Exit.
+- Canonical new-game owner, save, 64-object manager/player/follower and original tasks remain preserved.
+- RESET completes; LOAD returns all 23 original effect constructors (mask 0x007fffff).
+- Renderer 14 unchanged C executes as ARM32; four 20-byte holders and four 84-byte embedded render objects retain real models.
+- Existing model/texture/animation/raster services supply native associations; upstream remains unchanged.
+- Original VBlank IRQ drains capacity-32 queue during LOAD; main/VWait phases remain separate.
+- Original object graphics manager construction/destruction now executes on directly mapped canonical opaque state.
+- Original sprite tables and 17 JSON-generated mmodel control members restore missing data dependencies.
+- Separate original raw-manager owners share existing transport with checked distinct manager/object handles.
+- ov01_022057DC, FieldEffect_InitRenderObject and original PlayerAvatar_InitMapFeatures now execute.
+- Shared-root audit: A canonical ABI/callbacks, B environment owners, C graphics state, D frame lifecycle, E script/input.
+- Priority A typed accessors now initialize original ov01_02200900 with canonical player identity; next owner is sub_0205E520.
+- Repeated constructor/callback/identity rejection probe passes (0.242 s); character/control-table test passes (0.133 s).
+- Preserved loader: 59 models, eight props, 260 land triangles and four resource ticks per repeated session.
+- LOAD partial, runningFieldMap false; paused Control only; zero Main/Exit or enabled-input frames.
+- No full suite, sanitizers, UI smoke or unrelated benchmark workloads run.

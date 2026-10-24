@@ -5,6 +5,7 @@
 #include "field_data.h"
 #include "motion_guest.h"
 #include <stdio.h>
+#include <unistd.h>
 #define CHECK(x) do { if(!(x)){fprintf(stderr,"%s:%d: %s\n",__FILE__,__LINE__,#x);exit(1);} } while(0)
 static unsigned half(const uint8_t *p){return p[0]|(unsigned)p[1]<<8;}
 static void completed(LocalMapObject *object){(void)object;}
@@ -27,25 +28,28 @@ static const unsigned keys[]={0x40,0x80,0x20,0x10};
 static const int dx[]={0,0,-1,1},dz[]={-1,1,0,0};
 #include "field_routes.h"
 int main(void) {
-    const unsigned maps[]={60,61,62,63,64,65,66,384};unsigned portals=0,selected_maps=0;
-    HGFieldLocation approaches[8][6]={0};
+    const unsigned maps[]={60,61,62,63,64,65,66,384,110,155,156};unsigned portals=0,selected_maps=0;
+    HGFieldLocation approaches[11][16]={0};
     for(unsigned m=0;m<sizeof(maps)/sizeof(*maps);m++) {
         Actor actor;init(&actor);PlayerSaveData *original=PlayerAvatar_GetPlayerSaveData(actor.avatar);
         HGTransition *transition=hg_transition_new(maps[m],actor.avatar);CHECK(transition);
         CHECK(PlayerAvatar_GetPlayerSaveData(actor.avatar)!=original);
         HGFieldResources *resources=hg_field_resources_new(maps[m]);CHECK(resources);HGEventView events;CHECK(hg_event_load(maps[m],&events));
         unsigned resolved=0;
+        CHECK(events.warp_count<=16);
         for(unsigned w=0;w<events.warp_count;w++) {
             const uint8_t *event=events.warps+12*w;int wx=(int)half(event),wz=(int)half(event+2),found=0;
             for(int oz=-1;oz<=1&&!found;oz++)for(int ox=-1;ox<=1&&!found;ox++)for(unsigned d=0;d<4&&!found;d++) {
                 HGMotionTile tile;if(!hg_motion_tile(resources,wx+ox,wz+oz,&tile)||tile.wall||!place(&actor,resources,wx+ox,wz+oz,d))continue;
                 HGTransitionState before,after;CHECK(hg_transition_inspect(transition,&before));HGWarpDestination destination;
                 int selected=hg_transition_probe(transition,resources,d,&destination);
+                if(!selected)selected=hg_transition_probe_step(transition,resources,&destination);
                 CHECK(hg_transition_inspect(transition,&after)&&!memcmp(&before,&after,sizeof(before)));
                 if(!selected||destination.map!=(int)half(event+4)||destination.warp!=(int)half(event+6))continue;
+                if((destination.kind==7||destination.kind==8)&&(ox||oz))continue;
                 HGEventView target;CHECK(hg_event_load((unsigned)destination.map,&target));CHECK((unsigned)destination.warp<target.warp_count);
                 const uint8_t *anchor=target.warps+12*destination.warp;
-                CHECK(destination.x==(int)half(anchor)&&destination.z==(int)half(anchor+2)&&destination.direction==(int)d);
+                CHECK(destination.x==(int)half(anchor)&&destination.z==(int)half(anchor+2)&&destination.direction==(destination.kind==8?0:(int)d));
                 HGWarpDestination altered=destination;altered.x++;CHECK(!hg_transition_commit(transition,&altered));
                 CHECK(hg_transition_inspect(transition,&after)&&!memcmp(&before,&after,sizeof(before)));
                 MapObject_AddCurrentX(&actor.object,1);CHECK(!hg_transition_commit(transition,&destination));MapObject_AddCurrentX(&actor.object,-1);
@@ -54,6 +58,7 @@ int main(void) {
                 CHECK(hg_transition_commit(transition,&destination));CHECK(hg_transition_inspect(transition,&after));
                 CHECK(after.current.map==destination.map&&after.current.x==destination.x&&after.current.z==destination.z);
                 CHECK(after.previous.map==(int)maps[m]&&after.previous.x==wx+ox&&after.previous.z==wz+oz);
+                if(after.entrance.map!=(int)maps[m]||after.entrance.warp!=(int)w||after.entrance.x!=wx||after.entrance.z!=wz)fprintf(stderr,"Entrance map %u warp %u at %d,%d kind %u -> %d/%d: got %d/%d %d,%d\n",maps[m],w,wx,wz,destination.kind,destination.map,destination.warp,after.entrance.map,after.entrance.warp,after.entrance.x,after.entrance.z);
                 CHECK(after.entrance.map==(int)maps[m]&&after.entrance.warp==(int)w&&after.entrance.x==wx&&after.entrance.z==wz);
                 CHECK(!hg_transition_commit(transition,&destination));
                 approaches[m][w]=(HGFieldLocation){(int)maps[m],(int)w,wx+ox,wz+oz,(int)d};
@@ -157,6 +162,14 @@ int main(void) {
     CHECK(zone_steps==17&&hg_field_player_pending_map(zone_player)==-1&&hg_field_player_steps(zone_player)==17);
     CHECK(hg_field_player_position(zone_player,&x,&z,NULL)&&x==671&&z==398);
     hg_field_player_free(zone_player);
+    app=hg_field_app_continue_copy("build/checkpoints/155-violet-arrival.sav","/tmp","hg-ladder",error,sizeof(error));CHECK(app);
+    char save_path[256];snprintf(save_path,sizeof(save_path),"%s",hg_field_app_save_path(app));
+    hg_test_portal(app,110);hg_test_travel(app,110,64);
+    hg_test_portal(app,155);hg_test_travel(app,155,64);
+    hg_test_portal(app,110);hg_test_travel(app,110,64);
+    CHECK(!hg_field_app_error(app)[0]);CHECK(hg_field_app_save(app,save_path,error,sizeof(error)));hg_field_app_free(app);
+    app=hg_field_app_continue(save_path,error,sizeof(error));CHECK(app&&hg_field_app_map(app)==110);
+    hg_test_portal(app,155);hg_test_portal(app,110);CHECK(!hg_field_app_error(app)[0]);hg_field_app_free(app);CHECK(!unlink(save_path));
     printf("Original warp kernel: %u portals across %u maps, original anchors/local-field records, staged commit/rejection; app town-house-town round trip with rendered fade, retained running/statistics passed\n",portals,selected_maps);
     return 0;
 }

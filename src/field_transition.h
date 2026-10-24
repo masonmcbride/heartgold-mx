@@ -17,6 +17,8 @@ void hg_transition_free(HGTransition *);
  * 1 selected, 0 no admitted transition. Output is unchanged on failure.
  * Queries never commit local-field state; commit follows successful scene load. */
 int hg_transition_probe(HGTransition *,HGFieldResources *,unsigned direction,HGWarpDestination *);
+/* Original step-completion selector, bounded to downward-ladder tiles. */
+int hg_transition_probe_step(HGTransition *,HGFieldResources *,HGWarpDestination *);
 int hg_transition_commit(HGTransition *,const HGWarpDestination *);
 /* Settled outdoor header change: current position changes, warp history stays. */
 int hg_transition_commit_zone(HGTransition *,unsigned map);

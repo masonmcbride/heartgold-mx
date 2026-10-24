@@ -23,3 +23,6 @@ struct DSThumb {
 /* PC is an even guest instruction address. LR/return_address are Thumb-tagged.
  * Caller supplies stack/arguments; execution never allocates guest memory. */
 DSThumbResult ds_thumb_run(DSThumb *,size_t budget);
+
+/* Named machine leaves shared by original guest islands; 0 means unhandled. */
+int ds_thumb_math_boundary(DSThumb *,const char *);

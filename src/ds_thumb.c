@@ -1,5 +1,8 @@
 #include "ds_thumb.h"
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <time.h>
 static int read_mem(DSThumb *c,uint32_t a,unsigned width,uint32_t *out) {
     const uint8_t *p=ds_translate(&c->memory,a,width);
     if(!p || a%width) { c->fault_address=a;return 0; }
@@ -27,7 +30,7 @@ static int condition(const DSThumb *c,unsigned cond) {
     case 12:return !c->z&&c->n==c->v;case 13:return c->z||c->n!=c->v;
     }return 0;
 }
-DSThumbResult ds_thumb_run(DSThumb *c,size_t budget) {
+static DSThumbResult thumb_run(DSThumb *c,size_t budget) {
     if(!c || !c->memory.ram)return DS_THUMB_BAD_MEMORY;
     c->steps=0;c->fault_address=0;c->fault_instruction=0;
     while(c->steps<budget) {
@@ -157,4 +160,41 @@ DSThumbResult ds_thumb_run(DSThumb *c,size_t budget) {
         } else return DS_THUMB_BAD_INSTRUCTION;
     }
     return DS_THUMB_BUDGET;
+}
+
+#include <limits.h>
+int ds_thumb_math_boundary(DSThumb *cpu,const char *name) {
+    if(!strcmp(name,"_ll_mul")) {
+        uint64_t a=(uint64_t)cpu->r[0]|(uint64_t)cpu->r[1]<<32;
+        uint64_t b=(uint64_t)cpu->r[2]|(uint64_t)cpu->r[3]<<32;
+        uint64_t product=a*b;cpu->r[0]=(uint32_t)product;cpu->r[1]=(uint32_t)(product>>32);return 1;
+    }
+    if(!strcmp(name,"FX_Div")) {
+        /* Explicit synchronous Q32 quotient -> rounded Q12 arithmetic boundary.
+         * SDK/hardware division implementation and timing are not executed. */
+        int64_t numerator=(int64_t)(int32_t)cpu->r[0]*INT64_C(4294967296);
+        int32_t denominator=(int32_t)cpu->r[1];
+        if(!denominator || (numerator==INT64_MIN && denominator==-1))return -1;
+        int64_t quotient=numerator/denominator;
+        if(quotient>INT64_MAX-INT64_C(524288))return -1;
+        quotient+=INT64_C(524288);
+        /* Explicit arithmetic shift, including negative nonmultiples. */
+        int64_t result=quotient/INT64_C(1048576);
+        if(quotient<0 && quotient%INT64_C(1048576))result--;
+        if(result<INT32_MIN || result>INT32_MAX)return -1;
+        cpu->r[0]=(uint32_t)(int32_t)result;return 1;
+    }
+    return 0;
+}
+
+/* Aggregate opt-in timing, outside the instruction loop. No results are cached. */
+static struct {uint64_t calls,steps;double seconds;} thumb_profile;
+static int thumb_profiling=-1;
+static double thumb_clock(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec+t.tv_nsec*1e-9;}
+static void thumb_report(void){fprintf(stderr,"HG_THUMB {\"calls\":%llu,\"steps\":%llu,\"seconds\":%.9f}\n",(unsigned long long)thumb_profile.calls,(unsigned long long)thumb_profile.steps,thumb_profile.seconds);}
+DSThumbResult ds_thumb_run(DSThumb *c,size_t budget){
+    if(thumb_profiling<0){thumb_profiling=getenv("HG_PROFILE_RESOURCES")!=NULL;if(thumb_profiling)atexit(thumb_report);}
+    if(!thumb_profiling)return thumb_run(c,budget);
+    double start=thumb_clock();DSThumbResult result=thumb_run(c,budget);
+    thumb_profile.calls++;thumb_profile.steps+=c->steps;thumb_profile.seconds+=thumb_clock()-start;return result;
 }

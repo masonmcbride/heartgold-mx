@@ -25,6 +25,16 @@ int main(void) {
         DSCamera camera;hg_field_view_camera(follower,&camera,96,96);CHECK(hg_field_view_render(follower,&camera,front,96,96));hg_field_view_free(follower);
     }
     const uint8_t *bytes;size_t size;DSModel model;DSModelStats stats;
+    /* Original mmodel.json.txt stores count + u16 frame plane + two u8 planes.
+     * These control members used to be empty holes in the packaged archive. */
+    for(unsigned member=280;member<=296;member++){
+        CHECK(native_resource_member(NARC_data_mmodel_mmodel,0,member,&bytes,&size)&&size>=4);
+        unsigned count=bytes[0]|(unsigned)bytes[1]<<8|(unsigned)bytes[2]<<16|(unsigned)bytes[3]<<24;
+        CHECK(size==4+(size_t)count*4);
+    }
+    CHECK(native_resource_member(NARC_data_mmodel_mmodel,0,292,&bytes,&size)&&size==40&&bytes[0]==9);
+    const unsigned original_frames[]={0,10,20,25,35,40,50,60,70},original_cells[]={0,1,2,3,2,4,5,6,7};
+    for(unsigned i=0;i<9;i++){CHECK((bytes[4+2*i]|(unsigned)bytes[5+2*i]<<8)==original_frames[i]);CHECK(bytes[22+i]==original_cells[i]&&bytes[31+i]==0);}
     CHECK(native_resource_member(NARC_data_mmodel_mmodel,0,266,&bytes,&size));CHECK(ds_model_open(bytes,size,0,&model));
     CHECK(!ds_model_scene(&model,NULL,NULL,&stats));CHECK(ds_model_inspection_scene(&model,NULL,NULL,&stats) && stats.triangles==2);
     CHECK(native_resource_member(NARC_data_mmodel_mmodel,0,146,&bytes,&size));DSTextureBank bank;CHECK(ds_texture_bank(bytes,size,&bank));

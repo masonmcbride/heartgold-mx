@@ -8,6 +8,13 @@
 #include "motion_guest.h"
 #include "field_events.h"
 #include "field_view.h"
+#include "compat/overlays.h"
+#include "constants/std_script.h"
+#include "constants/trainers.h"
+#define HG_NATIVE_OVY_26 26
+#define FS_OVERLAY_ID(name) HG_NATIVE_##name
+u16 ScriptNumToTrainerNum(u16);
+BOOL TrainerNumIsDouble(u32);
 static HGEventView scene_events(FieldSystem *field) {
     HGEventView events;GF_ASSERT(field&&field->location&&hg_event_load(field->location->mapId,&events));return events;
 }
@@ -39,7 +46,9 @@ static void native_follow_reset(LocalMapObject *object) {
     GF_ASSERT(hg_motion_follow_tick(field->native_scene_resources,field->playerAvatar,object,field->native_follow_session,2,48));
 }
 static void native_follow_change(LocalMapObject *object,u32 movement) {
-    FieldSystem *field=MapObject_GetFieldSystem(object);GF_ASSERT(movement==48||movement==55||movement==56);
+    FieldSystem *field=MapObject_GetFieldSystem(object);
+    if(movement>=14&&movement<=17){GF_ASSERT(hg_motion_actor_reset(object,movement));return;}
+    GF_ASSERT(movement==48||movement==55||movement==56);
     hg_map_object_set_movement(object,movement);
     GF_ASSERT(hg_motion_follow_tick(field->native_scene_resources,field->playerAvatar,object,field->native_follow_session,1,movement));
 }
@@ -77,6 +86,7 @@ static void native_handoff(FieldSystem *field){GF_ASSERT(hg_motion_handoff_begin
 #define ov01_02205AEC native_handoff
 #define CallTask_LeaveOverworld(task) (ctx->fieldSystem->native_field_suspended=TRUE)
 #define PokecenterAnimCreate(field,count) ((field)->native_healing=hg_healing_new(field,count))
+#define FieldSysGetAttrAddr hg_script_attribute
 #include "script_scene_decls.inc"
 #include "script_scene_kernel.inc"
 static const ScrCmdFunc scene_commands[1024]={
@@ -115,6 +125,23 @@ int hg_script_scene_command(ScriptContext *context,unsigned op,BOOL *yielded) {
            (object==PlayerAvatar_GetMapObject(field->playerAvatar)&&hg_field_resources_height(field->native_scene_resources,v[1],v[3],0,(int32_t)v[2]*32768,&height)!=1))return 0;
     }
 
+    if(op==109) {
+        const u8 *p=context->script_ptr;
+        unsigned id=FieldSystem_VarGet(context->fieldSystem,(u16)(p[0]|p[1]<<8));
+        unsigned movement=p[2]|p[3]<<8;
+        LocalMapObject *object=MapObjectManager_GetFirstActiveObjectByID(context->fieldSystem->mapObjectManager,id);
+        if(object){LocalMapObject copy=*object;if(!hg_motion_actor_reset(&copy,movement))return 0;}
+    }
+    if(op==454) {
+        LocalMapObject **last=FieldSysGetAttrAddr(context->fieldSystem,SCRIPTENV_LAST_INTERACTED);
+        if(*last) {
+            unsigned script=MapObject_GetScriptID(*last);
+            if(script<_std_npc_trainer||script>=_std_npc_trainer+LAST_TRAINER_INDEX-FIRST_TRAINER_INDEX||TrainerNumIsDouble(ScriptNumToTrainerNum(script)))return 0;
+            LocalMapObject copy=**last;unsigned facing=MapObject_GetFacingDirection(*last);
+            if(facing>3||!hg_motion_actor_reset(&copy,14+facing))return 0;
+        }
+        if(!hg_overlay_register(HG_NATIVE_OVY_26))return 0;
+    }
     if(op==436&&(!context->fieldSystem->native_fade||context->fieldSystem->native_fade->active||!context->fieldSystem->native_fade->brightness))return 0;
     if(op==188) {
         unsigned flags=context->script_ptr[0]|(unsigned)context->script_ptr[1]<<8;
@@ -129,5 +156,7 @@ int hg_script_scene_command(ScriptContext *context,unsigned op,BOOL *yielded) {
         if(!sprite)return 0;hg_field_view_free(sprite);
     }
     if(op==621&&!context->fieldSystem->mapPropManager)return 0;
-    *yielded=scene_commands[op](context);return 1;
+    *yielded=scene_commands[op](context);
+    if(op==454)GF_ASSERT(hg_overlay_unregister(HG_NATIVE_OVY_26));
+    return 1;
 }

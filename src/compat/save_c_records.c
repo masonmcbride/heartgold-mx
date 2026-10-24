@@ -25,7 +25,6 @@ static void save_box_messages_destroy(MsgData *messages) {
 #undef ReadMsgDataIntoU16Array
 #undef DestroyMsgData
 
-void MI_CpuFill8(void *dest,u8 value,u32 size) { memset(dest,value,size); }
 /* Nitro calendar uses local wall time and an epoch of 2000-01-01. The
  * serialized date stores year 0..99 and weekday Sunday=0. */
 static const HGSaveRTC *rtc_sample;

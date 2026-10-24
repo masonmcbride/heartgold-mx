@@ -15,6 +15,13 @@ static const uint8_t *block(const uint8_t *p, size_t n, const char *magic, const
     }
     return NULL;
 }
+bool ds_palette_open(const uint8_t *data,size_t n,const uint8_t **pixels,size_t *length,unsigned *format,unsigned *extended){
+    if(!data||!pixels||!length||!format||!extended)return false;
+    size_t size;const uint8_t *p=block(data,n,"RLCN","TTLP",&size);if(!p||size<24)return false;
+    unsigned fmt=le32(p+8),ext=le32(p+12);size_t count=le32(p+16),offset=8+(size_t)le32(p+20);
+    if((fmt!=3&&fmt!=4)||ext>1||!count||(count&1)||offset<24||offset>size||count>size-offset)return false;
+    *pixels=p+offset;*length=count;*format=fmt;*extended=ext;return true;
+}
 bool ds_decode_icon(const uint8_t *g,size_t gn,const uint8_t *p,size_t pn,uint8_t out[32*32*4]) {
     size_t gs,ps;
     const uint8_t *gb=block(g,gn,"RGCN","RAHC",&gs), *pb=block(p,pn,"RLCN","TTLP",&ps);

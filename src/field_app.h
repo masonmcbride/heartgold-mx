@@ -74,7 +74,7 @@ int hg_field_app_battle_state(const HGFieldApp *);
 int hg_field_app_battle_mon(const HGFieldApp *,unsigned,HGBattleMonView *);
 int hg_field_app_battle_choose(HGFieldApp *,unsigned);
 
-/* Read-only live field panels: 0 close, 1 Bag, 2 Pokemon. Repeating toggles. */
+/* Live field panels: 0 close, 1 Bag, 2 Pokemon. Repeating toggles. */
 int hg_field_app_inspect(HGFieldApp *,int kind);
 int hg_field_app_inspect_kind(const HGFieldApp *);
 void hg_field_app_inspect_text(HGFieldApp *,char *,size_t);
@@ -96,6 +96,8 @@ unsigned hg_field_app_capture_phase(const HGFieldApp *);
 /* Original cartridge save manager, distinct from development checkpoints. */
 int hg_field_app_save(HGFieldApp *,const char *path,char *,size_t);
 HGFieldApp *hg_field_app_continue(const char *path,char *,size_t);
+/* Fork a prepared cartridge into a separate sandbox file, retaining extras. */
+HGFieldApp *hg_field_app_continue_copy(const char *source,const char *directory,const char *name,char *,size_t);
 const char *hg_field_app_save_path(const HGFieldApp *);
 
 int hg_field_app_save_unlocked(HGFieldApp *);

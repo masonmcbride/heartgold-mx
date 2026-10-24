@@ -55,12 +55,16 @@ static void capture(FieldSystem *field,u32 map,int warp,int x,int z,int directio
 }
 static void native_transition(FieldSystem *field,u32 map,int warp,int x,int z,int direction,int kind) { capture(field,map,warp,x,z,direction,(unsigned)kind); }
 static void native_exit(FieldSystem *field,u32 map,int warp,int x,int z,int direction) { capture(field,map,warp,x,z,direction,0); }
+/* Step probing currently admits downward ladders only. Other branches of the
+ * unchanged selector remain bounded; warp-panel tasks have no host owner yet. */
+static void *native_warp_panel(FieldSystem *field,u32 map,int warp) { (void)map;(void)warp;owner(field)->failed=1;return NULL; }
 #define Save_LocalFieldData_Get native_local
 #define Field_InitMapEvents native_init_events
 #define GetMetatileBehavior native_behavior
 #define sub_020548C0 native_wall
 #define NewFieldTransitionEnvironment native_transition
 #define sub_02055CD8 native_exit
+#define sub_02053E08 native_warp_panel
 #include "transition_kernel.inc"
 HGFieldLocation hg_field_new_game_location(void) {
     Location location;Location_SetToPlayerRoom(&location);
@@ -91,19 +95,24 @@ void hg_transition_free(HGTransition *t) {
     }
     free(t->local);free(t->pending_local);free(t->pending_source);free(t);
 }
-int hg_transition_probe(HGTransition *t,HGFieldResources *resources,unsigned direction,HGWarpDestination *out) {
+static int probe(HGTransition *t,HGFieldResources *resources,unsigned direction,int step,HGWarpDestination *out) {
     if(!t)return 0;t->pending=0;
     if(!resources||direction>3||!out)return 0;t->failed=t->requested=0;t->resources=resources;
     size_t size=Save_LocalFieldData_sizeof();uint8_t saved[size];memcpy(saved,t->local,size);Location before=*t->location;
     t->location->x=(int)PlayerAvatar_GetXCoord(t->field.playerAvatar);t->location->y=(int)PlayerAvatar_GetZCoord(t->field.playerAvatar);
     t->location->direction=(int)PlayerAvatar_GetFacingDirection(t->field.playerAvatar);
     FieldInput input={.transitionDir=(s8)direction};
-    int selected=FieldSystem_CheckMapTransition(&t->field,&input);
+    int selected;
+    if(step){
+        u8 behavior=GetMetatileBehavior(&t->field,t->location->x,t->location->y);
+        selected=!t->failed&&MetatileBehavior_IsLadderDown(behavior)&&FieldSystem_CheckTransition(&t->field,t->location->x,t->location->y,behavior);
+    }else selected=FieldSystem_CheckMapTransition(&t->field,&input);
     int ok=selected&&t->requested&&!t->failed&&hg_transition_supported((unsigned)t->request.map);
     if(ok) {
         HGEventView destination;
         ok=hg_event_load((unsigned)t->request.map,&destination)&&t->request.warp>=0&&(unsigned)t->request.warp<destination.warp_count;
     }
+    if(ok&&step)FieldSystem_TrySetMapConnection(&t->field);
     if(ok) {
         Location next={t->request.map,t->request.warp,t->request.x,t->request.z,t->request.direction};
         sub_02052F94(&t->field,&next);
@@ -116,6 +125,8 @@ int hg_transition_probe(HGTransition *t,HGFieldResources *resources,unsigned dir
     memcpy(t->pending_source,saved,size);t->pending_x=(int)PlayerAvatar_GetXCoord(t->field.playerAvatar);t->pending_z=(int)PlayerAvatar_GetZCoord(t->field.playerAvatar);
     t->pending=1;*out=t->request;return 1;
 }
+int hg_transition_probe(HGTransition *t,HGFieldResources *resources,unsigned direction,HGWarpDestination *out){return probe(t,resources,direction,0,out);}
+int hg_transition_probe_step(HGTransition *t,HGFieldResources *resources,HGWarpDestination *out){return probe(t,resources,0,1,out);}
 int hg_transition_commit(HGTransition *t,const HGWarpDestination *destination) {
     if(!t||!destination||!t->pending||memcmp(destination,&t->request,sizeof(*destination)))return 0;
     if(memcmp(t->local,t->pending_source,Save_LocalFieldData_sizeof())||

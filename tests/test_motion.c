@@ -10,6 +10,26 @@
 static unsigned completions;
 static void completed(LocalMapObject *object) { (void)object;completions++; }
 int main(void) {
+    /* Every admitted static-facing reset uses the original state initializer;
+     * dynamic/type callback owners reject without changing even private bytes. */
+    for(unsigned old=14;old<=17;old++)for(unsigned next=14;next<=17;next++) {
+        LocalMapObject actor={0};actor.movement=old;actor.type=1;
+        actor.currentX=11;actor.currentZ=19;actor.previousX=3;actor.previousZ=4;
+        memset(actor.unkD8,0x5a,sizeof(actor.unkD8));
+        CHECK(hg_motion_actor_reset(&actor,next));
+        CHECK(MapObject_GetMovement(&actor)==next);
+        unsigned facing=99;memcpy(&facing,actor.unkD8,sizeof(facing));
+        CHECK(facing==next-14&&actor.unkD8[4]==0);
+        CHECK(MapObject_GetPreviousXCoord(&actor)==11&&MapObject_GetPreviousZCoord(&actor)==19);
+        LocalMapObject before=actor;
+        CHECK(!hg_motion_actor_reset(&actor,51)&&!memcmp(&actor,&before,sizeof(actor)));
+        actor.type=4;before=actor;
+        CHECK(!hg_motion_actor_reset(&actor,14)&&!memcmp(&actor,&before,sizeof(actor)));
+        actor.type=1;actor.movement=51;before=actor;
+        CHECK(!hg_motion_actor_reset(&actor,14)&&!memcmp(&actor,&before,sizeof(actor)));
+        actor.movement=14;actor.unkC0=completed;before=actor;
+        CHECK(!hg_motion_actor_reset(&actor,14)&&!memcmp(&actor,&before,sizeof(actor)));
+    }
     LocalMapObject object={0};MapObjectManager manager={0};FieldSystem field={0};PlayerSaveData save;
     manager.objects=&object;manager.objectCount=1;manager.fieldSystem=&field;object.manager=&manager;object.movement=1;
     MapObject_SetFlagsBits(&object,MAPOBJECTFLAG_ACTIVE);PlayerSaveData_Init(&save);

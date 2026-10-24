@@ -370,7 +370,7 @@ int hg_field_view_prop_poses(HGFieldView *v,const HGPropPose *poses,unsigned cou
     if(!v||count>16||(!poses&&count))return 0;unsigned matched[16]={0};
     typedef struct { PropGeometry *record;DSRasterTriangle *triangles;int posed; } Update;
     Update updates[2048];unsigned pending=0;int ok=0;
-    struct { unsigned index;DSTexture texture; } textures[4096];unsigned texture_count=0;
+    struct { unsigned index;DSTexture texture;int transformed;double matrix[6]; } textures[4096];unsigned texture_count=0;
     for(unsigned i=0;i<v->prop_count;i++) {
         PropGeometry *r=v->props+i;const DSJointPose *pose=NULL;const HGPropPose *selected=NULL;
         for(unsigned j=0;j<count;j++)if(r->id==poses[j].model &&
@@ -383,12 +383,13 @@ int hg_field_view_prop_poses(HGFieldView *v,const HGPropPose *poses,unsigned cou
             DSModelMaterial material;if(!ds_model_material(&r->model,mat,&material))goto cleanup;
             if(!material.texture[0])continue;char tex[17],pal[17];
             int changed=patterned?ds_texture_animation_frame(&selected->texture,selected->texture_frame,material.name,tex,pal):0;
-            if(changed<0)goto cleanup;DSTexture texture;
+            double matrix[6];int transformed=patterned?ds_texture_animation_matrix(&selected->texture,selected->texture_frame,material.name,material.width,material.height,matrix):0;
+            if(changed<0||transformed<0)goto cleanup;DSTexture texture;
             if(!ds_texture_find(&r->bank,changed?tex:material.texture,changed?pal:material.palette,&texture))goto cleanup;
             unsigned index=r->material_base+mat,at=0;
             for(;at<texture_count;at++)if(textures[at].index==index)break;
-            if(at<texture_count){if(textures[at].texture.texels!=texture.texels||textures[at].texture.palette!=texture.palette)goto cleanup;}
-            else {if(texture_count>=4096)goto cleanup;textures[texture_count].index=index;textures[texture_count++].texture=texture;}
+            if(at<texture_count){if(textures[at].texture.texels!=texture.texels||textures[at].texture.palette!=texture.palette||textures[at].transformed!=transformed||(transformed&&memcmp(textures[at].matrix,matrix,sizeof(matrix))))goto cleanup;}
+            else {if(texture_count>=4096)goto cleanup;textures[texture_count].index=index;textures[texture_count].texture=texture;textures[texture_count].transformed=transformed;if(transformed)memcpy(textures[texture_count].matrix,matrix,sizeof(matrix));texture_count++;}
         }
         if(!pose&&!(r->posed&1)) {
             if(patterned||r->posed)updates[pending++]=(Update){r,NULL,patterned?2:0};
@@ -406,7 +407,7 @@ int hg_field_view_prop_poses(HGFieldView *v,const HGPropPose *poses,unsigned cou
     for(unsigned i=0;i<pending;i++) {
         Update *u=updates+i;if(u->triangles)memcpy(v->triangles+u->record->first,u->triangles,u->record->count*sizeof(*u->triangles));u->record->posed=u->posed;
     }
-    for(unsigned i=0;i<texture_count;i++)v->materials[textures[i].index].texture=textures[i].texture;
+    for(unsigned i=0;i<texture_count;i++){DSRasterMaterial *m=&v->materials[textures[i].index];m->texture=textures[i].texture;m->uv_transform=textures[i].transformed;if(m->uv_transform)memcpy(m->uv_matrix,textures[i].matrix,sizeof(m->uv_matrix));}
     ok=1;
 cleanup:
     for(unsigned i=0;i<pending;i++)free(updates[i].triangles);return ok;

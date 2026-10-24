@@ -58,6 +58,7 @@ static void time_free(void *p) {
 #define Heap_Alloc time_allocate
 #define Heap_AllocAtEnd time_allocate
 #define Heap_Free time_free
+#define FreePhoneBook field_time_FreePhoneBook
 typedef struct { struct { u8 month,day; } birthday; } OSOwnerInfo;
 static s64 OS_GetOwnerRtcOffset(void) { return host_sample->rtc_offset; }
 static void OS_GetMacAddress(u8 *out) { memcpy(out,host_sample->identity,6); }
@@ -189,4 +190,41 @@ unsigned hg_field_time_of_day(FieldSystem *field){return Field_GetTimeOfDay(fiel
 
 void hg_field_time_set_call_trigger(SaveData *save,unsigned trigger){
     GF_ASSERT(save&&trigger<13);GearPhoneRingManager phone={0};phone.savingsData=SaveData_GetPhoneCallPersistentState(save);sub_02092E14(&phone,(u8)trigger,FALSE);
+}
+
+/* Canonical callers lend their owners to the same original time kernel. The
+ * scoped FieldSystem is an ABI view only; no save/phone/contest is constructed,
+ * copied, published or freed here. Failure is reported after restoring bindings. */
+int hg_field_time_update_live(SaveData *save,GearPhoneRingManager *phone,BugContest *contest,
+                             char *error,size_t size) {
+    if(error&&size)error[0]=0;
+    if(!save||!phone||running_time){if(error&&size)snprintf(error,size,"Invalid or reentrant canonical field-time owner");return 0;}
+    HGTimeSample sample={0};
+    GF_RTC_CopyDateTime(&sample.rtc.date,&sample.rtc.time);
+    HGFieldTime borrowed={.phone=phone,.contest=contest};
+    FieldSystem view={0};view.saveData=save;view.phoneRingManager=phone;view.bugContest=contest;
+    FieldSystem *previous_sys=phone->sys;
+    SaveData *previous_phone_save=phone->saveData;
+    SavePokegear *previous_gear=phone->pokegearData;
+    PhoneCallPersistentState *previous_savings=phone->savingsData;
+    const HGSaveRTC *previous_rtc=hg_save_rtc_exchange(&sample.rtc);
+    SaveData *previous_save=hg_save_manager_exchange(save);
+    enter_sample(save,&sample);running_time=&borrowed;time_error=NULL;time_allocation_count=0;
+    phone->sys=&view;phone->saveData=save;phone->pokegearData=SaveData_Pokegear_Get(save);
+    phone->savingsData=SaveData_GetPhoneCallPersistentState(save);
+    int ok=0;
+    if(!setjmp(time_trap)) {
+        if(Save_VarsFlags_CheckBugContestFlag(hg_story_save_vars(save))&&!contest)
+            unsupported("Active Bug-Catching Contest needs its original runtime");
+        FieldSystem_StartBugContestTimer(&view);
+        if(borrowed.forced)unsupported("canonical time-triggered scene requires original script task");
+        ok=1;
+    }
+    for(unsigned i=0;i<time_allocation_count;i++)free(time_allocations[i]);
+    time_allocation_count=0;phone->sys=previous_sys;phone->saveData=previous_phone_save;
+    phone->pokegearData=previous_gear;phone->savingsData=previous_savings;
+    hg_save_manager_exchange(previous_save);hg_save_rtc_exchange(previous_rtc);
+    host_sample=NULL;host_owner=NULL;running_time=NULL;
+    if(!ok&&error&&size)snprintf(error,size,"%s",time_error?time_error:"Canonical field-time failure");
+    return ok;
 }

@@ -1,5 +1,45 @@
 # Original warp decisions and inspection travel
 
+## Downward ladders
+
+Downward ladders now execute the unchanged original step-completion selector
+`FieldSystem_CheckTransition`, rather than relying on the direction-driven
+`FieldSystem_CheckMapTransition` (which intentionally excludes LadderDown).
+The host runs coordinate events first, then the ladder check, then wild encounters,
+matching the original ordering. A completed step triggers descent even when its
+movement key has already been released. Arrival itself does not retrigger descent.
+
+The admitted closure is the LadderDown predicate → original map connection and
+connection-history update → original destination anchor → existing private
+transition transaction → staged fade/scene/actor/follower publication. The
+unchanged `FieldSystem_TrySetMapConnection`/`FieldSystem_SetMapConnection` retain
+original return-location ownership. Other step-triggered transition kinds remain
+outside this admission; warp panels explicitly reject instead of reporting success.
+The host still schedules travel presentation; the original kind-8 task animation
+is not claimed.
+
+`test_transitions` now checks every one of 26 portals across 11 maps, including
+all three Sprout Tower floors. Neighboring ladders can share a destination;
+each ladder assertion checks its actual source tile as well as the destination.
+Every selected portal retains the modified/stale/repeated commit rejection and
+private-state checks. The application scenario copies the gameplay-produced
+Cyndaquil Violet cartridge, walks to Tower 1F/2F and descends, saves/reopens on 1F,
+then uses the ladders again. It never alters the source cartridge or story flags.
+The sanitizer scenario completes with existing original signed-shift UBSan reports.
+Native-window checks render the upper landing and the recovered lower floor in
+ignored `build/evidence/ladder-upper-ui.png` and `ladder-lower-ui.png`.
+
+This proves ladder travel; the ordinary trainer/Nico boundary remains open.
+Reaching 3F through the complete original trainer route is not established by
+these component/transition checks.
+
+## Initial inspection milestone (historical)
+
+The following records the earlier New Bark-only milestone. Broader current
+opening, saving and battle evidence is tracked in `docs/current-work.md` and the
+linked runtime documents; its old pending-work list is historical.
+
+
 The field viewer now supports walking, running and door/stair travel through **New Bark and its seven interiors**. Approach a door and move into it; use the original direction indicated by a stair tile. Selecting one of these eight maps directly also creates an inspection player at its first warp, except New Bark which retains its existing town-center spawn. Other maps remain inspection-only scenes.
 
 The player, running-shoe state, original step-statistics record and native application owner survive travel. The camera resets around the destination, the map list follows the player, and map-list synchronization does not recreate the session. The native host clears held/pending input after travel to prevent an immediate repeat. Travel is choreographed with the original presentation sequence: the field fades to black through the player's own original `FadeWork` (`FadeFunc_00`), the destination scene is installed while the screen is dark, the door/stair sound `SEQ_SE_DP_KAIDAN2` plays once at the exit, and the field fades back in (`FadeFunc_01`). The destination view is prepared before the fade begins, so a refused travel leaves the current scene untouched instead of fading back to an unchanged map. Interaction is reported busy for the whole fade so menus, scripts and tests wait for the animation. North-facing entrance props now open visibly through shared original one-shot
