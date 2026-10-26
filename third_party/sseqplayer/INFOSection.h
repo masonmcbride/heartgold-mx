@@ -25,6 +25,7 @@ template<typename T> struct INFORecord
 struct INFOSection
 {
 	INFORecord<INFOEntrySEQ> SEQrecord;
+	INFORecord<INFOEntryPLAYER> PLAYERrecord;
 	INFORecord<INFOEntryBANK> BANKrecord;
 	INFORecord<INFOEntryWAVEARC> WAVEARCrecord;
 

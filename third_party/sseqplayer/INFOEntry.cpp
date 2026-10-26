@@ -9,7 +9,7 @@
 
 #include "INFOEntry.h"
 
-INFOEntrySEQ::INFOEntrySEQ() : fileID(0), bank(0), vol(0)
+INFOEntrySEQ::INFOEntrySEQ() : fileID(0), bank(0), vol(0), channelPrio(0), playerPrio(0), playerNo(0)
 {
 }
 
@@ -19,11 +19,9 @@ void INFOEntrySEQ::Read(PseudoFile &file)
 	file.ReadLE<uint16_t>(); // unknown
 	this->bank = file.ReadLE<uint16_t>();
 	this->vol = file.ReadLE<uint8_t>();
-	if (!this->vol)
-		this->vol = 0x7F; // Prevents nothing for volume
-	file.ReadLE<uint8_t>(); // cpr
-	file.ReadLE<uint8_t>(); // ppr
-	file.ReadLE<uint8_t>(); // ply
+	this->channelPrio = file.ReadLE<uint8_t>();
+	this->playerPrio = file.ReadLE<uint8_t>();
+	this->playerNo = file.ReadLE<uint8_t>();
 }
 
 INFOEntryBANK::INFOEntryBANK() : fileID(0)
@@ -45,4 +43,9 @@ INFOEntryWAVEARC::INFOEntryWAVEARC() : fileID(0)
 void INFOEntryWAVEARC::Read(PseudoFile &file)
 {
 	this->fileID = file.ReadLE<uint16_t>();
+}
+
+void INFOEntryPLAYER::Read(PseudoFile &file) {
+    seqMax=file.ReadLE<uint8_t>();file.ReadLE<uint8_t>();
+    allocChBitFlag=file.ReadLE<uint16_t>();heapSize=file.ReadLE<uint32_t>();
 }

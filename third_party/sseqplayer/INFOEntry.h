@@ -24,7 +24,7 @@ struct INFOEntrySEQ : INFOEntry
 {
 	uint16_t fileID;
 	uint16_t bank;
-	uint8_t vol;
+	uint8_t vol, channelPrio, playerPrio, playerNo;
 
 	INFOEntrySEQ();
 
@@ -48,4 +48,11 @@ struct INFOEntryWAVEARC : INFOEntry
 	INFOEntryWAVEARC();
 
 	void Read(PseudoFile &file);
+};
+
+// Original SDAT player record; this is immutable archive metadata, not a
+// native replacement for NNSSndPlayer or its sound heap.
+struct INFOEntryPLAYER : INFOEntry {
+    uint8_t seqMax=0;uint16_t allocChBitFlag=0;uint32_t heapSize=0;
+    void Read(PseudoFile &file) override;
 };

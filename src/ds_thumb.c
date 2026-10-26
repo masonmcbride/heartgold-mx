@@ -3,16 +3,50 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
-static int read_mem(DSThumb *c,uint32_t a,unsigned width,uint32_t *out) {
+static int aligned_access(uint32_t a,unsigned width) {
+    return (width==1 || width==2 || width==4) && !(a%width) &&
+           (uint64_t)a+width<=UINT64_C(0x100000000);
+}
+static int device_access(const DSThumb *c,uint32_t a,unsigned width) {
+    if(a<0x04000000u || (uint64_t)a+width>0x05000000u ||
+       (c->memory.region_count && !c->memory.regions))return 0;
+    /* A request crossing an ordinary view's bound is still an invalid RAM
+     * access, even if the device handler happens to recognize its address. */
+    if(c->memory.ram && (size_t)(a-0x02000000u)<c->memory.size)return 0;
+    for(size_t i=0;i<c->memory.region_count;i++) {
+        const DSNativeRegion *r=&c->memory.regions[i];
+        if(r->bytes && r->size && (a>=r->address?
+           (size_t)(a-r->address)<r->size:(uint64_t)r->address-a<width))return 0;
+    }
+    return 1;
+}
+static uint32_t width_mask(unsigned width) {
+    return width==4?UINT32_MAX:(1u<<(8*width))-1;
+}
+static int read_ram(DSThumb *c,uint32_t a,unsigned width,uint32_t *out) {
     const uint8_t *p=ds_translate(&c->memory,a,width);
-    if(!p || a%width) { c->fault_address=a;return 0; }
+    if(!p || !aligned_access(a,width)) { c->fault_address=a;return 0; }
     *out=0;for(unsigned i=0;i<width;i++)*out|=(uint32_t)p[i]<<(8*i);return 1;
 }
+static int read_mem(DSThumb *c,uint32_t a,unsigned width,uint32_t *out) {
+    if(!aligned_access(a,width)) { c->fault_address=a;return 0; }
+    const uint8_t *p=ds_translate(&c->memory,a,width);
+    if(p) { *out=0;for(unsigned i=0;i<width;i++)*out|=(uint32_t)p[i]<<(8*i);return 1; }
+    uint32_t value=0;
+    if(device_access(c,a,width) && c->device_read &&
+       c->device_read(c->device_user,a,width,&value)==1) {
+        *out=value&width_mask(width);return 1;
+    }
+    c->fault_address=a;return 0;
+}
 static int write_mem(DSThumb *c,uint32_t a,unsigned width,uint32_t value) {
-    uint8_t *p=ds_translate(&c->memory,a,width);
-    if(!p || a%width || ((uint64_t)a<c->code_start+(uint64_t)c->code_size &&
+    if(!aligned_access(a,width) || ((uint64_t)a<c->code_start+(uint64_t)c->code_size &&
        (uint64_t)a+width>c->code_start)) { c->fault_address=a;return 0; }
-    for(unsigned i=0;i<width;i++)p[i]=(uint8_t)(value>>(8*i));return 1;
+    uint8_t *p=ds_translate(&c->memory,a,width);
+    if(p) { for(unsigned i=0;i<width;i++)p[i]=(uint8_t)(value>>(8*i));return 1; }
+    if(device_access(c,a,width) && c->device_write &&
+       c->device_write(c->device_user,a,width,value&width_mask(width))==1)return 1;
+    c->fault_address=a;return 0;
 }
 static void nz(DSThumb *c,uint32_t r) { c->n=r>>31;c->z=r==0; }
 static uint32_t add(DSThumb *c,uint32_t a,uint32_t b) {
@@ -42,7 +76,7 @@ static DSThumbResult thumb_run(DSThumb *c,size_t budget) {
             if(handled>0) { if(!(c->r[14]&1))return DS_THUMB_BAD_INSTRUCTION;c->r[15]=c->r[14]&~1u;continue; }
         }
         if(pc<c->code_start || (uint64_t)pc+2>c->code_start+(uint64_t)c->code_size ||
-           !read_mem(c,pc,2,&ins)) { c->fault_address=pc;return DS_THUMB_BAD_MEMORY; }
+           !read_ram(c,pc,2,&ins)) { c->fault_address=pc;return DS_THUMB_BAD_MEMORY; }
         c->steps++;c->fault_instruction=(uint16_t)ins;c->r[15]=pc+2;
         unsigned d=ins&7,s=(ins>>3)&7,t=(ins>>6)&7;uint32_t a,b,r,address;
         if((ins&0xf800)==0x1800) {
@@ -90,6 +124,10 @@ static DSThumbResult thumb_run(DSThumb *c,size_t budget) {
             case 7:{ unsigned shift=b&255;r=a;if(shift) { unsigned n=shift&31;r=n?(a>>n)|(a<<(32-n)):a;c->c=r>>31; }c->r[d]=r;nz(c,r);break; }
             case 5:{ unsigned carry=c->c;uint64_t sum=(uint64_t)a+b+carry;
                 r=(uint32_t)sum;nz(c,r);c->c=(unsigned)(sum>>32);c->v=(~(a^b)&(a^r))>>31;c->r[d]=r;break; }
+            case 6:{ unsigned borrow=1-c->c;uint64_t rhs=(uint64_t)b+borrow;
+                int64_t difference=(int64_t)(int32_t)a-(int64_t)(int32_t)b-borrow;
+                r=(uint32_t)((uint64_t)a-rhs);nz(c,r);c->c=(uint64_t)a>=rhs;
+                c->v=difference<INT32_MIN||difference>INT32_MAX;c->r[d]=r;break; }
             case 9:c->r[d]=sub(c,0,b);break;
             case 10:(void)sub(c,a,b);break;
             case 12:c->r[d]=a|b;nz(c,c->r[d]);break;
@@ -102,7 +140,9 @@ static DSThumbResult thumb_run(DSThumb *c,size_t budget) {
             switch((ins>>8)&3) {
             case 0:c->r[d]=(a+b)&(d==15?~1u:~0u);break;
             case 1:(void)sub(c,a,b);break;
-            case 2:if(d==15)return DS_THUMB_BAD_INSTRUCTION;c->r[d]=b;break;
+            case 2:
+                c->r[d]=d==15?b&~1u:b;
+                break;
             case 3:if(!(b&1) || (ins&7))return DS_THUMB_BAD_INSTRUCTION;if(ins&0x80)c->r[14]=pc+3;c->r[15]=b&~1u;break;
             }
         } else if((ins&0xf800)==0x4800) {
@@ -117,7 +157,7 @@ static DSThumbResult thumb_run(DSThumb *c,size_t budget) {
         } else if((ins&0xff00)==0xb000) {
             unsigned offset=4*(ins&127);c->r[13]+=(ins&128)?0u-offset:offset;
         } else if((ins&0xf800)==0xf000) {
-            if((uint64_t)pc+4>c->code_start+(uint64_t)c->code_size || !read_mem(c,pc+2,2,&r))return DS_THUMB_BAD_MEMORY;
+            if((uint64_t)pc+4>c->code_start+(uint64_t)c->code_size || !read_ram(c,pc+2,2,&r))return DS_THUMB_BAD_MEMORY;
             if((r&0xf800)!=0xf800)return DS_THUMB_BAD_INSTRUCTION;
             int32_t offset=(int32_t)(((ins&2047)<<12)|((r&2047)<<1));
             if(offset&(1<<22))offset-=1<<23;
@@ -164,7 +204,22 @@ static DSThumbResult thumb_run(DSThumb *c,size_t budget) {
 
 #include <limits.h>
 int ds_thumb_math_boundary(DSThumb *cpu,const char *name) {
-    if(!strcmp(name,"_ll_mul")) {
+    if(!strcmp(name,"__aeabi_llsr")){
+        if(cpu->r[2]>=64)return -1;
+        uint64_t value=cpu->r[0]|(uint64_t)cpu->r[1]<<32;
+        value>>=cpu->r[2];
+        cpu->r[0]=(uint32_t)value;
+        cpu->r[1]=(uint32_t)(value>>32);
+        return 1;
+    }
+    if(!strcmp(name,"abs")) {
+        /* C's INT_MIN case has no representable result; reject it before
+         * mutation. SDK frame heaps use bounded power-of-two alignments. */
+        if(cpu->r[0]==0x80000000u)return -1;
+        if(cpu->r[0]&0x80000000u)cpu->r[0]=0u-cpu->r[0];
+        return 1;
+    }
+    if(!strcmp(name,"_ll_mul")||!strcmp(name,"__aeabi_lmul")) {
         uint64_t a=(uint64_t)cpu->r[0]|(uint64_t)cpu->r[1]<<32;
         uint64_t b=(uint64_t)cpu->r[2]|(uint64_t)cpu->r[3]<<32;
         uint64_t product=a*b;cpu->r[0]=(uint32_t)product;cpu->r[1]=(uint32_t)(product>>32);return 1;

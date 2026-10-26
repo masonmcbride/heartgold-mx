@@ -43,3 +43,10 @@ void ReadMsgDataIntoString(MsgData *m,int index,String *s) {
 }
 void DestroyMsgData(MsgData *m) { Heap_Free(m); }
 String *NewString_ReadMsgData(MsgData *m,int index) { String *s=native_string_new();ReadMsgDataIntoString(m,index,s);return s; }
+
+/* Byte-compatible native transport for the original word-fill operation. */
+void MI_CpuFill32(void *destination,u32 value,u32 size){
+    if(!size)return;
+    GF_ASSERT(destination&&!((uintptr_t)destination&3)&&!(size&3));
+    u8 *p=destination;for(u32 i=0;i<size;i++)p[i]=(u8)(value>>(8*(i&3)));
+}

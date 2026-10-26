@@ -2,6 +2,7 @@
 #include "compat/resources.h"
 #include "message_bank_count.inc"
 #include <time.h>
+#include <fcntl.h>
 /* Opt-in aggregate measurements; immutable cache behavior is unchanged. */
 static struct {unsigned requests,loads;size_t bytes;double io,parse;} resource_profile;
 static int resource_profiling=-1;
@@ -9,7 +10,7 @@ static double resource_clock(void){struct timespec t;clock_gettime(CLOCK_MONOTON
 static void resource_profile_report(void){fprintf(stderr,"HG_RESOURCES {\"requests\":%u,\"loads\":%u,\"bytes\":%zu,\"io_seconds\":%.9f,\"parse_seconds\":%.9f}\n",resource_profile.requests,resource_profile.loads,resource_profile.bytes,resource_profile.io,resource_profile.parse);}
 /* Process-lifetime cache. All callers run on the main thread. */
 typedef struct { uint8_t *bytes; DSNarc narc; } Cache;
-static Cache cache[48];
+static Cache cache[51];
 static Cache message_cache[HG_MESSAGE_BANK_COUNT];
 static Cache *resource_archive(int archive,int group) {
     if(resource_profiling<0){resource_profiling=getenv("HG_PROFILE_RESOURCES")!=NULL;if(resource_profiling)atexit(resource_profile_report);}
@@ -19,7 +20,10 @@ static Cache *resource_archive(int archive,int group) {
         if(group<0||group>=HG_MESSAGE_BANK_COUNT)return 0;
         snprintf(message_name,sizeof(message_name),"msg_%04d.narc",group);name=message_name;c=&message_cache[group];
     } else {
-        if(archive==NARC_a_1_0_3) {slot=47;name="field_effects.narc";}
+        if(archive==NARC_a_1_3_9) {slot=50;name="field_texture_animations.narc";}
+        else if(archive==HG_RESOURCE_ORIGINAL_MESSAGES) {slot=49;name="original_messages.narc";}
+        else if(archive==NARC_a_0_6_3) {slot=48;name="field_sprites.narc";}
+        else if(archive==NARC_a_1_0_3) {slot=47;name="field_effects.narc";}
         else if(archive==NARC_a_0_9_2) {slot=46;name="map_object_preload.narc";}
         else if(archive==NARC_a_0_7_0) { slot=45;name="prop_texture.narc"; }
         else if(archive==NARC_a_2_3_0) { slot=44;name="safari_enc.narc"; }
@@ -108,15 +112,28 @@ void NARC_ReadFile(NARC *n,u32 length,void *out) {
     if(length)memcpy(out,n->stream+n->position,length);n->position+=length;
 }
 
+static const char *const resource_file_names[]={"bm_field_matshp.dat","bm_room_matshp.dat","area00light.txt","area01light.txt","area02light.txt","dun20_01light.txt","dun20_02light.txt","clact_default.NANR"};
+int native_resource_file_id(const char *name) {
+    if(!name)return -1;
+    if(!strcmp(name,"sound/gs_sound_data.sdat"))return NELEMS(resource_file_names);
+    for(unsigned i=0;i<NELEMS(resource_file_names);i++)if(!strcmp(name,resource_file_names[i]))return i;
+    return -1;
+}
+int native_resource_file_open(unsigned id) {
+    if(id>NELEMS(resource_file_names))return -1;
+    const char *name=id==NELEMS(resource_file_names)?"gs_sound_data.sdat":resource_file_names[id];
+    char path[4096];if(snprintf(path,sizeof(path),"%s/%s",HG_PACKED_ROOT,name)>=(int)sizeof(path))return -1;
+    return open(path,O_RDONLY|O_CLOEXEC);
+}
+
 int native_resource_file(const char *name,const uint8_t **out,size_t *size) {
-    static struct { uint8_t *bytes;size_t length; } files[2];
-    static const char *const names[]={"bm_field_matshp.dat","bm_room_matshp.dat"};
+    static struct { uint8_t *bytes;size_t length; } files[8];
+
     if(!name || !out || !size)return 0;
-    unsigned slot=NELEMS(names);for(unsigned i=0;i<NELEMS(names);i++)if(!strcmp(name,names[i])){slot=i;break;}
-    if(slot==NELEMS(names))return 0;
+    int slot=native_resource_file_id(name);if(slot<0||slot>=NELEMS(files))return 0;
     uint8_t *bytes=files[slot].bytes;size_t length=files[slot].length;
     if(!bytes) {
-        char path[4096];if(snprintf(path,sizeof(path),"%s/%s",HG_PACKED_ROOT,name)>=(int)sizeof(path))return 0;
+        char path[4096];if(snprintf(path,sizeof(path),"%s/%s",HG_PACKED_ROOT,resource_file_names[slot])>=(int)sizeof(path))return 0;
         FILE *f=fopen(path,"rb");if(!f)return 0;
         if(fseek(f,0,SEEK_END)) { fclose(f);return 0; }long n=ftell(f);
         if(n<4 || n>1024*1024 || fseek(f,0,SEEK_SET)) { fclose(f);return 0; }

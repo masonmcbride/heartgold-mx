@@ -63,3 +63,13 @@ shutil.copyfile(root/"files/a/0/9/2",out/"resources/map_object_preload.narc")
 
 # Original field-effect archive; shared resource cache only.
 shutil.copyfile(root/"files/a/1/0/3",out/"resources/field_effects.narc")
+
+# Byte-identical prebuilt field-light text, including original CRLF delimiters.
+for name in ('area00light.txt','area01light.txt','area02light.txt','dun20_01light.txt','dun20_02light.txt'):
+    write_bytes_if_changed(out/'resources'/name,(root/'files/data'/name).read_bytes())
+
+# Original shared sprite-resource archive and default animation, byte-identical.
+shutil.copyfile(root/'files/a/0/6/3',out/'resources/field_sprites.narc')
+write_bytes_if_changed(out/'resources/clact_default.NANR',(root/'files/data/clact_default.NANR').read_bytes())
+
+shutil.copyfile(root/'files/a/1/3/9',out/'resources/field_texture_animations.narc')

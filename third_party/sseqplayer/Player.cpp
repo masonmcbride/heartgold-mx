@@ -93,39 +93,10 @@ void Player::Stop(bool bKillSound)
 }
 
 // Original FSS Function: Chn_Alloc
-int Player::ChannelAlloc(int type, int priority)
+int Player::ChannelAlloc(int type, int priority, uint16_t mask, bool strong)
 {
-	static const uint8_t pcmChnArray[] = { 4, 5, 6, 7, 2, 0, 3, 1, 8, 9, 10, 11, 14, 12, 15, 13 };
-	static const uint8_t psgChnArray[] = { 8, 9, 10, 11, 12, 13 };
-	static const uint8_t noiseChnArray[] = { 14, 15 };
-	static const uint8_t arraySizes[] = { sizeof(pcmChnArray), sizeof(psgChnArray), sizeof(noiseChnArray) };
-	static const uint8_t *const arrayArray[] = { pcmChnArray, psgChnArray, noiseChnArray };
-
-	auto chnArray = arrayArray[type];
-	int arraySize = arraySizes[type];
-
-	int curChnNo = -1;
-	for (int i = 0; i < arraySize; ++i)
-	{
-		int thisChnNo = chnArray[i];
-		Channel &thisChn = this->channels[thisChnNo];
-		Channel &curChn = this->channels[curChnNo == -1 ? thisChnNo : curChnNo];
-		if (curChnNo != -1 && thisChn.prio >= curChn.prio)
-		{
-			if (thisChn.prio != curChn.prio)
-				continue;
-			if (curChn.vol <= thisChn.vol)
-				continue;
-		}
-		curChnNo = thisChnNo;
-	}
-
-	if (curChnNo == -1 || priority < this->channels[curChnNo].prio)
-		return -1;
-	this->channels[curChnNo].noteLength = -1;
-	this->channels[curChnNo].vol = 0x7FF;
-	this->channels[curChnNo].clearHistory();
-	return curChnNo;
+    if(!channelAllocator)throw std::runtime_error("Missing shared DS sound channel owner");
+    return channelAllocator(this,type,priority,mask,strong);
 }
 
 // Original FSS Function: Track_Alloc

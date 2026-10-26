@@ -26,7 +26,163 @@ static void run(DSThumb *c) {
     CHECK(result==DS_THUMB_RETURN);CHECK(c->steps>0 && c->r[13]==BASE+0xf000);
     for(unsigned i=4;i<=11;i++)CHECK(c->r[i]==0xa0000000+i);
 }
+typedef struct {
+    unsigned reads,writes,width;
+    uint32_t address,value;
+    int handled;
+} Device;
+static int device_read(void *user,uint32_t address,unsigned width,uint32_t *out) {
+    Device *d=user;d->reads++;d->address=address;d->width=width;
+    if(d->handled!=1)return d->handled;
+    if(address!=0x04000008u)return 0;
+    *out=d->value;return 1;
+}
+static int device_write(void *user,uint32_t address,unsigned width,uint32_t value) {
+    Device *d=user;d->writes++;d->address=address;d->width=width;
+    if(d->handled!=1)return d->handled;
+    if(address!=0x04000008u)return 0;
+    d->value=value;return 1;
+}
+static DSThumb device_cpu(unsigned instruction,Device *device) {
+    ram[0]=(uint8_t)instruction;ram[1]=(uint8_t)(instruction>>8);ram[2]=0x70;ram[3]=0x47;
+    DSThumb c=cpu(0);c.code_size=4;c.r[1]=0x04000008u;
+    c.device_read=device_read;c.device_write=device_write;c.device_user=device;return c;
+}
+static void device_tests(void) {
+    /* Synthetic Thumb instructions exercise the shared bus contract without a
+     * renderer, loader import, or fabricated MMIO-backed pointer mapping. */
+    const unsigned loads[]={0x7808,0x8808,0x6808},stores[]={0x7008,0x8008,0x6008};
+    const uint32_t masks[]={0xff,0xffff,UINT32_MAX};
+    for(unsigned i=0;i<3;i++) {
+        Device d={.value=0xfedcba98u,.handled=1};DSThumb c=device_cpu(loads[i],&d);
+        run(&c);CHECK(c.r[0]==(0xfedcba98u&masks[i]));
+        CHECK(d.reads==1 && !d.writes && d.width==(1u<<i) && d.address==0x04000008u);
+        c=device_cpu(stores[i],&d);c.r[0]=0x76543210u;run(&c);
+        CHECK(d.reads==1 && d.writes==1 && d.width==(1u<<i) && d.value==(0x76543210u&masks[i]));
+    }
+    Device d={.value=0xeeee8080u,.handled=1};DSThumb c=device_cpu(0x5688,&d);c.r[2]=0;
+    run(&c);CHECK(c.r[0]==0xffffff80u && d.width==1);
+    c=device_cpu(0x5e88,&d);c.r[2]=0;run(&c);CHECK(c.r[0]==0xffff8080u && d.width==2);
+    for(unsigned write=0;write<2;write++) {
+        for(unsigned i=1;i<3;i++) {
+            d=(Device){.value=0x12345678,.handled=1};c=device_cpu(write?stores[i]:loads[i],&d);c.r[1]++;
+            CHECK(ds_thumb_run(&c,10)==DS_THUMB_BAD_MEMORY && c.fault_address==0x04000009u);
+            CHECK(!d.reads && !d.writes && d.value==0x12345678);
+        }
+        d=(Device){.value=0x12345678};c=device_cpu(write?stores[1]:loads[1],&d);c.r[0]=0x55555555;
+        CHECK(ds_thumb_run(&c,10)==DS_THUMB_BAD_MEMORY && c.fault_address==0x04000008u);
+        CHECK(d.reads==!write && d.writes==write && d.value==0x12345678 && c.r[0]==0x55555555);
+        c=device_cpu(write?stores[1]:loads[1],&d);c.device_read=NULL;c.device_write=NULL;
+        CHECK(ds_thumb_run(&c,10)==DS_THUMB_BAD_MEMORY);
+        CHECK(d.reads==!write && d.writes==write);
+        for(int handled=-1;handled<=2;handled+=3) {
+            d=(Device){.value=0x12345678,.handled=handled};c=device_cpu(write?stores[1]:loads[1],&d);
+            CHECK(ds_thumb_run(&c,10)==DS_THUMB_BAD_MEMORY && d.value==0x12345678);
+        }
+        /* Unmapped RAM, the far I/O bound, and address-space wrap reject before
+         * callbacks. A partial ordinary-memory access cannot become a device. */
+        const uint32_t bad[]={BASE+sizeof(ram)-2,0x05000000u,UINT32_MAX};
+        for(unsigned i=0;i<3;i++) {
+            d=(Device){.handled=1};c=device_cpu(write?stores[2]:loads[2],&d);c.r[1]=bad[i];
+            CHECK(ds_thumb_run(&c,10)==DS_THUMB_BAD_MEMORY && c.fault_address==bad[i]);
+            CHECK(!d.reads && !d.writes);
+        }
+        d=(Device){.handled=1};c=device_cpu(write?stores[2]:loads[2],&d);c.r[1]=BASE+0x1000;
+        put(0x1000,0x12345678);c.r[0]=0x87654321;run(&c);
+        CHECK(!d.reads && !d.writes);
+        CHECK(write?get(0x1000)==0x87654321:c.r[0]==0x12345678);
+    }
+    /* Code remains read-only with hooks, and neither instruction halfword of
+     * a BL instruction may be fetched by a device callback. */
+    d=(Device){.handled=1};c=device_cpu(0x6008,&d);c.r[1]=BASE;
+    CHECK(ds_thumb_run(&c,10)==DS_THUMB_BAD_MEMORY && c.fault_address==BASE && !d.writes);
+    c=device_cpu(0x6008,&d);c.code_start=0x04000008u;c.code_size=4;c.r[15]=c.code_start;
+    CHECK(ds_thumb_run(&c,10)==DS_THUMB_BAD_MEMORY && !d.reads);
+    ram[sizeof(ram)-2]=0;ram[sizeof(ram)-1]=0xf0;
+    c=device_cpu(0x6008,&d);c.code_start=BASE+sizeof(ram)-2;c.code_size=4;c.r[15]=c.code_start;
+    CHECK(ds_thumb_run(&c,10)==DS_THUMB_BAD_MEMORY && !d.reads);
+    /* Explicit RAM views keep their existing bounded semantics; adding device
+     * dispatch does not redirect a compatible mapped view to a callback. */
+    uint8_t bytes[]={0x34,0x12};DSNativeRegion view={.address=0x04000008u,.bytes=bytes,.size=sizeof(bytes)};
+    c=device_cpu(0x8808,&d);c.memory.regions=&view;c.memory.region_count=1;run(&c);
+    CHECK(c.r[0]==0x1234 && !d.reads);
+    c=device_cpu(0x8008,&d);c.memory.regions=&view;c.memory.region_count=1;c.r[0]=0xaabbccdd;run(&c);
+    CHECK(bytes[0]==0xdd && bytes[1]==0xcc && !d.writes);
+    c=device_cpu(0x6808,&d);c.memory.regions=&view;c.memory.region_count=1;
+    CHECK(ds_thumb_run(&c,10)==DS_THUMB_BAD_MEMORY && !d.reads);
+    c=device_cpu(0x6008,&d);c.memory.regions=&view;c.memory.region_count=1;
+    CHECK(ds_thumb_run(&c,10)==DS_THUMB_BAD_MEMORY && !d.writes && bytes[0]==0xdd && bytes[1]==0xcc);
+}
+static void compiler_multiply_tests(void) {
+    const uint64_t vectors[][3]={
+        {0,UINT64_MAX,0},{1,UINT64_MAX,UINT64_MAX},
+        {UINT64_MAX,2,UINT64_MAX-1},
+        {0xffffffffULL,0xffffffffULL,0xfffffffe00000001ULL},
+        {0x100000000ULL,0x100000000ULL,0},
+        {0x8000000000000000ULL,3,0x8000000000000000ULL},
+        {0x100000001ULL,0x100000001ULL,0x200000001ULL}
+    };
+    for(unsigned i=0;i<sizeof(vectors)/sizeof(vectors[0]);i++) {
+        DSThumb c=cpu(0);
+        c.r[0]=vectors[i][0];c.r[1]=vectors[i][0]>>32;
+        c.r[2]=vectors[i][1];c.r[3]=vectors[i][1]>>32;
+        CHECK(ds_thumb_math_boundary(&c,"__aeabi_lmul")==1);
+        CHECK((c.r[0]|(uint64_t)c.r[1]<<32)==vectors[i][2]);
+    }
+}
+static void compiler_shift_tests(void) {
+    const uint64_t results[]={0x8000000100000001ULL,0x4000000080000000ULL,
+        0x100000002ULL,0x80000001ULL,1};
+    const unsigned counts[]={0,1,31,32,63};
+    for(unsigned i=0;i<5;i++) {
+        DSThumb c=cpu(0);c.r[0]=1;c.r[1]=0x80000001;c.r[2]=counts[i];
+        CHECK(ds_thumb_math_boundary(&c,"__aeabi_llsr")==1);
+        CHECK((c.r[0]|(uint64_t)c.r[1]<<32)==results[i]);
+    }
+    DSThumb c=cpu(0);c.r[0]=1;c.r[1]=2;c.r[2]=64;
+    CHECK(ds_thumb_math_boundary(&c,"__aeabi_llsr")==-1&&c.r[0]==1&&c.r[1]==2);
+}
+static void high_register_pc_tests(void) {
+    /* ARM7 Thumb MOV to PC stays in Thumb state and ignores target bit zero;
+     * it neither performs BX interworking nor updates the condition flags. */
+    for(unsigned odd=0;odd<2;odd++) {
+        memset(ram,0xff,16);
+        ram[0]=0x87;ram[1]=0x46; /* MOV pc,r0 */
+        ram[8]=0x70;ram[9]=0x47; /* BX lr */
+        DSThumb c=cpu(0);c.code_size=16;c.r[0]=BASE+8+odd;
+        c.n=1;c.z=0;c.c=1;c.v=1;
+        run(&c);
+        CHECK(c.steps==2&&c.n==1&&!c.z&&c.c==1&&c.v==1);
+        CHECK(c.r[0]==BASE+8+odd);
+    }
+    ram[0]=0xff;ram[1]=0x46; /* MOV pc,pc uses the pipelined PC + 4 */
+    ram[4]=0x70;ram[5]=0x47;
+    DSThumb c=cpu(0);c.code_size=16;run(&c);CHECK(c.steps==2);
+    ram[0]=0xf7;ram[1]=0x46; /* MOV pc,lr can return without BX */
+    c=cpu(0);c.code_size=16;run(&c);CHECK(c.steps==1);
+}
 int main(void) {
+    device_tests();
+    high_register_pc_tests();
+    compiler_multiply_tests();
+    compiler_shift_tests();
+    const uint32_t arithmetic[]={0,1,0x7fffffff,0x80000000u,0xfffffffeu,0xffffffffu};
+    for(unsigned i=0;i<6;i++)for(unsigned j=0;j<6;j++)for(unsigned carry=0;carry<2;carry++){
+        /* SBC r0,r1; bx lr. Independent signed/unsigned mathematical results. */
+        ram[0]=0x88;ram[1]=0x41;ram[2]=0x70;ram[3]=0x47;
+        DSThumb subc=cpu(0);subc.code_size=4;subc.r[0]=arithmetic[i];subc.r[1]=arithmetic[j];subc.c=carry;
+        int64_t signed_result=(int64_t)(int32_t)arithmetic[i]-(int32_t)arithmetic[j]-(1-carry);
+        int64_t unsigned_result=(int64_t)arithmetic[i]-arithmetic[j]-(1-carry);
+        run(&subc);CHECK(subc.r[0]==(uint32_t)unsigned_result);
+        CHECK(subc.c==(unsigned_result>=0));CHECK(subc.v==(signed_result<INT32_MIN||signed_result>INT32_MAX));
+        CHECK(subc.n==(subc.r[0]>>31)&&subc.z==(subc.r[0]==0));
+    }
+    for(unsigned i=0;i<6;i++){
+        DSThumb arithmetic_cpu={0};arithmetic_cpu.r[0]=arithmetic[i];
+        int status=ds_thumb_math_boundary(&arithmetic_cpu,"abs");
+        if(arithmetic[i]==0x80000000u){CHECK(status==-1&&arithmetic_cpu.r[0]==arithmetic[i]);}
+        else {int64_t value=(int32_t)arithmetic[i];CHECK(status==1&&arithmetic_cpu.r[0]==(uint32_t)(value<0?-value:value));}
+    }
     /* Register shifts use the low eight count bits and preserve V; edge
      * counts differ from immediate shifts and from native C shift rules. */
     const unsigned ops[]={2,3,4},counts[]={0,1,31,32,33,255,256};

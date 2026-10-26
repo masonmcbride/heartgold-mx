@@ -8,7 +8,7 @@ def assemble(raw,root,out,cc,stem,prefix,include_dirs=(),data_imports=()):
     text=subprocess.check_output([str(cc),'-E','-P','-DPM_ASM','-x','assembler-with-cpp','-I'+str(out),'-I'+str(root/'include'),'-I'+str(root/'files'),*('-I'+str(p) for p in include_dirs),str(source)],text=True)
     lines=['.syntax unified','.cpu arm946e-s','.thumb'];compiler_syntax=False
     for line in text.splitlines():
-     line=line.split(';')[0].strip()
+     line=(line if compiler_syntax else line.split(';')[0]).strip()
      if line=='.set hg_compiler_syntax, 1':compiler_syntax=True;continue
      if line=='.set hg_compiler_syntax, 0':compiler_syntax=False;continue
      if not line or line.startswith(('#','.include','thumb_func_end')):continue
@@ -45,12 +45,35 @@ def assemble(raw,root,out,cc,stem,prefix,include_dirs=(),data_imports=()):
      if (info&15)==2 and index in bases and index!=text_index:
       raise ValueError(('guest function outside executable section',string(symstrings,name)))
      symbols.append((string(symstrings,name),value,index))
-    imports={name:0x02100000+4*i for i,name in enumerate(sorted({n for n,v,idx in symbols if idx==0 and n}))}
+    # HG_LINKER_OVERLAY_IDS: linker-generated integer constants.
+    overlay_names=re.findall(
+     r'^Overlay[ \t]+([A-Za-z_]\w*)[ \t]*$',
+     (root/'main.lsf').read_text(),re.M)
+    if not overlay_names or len(set(overlay_names))!=len(overlay_names):
+     raise ValueError('invalid original overlay specification')
+    for number,overlay_name in enumerate(overlay_names):
+     match=re.fullmatch(r'OVY_(\d+)',overlay_name)
+     if match and int(match[1])!=number:
+      raise ValueError(('overlay ID/order mismatch',overlay_name,number))
+    overlay_values={'SDK_OVERLAY_'+name+'_ID':number
+                    for number,name in enumerate(overlay_names)}
+    undefined={n for n,v,idx in symbols if idx==0 and n}
+    overlay_refs={n for n in undefined
+                  if n.startswith('SDK_OVERLAY_') and n.endswith('_ID')}
+    unknown=overlay_refs-overlay_values.keys()
+    if unknown:
+     raise ValueError(('unknown original overlay IDs',sorted(unknown)))
+    imports={name:0x02100000+4*i
+             for i,name in enumerate(sorted(undefined-overlay_refs))}
+    if imports and base+len(image)>min(imports.values()):
+     raise ValueError(('guest image overlaps import identities',len(image),min(imports.values())))
     if set(data_imports)-imports.keys():raise ValueError(('undefined guest data imports',sorted(set(data_imports)-imports.keys())))
     def address(sym):
      name,value,index=sym
      if index in bases:return base+bases[index]+value
-     if index==0:return imports[name]+(name not in data_imports)
+     if index==0:
+      if name in overlay_refs:return overlay_values[name]
+      return imports[name]+(name not in data_imports)
      if index==0xfff1:return value
      raise ValueError(('unmapped symbol',sym))
     for section in sections:
@@ -66,7 +89,7 @@ def assemble(raw,root,out,cc,stem,prefix,include_dirs=(),data_imports=()):
       else:raise ValueError(('unsupported relocation',kind))
     header=['/* Original assembled bytes: generated build-local. */',f'static const unsigned char {prefix.lower()}_image[] = {{',','.join(map(str,image)),'};',f'#define {prefix}_CODE_SIZE {code_size}u']
     for name,value,index in symbols:
-     if index in bases and name and not name.startswith('$'):header.append(f'#define {prefix}_{name} {address((name,value,index))&~1}u')
+     if index in bases and re.fullmatch(r'[A-Za-z_]\w*',name):header.append(f'#define {prefix}_{name} {address((name,value,index))&~1}u')
     header += [f'#define {prefix}_IMPORT_{n} {imports[n]}u' for n in sorted(data_imports)]
     header += [f'static const struct {{ unsigned address;const char *name; }} {prefix.lower()}_imports[] = {{']
     header += [f'{{{a}u,"{n}"}},' for n,a in imports.items()];header+=['};']

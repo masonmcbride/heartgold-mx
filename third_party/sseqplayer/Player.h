@@ -39,7 +39,11 @@ struct Player
 	void ClearState();
 	void FreeTracks();
 	void Stop(bool bKillSound);
-	int ChannelAlloc(int type, int prio);
+	int ChannelAlloc(int type, int prio, uint16_t mask=0xffff, bool strong=false);
+	// Optional shared DS physical-channel owner supplied by ds_audio.
+	std::function<int(Player *,int,int,uint16_t,bool)> channelAllocator;
+	uint16_t startChannelMask=0xffff;
+	bool startChannelMaskEnabled=false;
 	int TrackAlloc();
 	void Run();
 	void UpdateTracks();

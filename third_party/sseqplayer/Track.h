@@ -56,6 +56,8 @@ struct Track
 
 	std::bitset<TS_BITS> state;
 	uint8_t num, prio;
+	uint16_t channelMask=0xffff;
+	bool channelMaskEnabled=false;
 	Player *ply;
 
 	const uint8_t *startPos;

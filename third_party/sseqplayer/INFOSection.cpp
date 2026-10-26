@@ -30,7 +30,7 @@ template<typename T> void INFORecord<T>::Read(PseudoFile &file, uint32_t startOf
 		}
 }
 
-INFOSection::INFOSection() : SEQrecord(), BANKrecord(), WAVEARCrecord()
+INFOSection::INFOSection() : SEQrecord(), PLAYERrecord(), BANKrecord(), WAVEARCrecord()
 {
 }
 
@@ -59,4 +59,8 @@ void INFOSection::Read(PseudoFile &file)
 		file.pos = startOfINFO + recordOffsets[REC_WAVEARC];
 		this->WAVEARCrecord.Read(file, startOfINFO);
 	}
+    if(recordOffsets[REC_PLAYER]) {
+        file.pos=startOfINFO+recordOffsets[REC_PLAYER];
+        PLAYERrecord.Read(file,startOfINFO);
+    }
 }

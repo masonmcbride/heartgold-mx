@@ -20,7 +20,7 @@ file(GLOB HG_MESSAGE_INDEX_INPUTS CONFIGURE_DEPENDS "${HG_UPSTREAM}/files/msgdat
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${HG_MESSAGE_INDEX_INPUTS})
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare.py" "${HG_UPSTREAM}" "${GEN}" COMMAND_ERROR_IS_FATAL ANY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HG_UPSTREAM}/src/item.c" "${HG_UPSTREAM}/files/itemtool/itemdata/item_data.csv" "${HG_UPSTREAM}/files/itemtool/itemdata/item_data.txt" "${CMAKE_SOURCE_DIR}/scripts/prepare.py")
-# Locally authored SDK scalar interface; no proprietary SDK headers/libraries.
+# Native scalar interface. Original guest 2D code below uses pinned build-local SDK inputs.
 add_library(hg_sdk_types INTERFACE)
 target_include_directories(hg_sdk_types INTERFACE "${CMAKE_SOURCE_DIR}/src/compat/include")
 add_library(hg_logic STATIC "${HG_UPSTREAM}/src/item.c" "${HG_UPSTREAM}/src/bag.c" src/compat/runtime.c src/compat/native_heap.c src/compat/menu.c src/compat/resources.c src/demo_bridge.c "${HG_UPSTREAM}/src/list_menu.c")
@@ -40,6 +40,9 @@ option(HG_OPTIMIZE_RASTER "Optimize native CPU raster and texture sampling" ON)
 if(HG_OPTIMIZE_RASTER)
   set_property(SOURCE src/ds_raster.c src/ds_texture.c APPEND PROPERTY COMPILE_OPTIONS -O2)
 endif()
+add_executable(test_ds_mapping tests/test_ds_mapping.c)
+target_include_directories(test_ds_mapping PRIVATE src)
+add_test(NAME ds_memory_correspondence COMMAND test_ds_mapping)
 add_executable(test_platform tests/test_platform.c)
 target_link_libraries(test_platform PRIVATE ds_platform)
 add_test(NAME ds_platform COMMAND test_platform)
@@ -123,6 +126,8 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${MATRIX_INPUTS}
  "${HG_UPSTREAM}/files/fielddata/mapmatrix/map_matrix/meson.build"
  "${HG_UPSTREAM}/files/fielddata/eventdata/zone_event/meson.build"
  "${HG_UPSTREAM}/files/fielddata/script/scr_seq/meson.build"
+ "${HG_UPSTREAM}/files/data/area00light.txt" "${HG_UPSTREAM}/files/data/area01light.txt"
+ "${HG_UPSTREAM}/files/data/area02light.txt" "${HG_UPSTREAM}/files/data/dun20_01light.txt" "${HG_UPSTREAM}/files/data/dun20_02light.txt"
  "${HG_UPSTREAM}/files/msgdata/NARC_msg.txt"
  "${HG_UPSTREAM}/files/fielddata/encountdata/gs_enc_data.json")
 add_library(hg_field STATIC "${HG_UPSTREAM}/src/map_matrix.c" "${HG_UPSTREAM}/src/map_header.c" "${HG_UPSTREAM}/src/metatile_behavior.c" src/compat/field.c src/land_data.c src/field_preview.c)
@@ -224,7 +229,15 @@ target_include_directories(test_original_field_owner PRIVATE "${GEN}")
 target_compile_definitions(test_original_field_owner PRIVATE POKEHEARTGOLD_SCRIPT_MANAGER_H)
 target_compile_options(test_original_field_owner PRIVATE "SHELL:-include \"${GEN}/original_field_owner.h\"")
 add_test(NAME original_field_owner_mechanisms COMMAND test_original_field_owner)
-execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_field_loader.py" "${HG_UPSTREAM}" "${GEN}" "${CMAKE_C_COMPILER}" COMMAND_ERROR_IS_FATAL ANY)
+# These are upstream's existing pinned dependencies, read only for original
+# guest software code/layouts; never linked into the native scalar interface.
+set(HG_NITROSDK "${CMAKE_SOURCE_DIR}/build/evidence/weather/NitroSDK" CACHE PATH "Pinned upstream NitroSDK source, build-local")
+set(HG_NITROSYSTEM "${CMAKE_SOURCE_DIR}/build/evidence/weather/NitroSystem" CACHE PATH "Pinned upstream NitroSystem source, build-local")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${CMAKE_SOURCE_DIR}/scripts/prepare_original_2d.py" "${CMAKE_SOURCE_DIR}/scripts/prepare_original_2d_sdk.py"
+  "${CMAKE_SOURCE_DIR}/scripts/prepare_original_sound.py"
+  "${HG_UPSTREAM}/files/a/0/6/3" "${HG_UPSTREAM}/files/data/clact_default.NANR" "${HG_UPSTREAM}/files/a/1/3/9")
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_field_loader.py" "${HG_UPSTREAM}" "${GEN}" "${CMAKE_C_COMPILER}" "${HG_NITROSDK}" "${HG_NITROSYSTEM}" COMMAND_ERROR_IS_FATAL ANY)
 include("${GEN}/original_loader_dependencies.cmake")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
   "${CMAKE_SOURCE_DIR}/scripts/prepare_field_loader.py" "${CMAKE_SOURCE_DIR}/scripts/guest_assembly.py"
@@ -242,10 +255,14 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 add_executable(test_original_field_constructor tests/test_original_field_constructor.c src/compat/original_loader.c "${HG_UPSTREAM}/src/task.c" "${HG_UPSTREAM}/src/field/field_3d_object_task.c")
 target_compile_options(test_original_field_constructor PRIVATE "SHELL:-include \"${GEN}/original_field_task_names.h\"" "SHELL:-include \"${GEN}/original_field_owner.h\"")
 target_link_libraries(test_original_field_constructor PRIVATE hg_overlays)
+target_compile_definitions(test_original_field_constructor PRIVATE HG_LOADER_TEST_HOOKS)
 target_compile_definitions(test_original_field_constructor PRIVATE POKEHEARTGOLD_SCRIPT_MANAGER_H MI_CpuClear32=MI_CpuClear8)
 target_include_directories(test_original_field_constructor PRIVATE "${GEN}")
 target_compile_definitions(test_original_field_constructor PRIVATE HG_ORIGINAL_SCRIPT_VM="${HG_UPSTREAM}/src/script.c")
 add_test(NAME original_field_construction COMMAND test_original_field_constructor)
+add_test(NAME original_sound_owners COMMAND test_original_field_constructor --sound-owners)
+add_test(NAME original_sound_commands COMMAND test_original_field_constructor --sound-commands)
+add_test(NAME original_loader_files COMMAND test_original_field_constructor --files)
 add_library(hg_field_app STATIC src/field_app.c src/field_menu.c src/story_checkpoints.c)
 target_link_libraries(hg_field_app PUBLIC hg_field_view PRIVATE hg_overlays)
 target_link_libraries(heartgold_field_viewer PRIVATE hg_field_app)
@@ -389,6 +406,10 @@ foreach(HG_AUDIT_TARGET IN LISTS HG_AUDIT_TARGETS)
   endif()
 endforeach()
 
+set(HG_YYJSON "${CMAKE_SOURCE_DIR}/build/evidence/weather/yyjson-0.12.0" CACHE PATH "Upstream-pinned yyjson with packagefile patches for original msgenc")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS scripts/prepare_original_messages.py scripts/prepare_original_field_windows.py)
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_original_messages.py" "${HG_UPSTREAM}" "${GEN}" "${CMAKE_C_COMPILER}" "${HG_YYJSON}" COMMAND_ERROR_IS_FATAL ANY)
+include("${GEN}/original_message_inputs.cmake")
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/prepare_pokemon.py" "${HG_UPSTREAM}" "${GEN}" "${CMAKE_C_COMPILER}" COMMAND_ERROR_IS_FATAL ANY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/scripts/prepare_pokemon.py"
   "${HG_UPSTREAM}/src/pokemon.c" "${HG_UPSTREAM}/src/party.c" "${HG_UPSTREAM}/src/pm_string.c"
@@ -499,7 +520,7 @@ add_test(NAME original_phone_application COMMAND test_phone)
 set(CMAKE_CXX_STANDARD 17)
 file(GLOB SSEQPLAYER_SOURCES CONFIGURE_DEPENDS "third_party/sseqplayer/*.cpp")
 add_library(ds_audio STATIC src/ds_audio.cpp src/ds_audio_output.c ${SSEQPLAYER_SOURCES})
-target_include_directories(ds_audio PUBLIC src PRIVATE third_party/sseqplayer)
+target_include_directories(ds_audio PUBLIC src PRIVATE third_party/sseqplayer "${GEN}")
 configure_file("${HG_UPSTREAM}/files/data/sound/gs_sound_data.sdat" "${GEN}/resources/gs_sound_data.sdat" COPYONLY)
 target_compile_definitions(ds_audio PRIVATE HG_SOUND_ARCHIVE="${GEN}/resources/gs_sound_data.sdat")
 target_link_libraries(ds_audio PUBLIC "-framework AudioToolbox")
@@ -509,6 +530,10 @@ target_compile_options(ds_audio PRIVATE -O2)
 add_executable(test_audio tests/test_audio.c)
 target_link_libraries(test_audio PRIVATE ds_audio)
 add_test(NAME original_sound_archive COMMAND test_audio)
+add_executable(test_sound_channels tests/test_sound_channels.cpp)
+target_link_libraries(test_sound_channels PRIVATE ds_audio)
+target_include_directories(test_sound_channels PRIVATE "${GEN}")
+add_test(NAME original_sound_channels COMMAND test_sound_channels)
 add_executable(heartgold_audio src/audio_main.c)
 target_link_libraries(heartgold_audio PRIVATE ds_audio)
 add_executable(test_audio_script tests/test_audio_script.c)

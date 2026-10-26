@@ -67,6 +67,8 @@ void Track::ClearState()
 	this->state.set(TS_ALLOCBIT);
 	this->state.set(TS_NOTEWAIT);
 	this->prio = this->ply->prio + 64;
+	this->channelMask = this->ply->startChannelMask;
+	this->channelMaskEnabled = this->ply->startChannelMaskEnabled;
 
 	this->pos = this->startPos;
 	this->stackPos = 0;
@@ -153,7 +155,7 @@ int Track::NoteOn(int key, int vel, int len)
 			noteDef = &instrument.ranges[0];
 		if (fRecord == 3)
 		{
-			nCh = this->ply->ChannelAlloc(TYPE_NOISE, this->prio);
+			nCh = this->ply->ChannelAlloc(TYPE_NOISE, this->prio, this->channelMask, this->channelMaskEnabled);
 			if (nCh < 0)
 				return -1;
 			chn = &this->ply->channels[nCh];
@@ -161,7 +163,7 @@ int Track::NoteOn(int key, int vel, int len)
 		}
 		else
 		{
-			nCh = this->ply->ChannelAlloc(TYPE_PSG, this->prio);
+			nCh = this->ply->ChannelAlloc(TYPE_PSG, this->prio, this->channelMask, this->channelMaskEnabled);
 			if (nCh < 0)
 				return -1;
 			chn = &this->ply->channels[nCh];
@@ -174,7 +176,7 @@ int Track::NoteOn(int key, int vel, int len)
 
 	if (bIsPCM)
 	{
-		nCh = this->ply->ChannelAlloc(TYPE_PCM, this->prio);
+		nCh = this->ply->ChannelAlloc(TYPE_PCM, this->prio, this->channelMask, this->channelMaskEnabled);
 		if (nCh < 0)
 			return -1;
 		chn = &this->ply->channels[nCh];

@@ -1,3 +1,4 @@
+#include <string.h>
 #include "ds_raster.h"
 #include <stdlib.h>
 #include <math.h>
@@ -42,8 +43,39 @@ static int paint(const Triangle *t,const DSRasterMaterial *m,uint8_t *rgba,doubl
     }
     return 1;
 }
+/* Convert original Q12 SDK arguments at the graphics boundary. These double
+ * matrices are renderer inputs, not claims of bit-exact SDK matrix rounding. */
+static int unit(double v[3]){double n=sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);if(!isfinite(n)||n==0)return 0;for(unsigned i=0;i<3;i++)v[i]/=n;return 1;}
+static void cross(const double a[3],const double b[3],double c[3]){double v[]={a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]};memcpy(c,v,sizeof(v));}
+int ds_camera_look_at(DSCamera *c,const int32_t eye[3],const int32_t up[3],const int32_t target[3]){
+    if(!c||!eye||!up||!target)return 0;double z[3],u[3],x[3],y[3];
+    for(unsigned i=0;i<3;i++){z[i]=((double)eye[i]-target[i])/4096;u[i]=up[i]/4096.0;}
+    if(!unit(z))return 0;cross(u,z,x);if(!unit(x))return 0;cross(z,x,y);
+    DSTransform view=ds_transform_identity();const double *rows[]={x,y,z};
+    for(unsigned i=0;i<3;i++){view.m[4*i+3]=0;for(unsigned j=0;j<3;j++){view.m[4*i+j]=rows[i][j];view.m[4*i+3]-=rows[i][j]*eye[j]/4096.0;}}
+    c->view=view;return 1;
+}
+int ds_camera_perspective(DSCamera *c,const int32_t a[5]){
+    if(!c||!a||a[0]<=0||a[1]<=0||a[2]<=0||a[3]<=0||a[4]<=a[3])return 0;
+    double cot=(double)a[1]/a[0],aspect=a[2]/4096.0,n=a[3]/4096.0,f=a[4]/4096.0;
+    double p[16]={cot/aspect,0,0,0,0,cot,0,0,0,0,-(f+n)/(f-n),-2*f*n/(f-n),0,0,-1,0};
+    memcpy(c->projection,p,sizeof(p));c->projection_kind=1;return 1;
+}
+int ds_camera_ortho(DSCamera *c,const int32_t a[6]){
+    if(!c||!a||a[0]<=a[1]||a[3]<=a[2]||a[5]<=a[4])return 0;
+    double t=a[0]/4096.0,b=a[1]/4096.0,l=a[2]/4096.0,r=a[3]/4096.0,n=a[4]/4096.0,f=a[5]/4096.0;
+    double p[16]={2/(r-l),0,0,-(r+l)/(r-l),0,2/(t-b),0,-(t+b)/(t-b),0,0,-2/(f-n),-(f+n)/(f-n),0,0,0,1};
+    memcpy(c->projection,p,sizeof(p));c->projection_kind=2;return 1;
+}
 int ds_raster_project(const DSCamera *camera,const double world[3],unsigned w,unsigned h,double screen[3]) {
     if(!camera||!world||!screen||!w||!h)return 0;
+    if(camera->projection_kind){
+        double v[3];ds_transform_point(&camera->view,world[0],world[1],world[2],v,v+1,v+2);
+        double clip[4]={0};for(unsigned r=0;r<4;r++)for(unsigned j=0;j<4;j++)clip[r]+=camera->projection[4*r+j]*(j==3?1:v[j]);
+        if(!isfinite(clip[3])||clip[3]<=0)return 0;
+        for(unsigned j=0;j<3;j++)if(!isfinite(clip[j])||fabs(clip[j])>clip[3]+1e-9)return 0;
+        screen[0]=(clip[0]/clip[3]+1)*w/2;screen[1]=(1-clip[1]/clip[3])*h/2;screen[2]=-clip[2]/clip[3];return 1;
+    }
     const double fields[]={camera->yaw,camera->pitch,camera->scale,camera->x,camera->y,camera->z,camera->pan_x,camera->pan_y,world[0],world[1],world[2]};
     for(unsigned i=0;i<11;i++)if(!isfinite(fields[i]))return 0;
     if(camera->scale<=0||camera->scale>1000)return 0;
@@ -57,7 +89,7 @@ int ds_raster_project(const DSCamera *camera,const double world[3],unsigned w,un
 int ds_raster_draw(const DSRasterTriangle *src,size_t count,const DSRasterMaterial *materials,size_t material_count,const DSCamera *camera,uint8_t *rgba,unsigned w,unsigned h) {
     if(!src || !count || count>1000000 || !materials || !material_count || !camera || !rgba || !w || !h || w>2048 || h>2048)return 0;
     const double fields[]={camera->yaw,camera->pitch,camera->scale,camera->x,camera->y,camera->z,camera->pan_x,camera->pan_y};for(unsigned i=0;i<8;i++)if(!isfinite(fields[i]))return 0;
-    if(camera->scale<=0 || camera->scale>1000 || fabs(camera->pan_x)>100000 || fabs(camera->pan_y)>100000)return 0;
+    if(!camera->projection_kind&&(camera->scale<=0 || camera->scale>1000 || fabs(camera->pan_x)>100000 || fabs(camera->pan_y)>100000))return 0;
     Triangle *tri=malloc(count*sizeof(*tri));double *depth=malloc((size_t)w*h*sizeof(*depth));if(!tri || !depth) { free(tri);free(depth);return 0; }
     int alpha_needed=0;
     double cy=cos(camera->yaw),sy=sin(camera->yaw),cp=cos(camera->pitch),sp=sin(camera->pitch);
@@ -67,6 +99,7 @@ int ds_raster_draw(const DSRasterTriangle *src,size_t count,const DSRasterMateri
             const DSSceneVertex *s=&src[i].v[j];if(s->material!=tri[i].material)goto fail;
             double x=s->x-camera->x,y=s->y-camera->y,z=s->z-camera->z,xr=cy*x-sy*z,zr=sy*x+cy*z;
             V v={w/2.0+camera->scale*xr+camera->pan_x,h/2.0+camera->scale*(sp*zr-cp*y)+camera->pan_y,cp*zr+sp*y,s->u,s->v,s->color&31,(s->color>>5)&31,(s->color>>10)&31};
+            if(camera->projection_kind){double world[]={s->x,s->y,s->z},screen[3];if(!ds_raster_project(camera,world,w,h,screen))goto fail;v.x=screen[0];v.y=screen[1];v.z=screen[2];}
             if(!isfinite(v.x) || !isfinite(v.y) || !isfinite(v.z) || !isfinite(v.u) || !isfinite(v.v))goto fail;
             tri[i].v[j]=v;tri[i].depth+=v.z/3;
         }
